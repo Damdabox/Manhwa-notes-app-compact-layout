@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Manhwa Notes App</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <h1>Manhwa Notes App</h1>
+
+  <!-- libraryView wraps EVERYTHING that makes up the normal shelf page
+       (the add form, bulk add, search, tabs, zoom controls, and the
+       list of comics itself). Wrapping it all in one div means
+       script.js can hide/show the *entire* shelf as a single unit,
+       just by setting one style.display on this div - see the
+       "Detail view" section in script.js for how that swap works
+       together with #detailView below. -->
+  <div id="libraryView">
+
+  <div class="form">
+    <input type="text" id="titleInput" placeholder="Enter title">
+
+    <!-- Type: picks which kind of entry this is, which in turn decides
+         which progress field(s) below actually apply. Manhwa is the
+         first/default option here, which matters: it means the
+         progress fields start in the right state (Chapter # visible,
+         Volume/Page/Episode hidden) even before script.js runs a
+         single line - see the "Type" section in script.js for how
+         changing this dropdown swaps which field(s) are shown. -->
+    <select id="typeInput">
+      <option value="Manhwa">Manhwa</option>
+      <option value="Other Comics">Other Comics</option>
+      <option value="Videos">Videos</option>
+    </select>
+
+    <!-- Author: only makes sense for Manhwa / Other Comics (a "Videos"
+         entry doesn't really have an "author" in the same sense), so
+         this is shown/hidden based on the Type dropdown above, the
+         same way the progress fields below are - see
+         updateAuthorFieldVisibility() in script.js. Manhwa is the
+         default Type (see the <select> just above), so this starts
+         visible with no inline style="display: none" needed here. -->
+    <input type="text" id="authorInput" placeholder="Author">
+
+    <!-- Progress fields: exactly ONE of these groups is visible at a
+         time, based on whichever type is picked above. All four still
+         exist in the page at all times (just hidden with style="display:
+         none") - script.js only ever toggles which are shown, it never
+         adds/removes them, which keeps the show/hide logic simple. See
+         updateProgressFieldsVisibility() in script.js. -->
+    <input type="text" id="chapterInput" placeholder="Chapter #">
+    <input type="text" id="volumeInput" placeholder="Volume #" style="display: none;">
+    <input type="text" id="pageInput" placeholder="Page #" style="display: none;">
+    <input type="text" id="episodeInput" placeholder="Episode # (optional)" style="display: none;">
+
+    <input type="text" id="linkInput" placeholder="Link (URL)">
+    <select id="statusInput">
+      <option value="Reading">Reading</option>
+      <option value="Ongoing">Ongoing</option>
+      <option value="Completed">Completed</option>
+      <option value="Recommended">Recommended</option>
+    </select>
+
+    <!-- Tags: type a word into tagInput and click "Add Tag" (or press
+         Enter) to drop it into tagsPreview as a little removable chip.
+         You can add as many as you like before clicking "Add Entry" -
+         script.js is what actually keeps track of the list of tags
+         you've built up and turns them into chips. type="button" on
+         both buttons here just means "don't try to submit a form when
+         clicked" (there's no <form> element on this page, so it's not
+         strictly required, but it's the correct/expected type for a
+         button that isn't meant to submit anything). -->
+    <div class="tag-input-row">
+      <input type="text" id="tagInput" placeholder="Add a tag (e.g. isekai)">
+      <button id="addTagButton" type="button">Add Tag</button>
+    </div>
+    <div id="tagsPreview" class="tags-preview"></div>
+
+    <button id="addButton" type="button">Add Entry</button>
+    <button id="bulkAddButton" type="button">Bulk Add</button>
+
+    <!-- Quick Notes: a completely separate feature from the Manhwa/Other
+         Comics/Videos entries above - just a title + a block of
+         freeform text, with no status/chapter/cover/etc. at all. It
+         sits in this same row as "Add Entry"/"Bulk Add" (this <button>
+         is just one more flex item inside .form, wrapping onto its own
+         line if the window is too narrow the same way the other fields
+         already do), but keeps its own teal color (see
+         ".quick-notes-button" in style.css) so it still reads as its
+         own isolated feature rather than a third way to add a comic.
+
+         Clicking this button no longer opens a detail PAGE - it opens
+         the #quickNoteModalOverlay popup further down this file (see
+         the big comment down there for how a "popup" is actually built
+         out of plain HTML/CSS, and the "Quick Notes" section in
+         script.js for how Save/Delete work inside it). -->
+    <button id="quickNotesButton" type="button" class="quick-notes-button">Quick Notes</button>
+  </div>
+
+  <!-- Bulk Add panel: hidden until "Bulk Add" above is clicked. Paste a
+       whole list of titles into the textarea, pick ONE status that will
+       be applied to all of them, and click "Add All". See the "Bulk
+       Add" section in script.js for how the pasted text gets split up
+       into individual titles, and how duplicates are detected. -->
+  <div id="bulkAddPanel" class="bulk-add-panel" style="display: none;">
+    <textarea id="bulkAddTextarea" class="bulk-add-textarea" rows="8" placeholder="Paste titles here - one blank line between each comic. If a title wraps onto a second line with no blank line after it, both lines get joined into one title.
+
+Example:
+Solo Leveling
+
+Omniscient Reader's
+Viewpoint
+
+The Beginning After
+The End"></textarea>
+
+    <div class="bulk-add-controls">
+      <select id="bulkAddStatusInput">
+        <option value="Reading">Reading</option>
+        <option value="Ongoing">Ongoing</option>
+        <option value="Completed">Completed</option>
+        <option value="Recommended">Recommended</option>
+      </select>
+      <button id="bulkAddSubmitButton" type="button">Add All</button>
+      <button id="bulkAddCancelButton" type="button">Cancel</button>
+    </div>
+  </div>
+
+  <!-- Search bar: filters the shelf as you type. It works ALONGSIDE
+       whichever folder tab is active (see currentSearchTerm +
+       currentFilter both being checked together inside renderList() in
+       script.js) rather than replacing it - so searching "isekai"
+       while the "Reading" tab is active only shows Reading comics that
+       also match "isekai". The little (x) button just clears the box
+       back to showing everything; see the "Search bar" section in
+       script.js for how both pieces work. -->
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="Search by title or tag...">
+    <button id="clearSearchButton" class="clear-search-button" type="button" aria-label="Clear search">&times;</button>
+  </div>
+
+  <!-- tabs-row holds the folder tabs (left) and the privacy toggle
+       (right) side by side in one row. See style.css ".tabs-row" for
+       the layout, and the "Privacy toggle" section in script.js for
+       what flipping it actually does.
+
+       These top-level tabs filter by TYPE, not status: "All" shows
+       everything, and "Manhwa" / "Other Comics" / "Videos" each show
+       only entries whose typeInput value (see #typeInput near the top
+       of this file) matches that tab's data-filter. Status filtering
+       (Reading/Ongoing/Completed/Recommended) lives one level down
+       from here now - see #statusFilterRow just below this div - so it
+       only ever applies ON TOP OF whichever type tab is active, never
+       instead of it. See the matchesFolder check inside renderList()
+       in script.js for where entry.type actually gets compared against
+       the active tab. -->
+  <div class="tabs-row">
+    <div class="filter-tabs">
+      <button class="filter-tab active" data-filter="All">All</button>
+      <button class="filter-tab" data-filter="Manhwa">Manhwa</button>
+      <button class="filter-tab" data-filter="Other Comics">Other Comics</button>
+      <button class="filter-tab" data-filter="Videos">Videos</button>
+
+      <!-- Characters tab: instead of filtering the shelf by status
+           like every other tab here, this one swaps the whole shelf
+           out for #charactersList below (a combined list of every
+           character saved on every comic) - see the "Characters tab"
+           section in script.js for how that swap and combining work.
+           The star icon is the exact same solid-gold star path used
+           for the Completed-comic star ratings (STAR_PATH in
+           script.js) - pasted in directly here, rather than built
+           with buildStarSVG() like a rating star, since this one icon
+           is always the same full/solid star and never needs to
+           switch between full/half/empty. -->
+      <button class="filter-tab" data-filter="Characters">
+        <svg viewBox="0 0 24 24" width="14" height="14" class="star-svg tab-star-icon"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="#ffd700" stroke="#c9a400" stroke-width="1"></path></svg>
+        Characters
+      </button>
+    </div>
+
+    <!-- Privacy toggle: a checkbox styled to look like a slider switch
+         (see ".switch" / ".switch-slider" in style.css - this is a
+         common CSS trick, not a special HTML element). Unchecked =
+         "Cover" mode (blue, shelf looks normal). Checked = "Private"
+         mode (red, every comic becomes a plain text row). -->
+    <div class="privacy-toggle">
+      <span class="privacy-toggle-label privacy-toggle-label-cover">Cover</span>
+      <label class="switch">
+        <input type="checkbox" id="privacyToggleInput" aria-label="Toggle private display mode">
+        <span class="switch-slider"></span>
+      </label>
+      <span class="privacy-toggle-label privacy-toggle-label-private">Private</span>
+    </div>
+  </div>
+
+  <!-- Status filter row: only ever shown while a TYPE tab (Manhwa /
+       Other Comics / Videos) is the active tab above - script.js hides
+       this whole div for the "All" tab and the "Characters" tab, since
+       neither of those filters by status at all. See
+       updateStatusFilterRowUI() in script.js for exactly when it's
+       shown/hidden, and the big comment above typeStatusFilters there
+       for how each type tab keeps its OWN separate status choice
+       instead of all three sharing one.
+
+       Two separate controls sit side by side here:
+         - #statusAllButton: a plain toggle. Clicking it shows every
+           entry of the active type, no matter its status.
+         - #statusDropdown: starts collapsed, showing only
+           #statusDropdownButton with the currently-selected status as
+           its label (e.g. "Reading"). Clicking it reveals
+           #statusDropdownMenu underneath with the other status
+           choices; picking one filters the shelf to just that status
+           and becomes the new label. -->
+  <div id="statusFilterRow" class="status-filter-row" style="display: none;">
+    <button id="statusAllButton" class="status-all-button" type="button">All</button>
+
+    <div id="statusDropdown" class="status-dropdown">
+      <button id="statusDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false">
+        <span id="statusDropdownLabel">Reading</span>
+        <span class="status-dropdown-arrow">&#9662;</span>
+      </button>
+
+      <!-- Filled in by buildStatusDropdownMenu() in script.js, one
+           button per entry in STATUS_OPTIONS there - so this list can
+           never drift out of sync with the "Add Entry" status dropdown
+           up in the form. Starts hidden; script.js toggles it open/
+           closed each time #statusDropdownButton is clicked. -->
+      <div id="statusDropdownMenu" class="status-dropdown-menu" style="display: none;"></div>
+    </div>
+  </div>
+
+  <!-- Zoom controls: lets you scale every card on the shelf bigger or
+       smaller. The slider and the +/- buttons both do the same thing
+       (change one number), they're just two different ways to change it -
+       see the "Zoom controls" section in script.js for how that number
+       turns into an actual size change. -->
+  <div class="zoom-controls">
+    <label for="zoomSlider">Card Size:</label>
+    <button id="zoomOutButton" class="zoom-button" type="button" aria-label="Zoom out">&minus;</button>
+    <input type="range" id="zoomSlider" min="0.6" max="1.8" step="0.1" value="1">
+    <button id="zoomInButton" class="zoom-button" type="button" aria-label="Zoom in">+</button>
+    <span id="zoomValueLabel">100%</span>
+  </div>
+
+  <ul id="manhwaList"></ul>
+
+  <!-- charactersList: shown instead of manhwaList only while the
+       "Characters" tab above is active. Built entirely by
+       renderCharactersList() in script.js, which walks every comic in
+       the library, collects every character saved on that comic's own
+       detail page (see .detail-characters-section further down this
+       file), and combines all of them into this one flat,
+       alphabetically-sorted list. Starts hidden (same "hidden until
+       JS shows it" pattern used by #bulkAddPanel, #addSceneForm, etc.
+       elsewhere in this file) since the shelf above is what should
+       show first. -->
+  <ul id="charactersList" class="characters-list" style="display: none;"></ul>
+
+  </div><!-- /#libraryView -->
+
+  <!-- detailView: the "detail page" for one comic. Starts hidden
+       (style="display: none") since the shelf (#libraryView above) is
+       what should show first when the page loads. There's no separate
+       HTML file for this - it's just another chunk of markup sitting
+       in this same index.html, that script.js reveals (and hides
+       #libraryView instead) when you click a comic's cover or title.
+       See the "Detail view" section in script.js for exactly how that
+       show/hide swap works, and buildEntryActions()/renderList() for
+       where the click that triggers it comes from. -->
+  <div id="detailView" style="display: none;">
+    <button id="backButton" type="button" class="back-button">&larr; Back</button>
+
+    <div class="detail-content">
+      <!-- Same placeholder-box idea as every card's cover on the
+           shelf (see .cover-placeholder in style.css) - just drawn
+           bigger here via the extra "detail-cover" class. The "No
+           Cover" text lives inside its own <span> (instead of being
+           the box's whole textContent) so script.js can hide just the
+           text - and leave the box itself alone - once a real image
+           is loaded. See the "Cover images" section in script.js for
+           how a selected photo turns into what's shown here. -->
+      <div class="detail-cover-column" id="detailCoverColumn">
+        <div class="cover-placeholder detail-cover" id="detailCoverBox">
+          <span class="cover-placeholder-text">No Cover</span>
+        </div>
+
+        <!-- Cover image controls. The real file picker (#coverImageInput)
+             is a visually-hidden input - see ".visually-hidden" in
+             style.css - and the <label for="coverImageInput"> below is
+             styled to look like a normal button. Clicking a <label>
+             that points at a file input opens the same "choose a file"
+             dialog as clicking the input directly; this is a standard
+             HTML trick that lets us style the "button" however we want
+             instead of being stuck with the browser's plain default
+             file-input look. -->
+        <div class="detail-cover-actions">
+          <label for="coverImageInput" class="cover-upload-button">Choose Image</label>
+          <input type="file" id="coverImageInput" class="visually-hidden" accept="image/*">
+          <button id="removeCoverImageButton" type="button" class="remove-cover-button">Remove Image</button>
+        </div>
+      </div>
+
+      <div class="detail-info">
+        <!-- detailViewFields: wraps every plain read-only field below
+             (title through rating) plus the "Edit" button, so that one
+             single element can be hidden/shown as a group whenever
+             #detailEditForm (right below this div) is shown/hidden
+             instead - see editEntryButton's click handler in
+             script.js. -->
+        <div id="detailViewFields">
+          <h2 id="detailTitle" class="detail-title"></h2>
+
+          <!-- Filled in by script.js with the status text (e.g.
+               "Reading") and given a matching "status-reading" (etc.)
+               class, so it picks up the same color as that status's
+               ribbon on the card - see showDetailView() in script.js. -->
+          <div id="detailStatusBadge" class="detail-status-badge"></div>
+
+          <p id="detailChapter" class="detail-chapter"></p>
+
+          <!-- Author: only relevant for Manhwa / Other Comics entries
+               (same as #authorInput up in the Add-entry form) - hidden
+               for Videos entries and for any entry with no author typed
+               in, exactly like #detailChapter above hides itself when
+               there's no progress text. See showDetailView() in
+               script.js. -->
+          <p id="detailAuthor" class="detail-chapter"></p>
+
+          <!-- target="_blank" + rel="noopener noreferrer" is the same
+               pair used on every card's link - opens in a new tab
+               without giving that new tab a way to control this one.
+               script.js fills in both the href AND the visible text
+               with the entry's actual link, so what you see is exactly
+               where it'll take you - see showDetailView() in script.js. -->
+          <a id="detailLink" class="detail-link" target="_blank" rel="noopener noreferrer"></a>
+
+          <!-- Read-only tag chips. Reuses the same "tags-preview"/
+               "tag-chip" look as the Add-comic form and edit mode, but
+               filled in by a separate, simpler function
+               (buildReadOnlyTagChips in script.js) since these chips
+               have no (x) remove button - this page is view-only for
+               now. -->
+          <div id="detailTags" class="tags-preview detail-tags"></div>
+
+          <!-- Star rating row. Only shown for Completed comics that
+               already have a rating - see showDetailView() in
+               script.js, which sets this div's display to "none" for
+               every other comic. -->
+          <div id="detailRating" class="entry-rating detail-rating"></div>
+
+          <!-- Opens #detailEditForm below in place of this whole
+               #detailViewFields group - see editEntryButton's click
+               handler in script.js. This is a SECOND way to edit the
+               same fields the pencil icon on this comic's card already
+               edits (see buildEntryActions()/the "isEditing" branch of
+               renderList() in script.js for that original one) - both
+               write onto the exact same entry object, so either one
+               keeps the other in sync automatically. -->
+          <button id="editEntryButton" type="button">Edit</button>
+        </div>
+
+        <!-- detailEditForm: hidden until "Edit" above is clicked.
+             Holds one editable field per thing #detailViewFields shows
+             above, plus Save/Cancel. This deliberately mirrors the
+             pencil-icon edit mode on the card (same field list, same
+             "type/status change live-toggles other fields" behavior,
+             even several of the same CSS classes like .edit-input and
+             .tag-editor) - see script.js for the full explanation of
+             why a second edit entry point was added here without
+             touching the card's own pencil-icon edit at all. -->
+        <div id="detailEditForm" class="detail-edit-form" style="display: none;">
+          <input type="text" id="editEntryTitle" class="edit-input" placeholder="Title">
+
+          <select id="editEntryType" class="edit-input">
+            <option value="Manhwa">Manhwa</option>
+            <option value="Other Comics">Other Comics</option>
+            <option value="Videos">Videos</option>
+          </select>
+
+          <!-- Same "Manhwa / Other Comics only" idea as #authorInput -
+               script.js hides this live if Videos is picked above. -->
+          <input type="text" id="editEntryAuthor" class="edit-input" placeholder="Author">
+
+          <!-- Same four progress fields as the Add-entry form and the
+               card's edit mode - script.js shows only the one(s) that
+               match whichever Type is currently picked above. -->
+          <input type="text" id="editEntryChapter" class="edit-input" placeholder="Chapter #">
+          <input type="text" id="editEntryVolume" class="edit-input" placeholder="Volume #">
+          <input type="text" id="editEntryPage" class="edit-input" placeholder="Page #">
+          <input type="text" id="editEntryEpisode" class="edit-input" placeholder="Episode # (optional)">
+
+          <input type="text" id="editEntryLink" class="edit-input" placeholder="Link (URL)">
+
+          <select id="editEntryStatus" class="edit-input">
+            <option value="Reading">Reading</option>
+            <option value="Ongoing">Ongoing</option>
+            <option value="Completed">Completed</option>
+            <option value="Recommended">Recommended</option>
+          </select>
+
+          <!-- Rating: only relevant once Status is "Completed" -
+               script.js shows/hides this live as Status above is
+               changed, same as the card's edit mode. -->
+          <input type="number" id="editEntryRating" class="edit-input rating-edit-input" min="0" max="5" step="0.5" placeholder="Rating (0-5)">
+
+          <!-- Tag editor: same chips-plus-input-box idea as the
+               Add-comic form and the card's edit mode - see
+               editEntryTagAddButton's click handler in script.js. -->
+          <div class="tag-editor">
+            <div id="editEntryTagsPreview" class="tags-preview"></div>
+            <div class="tag-input-row">
+              <input type="text" id="editEntryTagInput" class="edit-input" placeholder="Add a tag">
+              <button id="editEntryTagAddButton" type="button">Add Tag</button>
+            </div>
+          </div>
+
+          <div class="detail-edit-form-controls">
+            <button id="saveEntryEditButton" type="button">Save</button>
+            <button id="cancelEntryEditButton" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notes section: your own free-form thoughts/review for this one
+         comic. Sits below .detail-content (the cover + info block
+         above), not inside it, since it's a separate full-width section
+         rather than part of the info column. Totally optional - see
+         showDetailView() in script.js for how a comic with no notes
+         saved yet just gets an empty textarea here, never placeholder
+         text (placeholder text could be mistaken for a real note).
+
+         NOT related to Quick Notes (the button in the row above, which
+         opens the #quickNoteModalOverlay popup near the bottom of this
+         file) - this is a single freeform notes field that belongs to
+         ONE comic, whereas a Quick Note is its own separate, standalone
+         entry. Confusing name collision, but two different features -
+         see the "Quick Notes" section in script.js for the full
+         explanation. -->
+    <div class="detail-notes-section">
+      <label for="detailNotesTextarea" class="detail-notes-label">My Notes</label>
+      <textarea id="detailNotesTextarea" class="detail-notes-textarea" rows="6"></textarea>
+      <button id="saveNotesButton" type="button">Save Notes</button>
+    </div>
+
+    <!-- Favorite Scenes section: sits below the notes section, same
+         "own full-width block, separated with a top border" idea. Lets
+         you save any number of specific scenes/chapters for this
+         comic - each one is a short description plus a link to that
+         scene. This builds on the same idea as tags (a plain JS array
+         living on the entry, with one row built per item) but each
+         scene needs to hold TWO pieces of information instead of just
+         one word, so each entry in the array is a small object like
+         { description: "...", link: "..." } rather than a plain
+         string. See renderSceneEntries() and the "Favorite Scenes"
+         section near the bottom of script.js for how that list gets
+         built, saved, and deleted from. -->
+    <div class="detail-scenes-section">
+      <h3 class="detail-scenes-heading">Favorite Scenes</h3>
+
+      <!-- Filled in by renderSceneEntries() in script.js. Left empty
+           here on purpose - a comic with no saved scenes yet just
+           renders as an empty div, same "no placeholder text that
+           could be mistaken for real content" approach as the notes
+           textarea above. -->
+      <div id="detailScenesList" class="detail-scenes-list"></div>
+
+      <button id="addSceneButton" type="button">Add Scene</button>
+
+      <!-- Hidden until "Add Scene" above is clicked. Holds the
+           description + link inputs for ONE new scene, plus the
+           "Save Scene" / "Cancel" buttons - same show/hide-panel idea
+           as #bulkAddPanel near the top of this file. -->
+      <div id="addSceneForm" class="add-scene-form" style="display: none;">
+        <textarea id="sceneDescriptionInput" class="scene-description-input" rows="3" placeholder="Describe this scene..."></textarea>
+        <input type="text" id="sceneLinkInput" class="scene-link-input" placeholder="Link (URL)">
+        <div class="scene-form-controls">
+          <button id="saveSceneButton" type="button">Save Scene</button>
+          <button id="cancelSceneButton" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Favorite Characters section: sits below Favorite Scenes, same
+         "own full-width block, separated with a top border" idea used
+         by the notes and scenes sections above. Characters can ONLY be
+         added/edited/deleted here, on a comic's own detail page - there's
+         no characters field anywhere on the main shelf. Just like
+         scenes, this is a plain JS array living on the entry
+         (entry.characters), with one small row built per character -
+         see renderCharacterEntries() and the "Favorite Characters"
+         section near the bottom of script.js. Each character's own
+         optional picture is stored in IndexedDB using the exact same
+         technique as a comic's cover image (see the "Cover images"
+         comment further up in script.js), just kept in its own
+         "characterImages" store inside that same database, keyed by
+         the character's own id instead of a comic's id. -->
+    <div class="detail-characters-section">
+      <h3 class="detail-characters-heading">Favorite Characters</h3>
+
+      <!-- Filled in by renderCharacterEntries() in script.js. Left
+           empty here on purpose - a comic with no saved characters yet
+           just renders as an empty div, same "no placeholder text that
+           could be mistaken for real content" approach as
+           #detailScenesList above. -->
+      <div id="detailCharactersList" class="detail-characters-list"></div>
+
+      <button id="addCharacterButton" type="button">Add Character</button>
+
+      <!-- Hidden until "Add Character" above is clicked. This one form
+           is reused for BOTH adding a brand new character and editing
+           an existing one - script.js keeps track of which of those two
+           it's currently doing with the editingCharacterId variable. -->
+      <div id="addCharacterForm" class="add-character-form" style="display: none;">
+        <input type="text" id="characterNameInput" class="character-name-input" placeholder="Character name">
+
+        <!-- Same visually-hidden-file-input-plus-styled-label trick as
+             the cover image picker in .detail-cover-actions above -
+             clicking the label opens the same file-choosing dialog as
+             the real (invisible) file input next to it. -->
+        <div class="character-image-controls">
+          <label for="characterImageInput" class="cover-upload-button">Choose Image</label>
+          <input type="file" id="characterImageInput" class="visually-hidden" accept="image/*">
+          <button id="removeCharacterImageButton" type="button" class="remove-cover-button">Remove Image</button>
+        </div>
+
+        <!-- Small live preview of whichever image is currently picked
+             for this character (or the same plain placeholder box every
+             cover image uses, if none is picked yet) - see
+             resetCharacterFormFields()/startEditCharacter() in
+             script.js. -->
+        <div class="cover-placeholder character-form-preview" id="characterFormPreviewBox">
+          <span class="cover-placeholder-text">No Photo</span>
+        </div>
+
+        <div class="character-form-controls">
+          <button id="saveCharacterButton" type="button">Save Character</button>
+          <button id="cancelCharacterButton" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Note modal: a POPUP, not a page. The key difference from
+       #detailView above is where it sits and what it covers. #detailView
+       is a full replacement for #libraryView - showDetailView() hides
+       one and shows the other, so you're always looking at exactly one
+       of the two, full-screen, and "Back" is the only way out.
+
+       This modal instead sits ON TOP of whatever is already on screen
+       (#libraryView OR #detailView, whichever you had open), without
+       hiding it. That's what #quickNoteModalOverlay is for: a
+       semi-transparent div stretched over the ENTIRE browser window
+       (position: fixed + top/left/right/bottom: 0 in style.css) that
+       dims everything behind it, with the small white #quickNoteModal
+       box centered inside it. Both start hidden (style="display: none")
+       and script.js only ever flips that one style between "none" and
+       "flex" - the page underneath never changes, so whatever you were
+       looking at (which tab was active, how far you'd scrolled, even a
+       comic's detail page) is still sitting there completely untouched
+       once the popup closes.
+
+       The SAME modal is reused for both jobs described in the "Quick
+       Notes" section of script.js:
+         - Clicking the "Quick Notes" button opens it EMPTY, ready to
+           create a brand new note.
+         - Clicking an existing note's card opens it PRE-FILLED with
+           that note's title/text, ready to edit (or delete) it.
+       script.js tells these two cases apart with one variable
+       (editingQuickNoteEntry) and shows/hides #quickNoteModalDeleteButton
+       accordingly - there's only ever one "Save Note" button either way. -->
+  <div id="quickNoteModalOverlay" class="modal-overlay" style="display: none;">
+    <div id="quickNoteModal" class="modal-box" role="dialog" aria-modal="true" aria-labelledby="quickNoteModalHeading">
+      <div class="modal-header">
+        <h3 id="quickNoteModalHeading">Quick Note</h3>
+
+        <!-- The "X" close button: just hides the overlay again, same as
+             clicking outside the box or pressing Escape (see script.js) -
+             none of the three save anything, they just close the popup
+             and leave the note (new or existing) exactly as it was
+             before you opened it. -->
+        <button id="quickNoteModalCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
+      </div>
+
+      <input type="text" id="quickNoteModalTitleInput" placeholder="Note title">
+      <textarea id="quickNoteModalTextInput" class="bulk-add-textarea" rows="8" placeholder="Write your note here..."></textarea>
+
+      <div class="bulk-add-controls">
+        <button id="quickNoteModalSaveButton" type="button">Save Note</button>
+
+        <!-- Only shown while editing an EXISTING note - there's nothing
+             to delete yet when this modal is being used to create a
+             brand new one. See openQuickNoteModal() in script.js for
+             where this gets shown/hidden. -->
+        <button id="quickNoteModalDeleteButton" type="button" class="remove-cover-button">Delete Note</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

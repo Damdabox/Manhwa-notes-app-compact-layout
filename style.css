@@ -1,0 +1,1675 @@
+/* Dark charcoal page background with white text, so all the ordinary
+   body text (titles, chapter info, tab labels, etc.) stays readable
+   without needing a color set on every single element - they just
+   inherit "color: #fff" from here unless something more specific
+   overrides it below (like the form inputs, which need dark text
+   on their own white background). #1c1c1c is a dark gray, not pure
+   black and not navy - similar to the near-black theme sites like
+   Letterboxd use. */
+body {
+  font-family: Arial, sans-serif;
+  max-width: 1100px;
+  margin: 40px auto;
+  padding: 0 20px;
+  background: #1c1c1c;
+  color: #fff;
+}
+
+h1 {
+  text-align: center;
+}
+
+.form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  max-width: 700px;
+}
+
+/* Quick Notes button: sits in the same row as "Add Entry"/"Bulk Add"
+   (it's just one more flex item inside .form), but keeps a teal color
+   no other button in the app uses (every other button is either plain
+   gray/white or a status color) - that's deliberate, so it still reads
+   at a glance as its own separate feature rather than a third way to
+   add a comic. */
+.quick-notes-button {
+  padding: 8px 16px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  background: #0d6e6e;
+  color: #fff;
+  border: 1px solid #094f4f;
+  border-radius: 6px;
+}
+
+.quick-notes-button:hover {
+  background: #094f4f;
+}
+
+/* White background + dark navy text, so these stay readable even
+   though the page around them is now navy with white text. #typeInput,
+   #volumeInput, #pageInput, and #episodeInput are the "Type" dropdown
+   and the extra progress fields it can reveal (see the Type section in
+   script.js) - grouped into this same rule so every field in the form
+   matches, whether it's visible right now or not. */
+#titleInput,
+#typeInput,
+#chapterInput,
+#volumeInput,
+#pageInput,
+#episodeInput,
+#linkInput,
+#statusInput,
+#quickNoteModalTitleInput {
+  flex: 1;
+  padding: 8px;
+  font-size: 16px;
+  background: #fff;
+  color: navy;
+}
+
+#addButton,
+#bulkAddButton {
+  padding: 8px 16px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+/* Bulk Add button: matches the Quick Notes button's teal background
+   and white text (see .quick-notes-button above), while keeping its
+   own padding/font-size from the shared #addButton rule above. */
+#bulkAddButton {
+  background: #0d6e6e;
+  color: #fff;
+}
+
+#bulkAddButton:hover {
+  background: #094f4f;
+}
+
+/* Bulk Add panel: hidden by default (see the inline style="display:
+   none" in index.html), shown/hidden by script.js when the "Bulk Add"
+   / "Cancel" buttons are clicked. Sits below .form, above the search
+   bar - same max-width as .form so it lines up with it. */
+.bulk-add-panel {
+  max-width: 700px;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.bulk-add-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  font-size: 15px;
+  font-family: Arial, sans-serif;
+  background: #fff;
+  color: navy;
+  resize: vertical;
+}
+
+.bulk-add-controls {
+  display: flex;
+  gap: 10px;
+}
+
+#bulkAddStatusInput {
+  padding: 8px;
+  font-size: 15px;
+  background: #fff;
+  color: navy;
+}
+
+#bulkAddSubmitButton,
+#bulkAddCancelButton,
+#quickNoteModalSaveButton,
+#quickNoteModalDeleteButton {
+  padding: 8px 16px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+/* Quick Note modal: see the big HTML comment above #quickNoteModalOverlay
+   in index.html for how this differs from #detailView's full-page swap.
+   .modal-overlay is what actually MAKES this a "popup" rather than just
+   another panel like .bulk-add-panel: "position: fixed" + stretching it
+   to all four edges pins it to the browser window itself (not wherever
+   it sits in the page's normal flow), so it covers everything - including
+   content the user had scrolled past - no matter how far down the page
+   they'd scrolled when they clicked. The semi-transparent black
+   background dims that content to make it obvious it's not clickable
+   right now, and flex centering is what keeps .modal-box in the middle
+   of the screen at any window size. */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.modal-box {
+  background: #262626;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 20px;
+  width: 100%;
+  max-width: 500px;
+  max-height: 85vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modal-header h3 {
+  margin: 0;
+}
+
+/* Plain "X", no button-ish background/border, so it reads as a close
+   icon rather than a third action competing with Save/Delete below. */
+.modal-close-button {
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.modal-close-button:hover {
+  color: #aaa;
+}
+
+/* Tag input row (text box + "Add Tag" button) for the Add-comic form.
+   Given its own full-width flex row so it doesn't get squeezed by the
+   flex-wrap on .form above - it lines up under title/chapter/link. */
+.tag-input-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+#tagInput {
+  flex: 1;
+  padding: 8px;
+  font-size: 16px;
+  background: #fff;
+  color: navy;
+}
+
+#addTagButton {
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* Holds the little tag "chips" built up before you click "Add Entry"
+   (or, in edit mode, a card's current tags). flex-wrap lets chips flow
+   onto a new line once they run out of horizontal room, instead of
+   overflowing or squishing.
+
+   These sizes are plain fixed pixels rather than the
+   calc(... * var(--card-scale)) pattern used elsewhere in this file.
+   That's deliberate: --card-scale is only defined on #manhwaList (the
+   shelf), but .tags-preview is also used up in the Add-comic form,
+   which lives outside #manhwaList - so var(--card-scale) wouldn't
+   mean anything there. Keeping one fixed size that works in both
+   places is simpler than maintaining two versions of this rule. */
+.tags-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: #444;
+  color: #fff;
+  font-size: 13px;
+}
+
+/* The small "x" on each chip that removes that one tag. */
+.tag-remove-button {
+  background: none;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+
+.tag-remove-button:hover {
+  color: #f66;
+}
+
+/* Wraps the tag chips + tag input row shown inside a card while it's
+   being edited. margin-top separates it from the link field above it. */
+.tag-editor {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: calc(6px * var(--card-scale));
+  margin-top: calc(4px * var(--card-scale));
+}
+
+/* Search bar: sits above the folder tabs and spans the full width of
+   the page (no max-width, unlike .form) since the user asked for it to
+   run edge-to-edge above the tabs. position: relative is what lets the
+   clear (x) button below be positioned *inside* the input via
+   position: absolute, instead of sitting next to it as its own box. */
+.search-bar {
+  position: relative;
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+#searchInput {
+  width: 100%;
+  box-sizing: border-box; /* padding is included in that 100% width, instead of making the box wider than its container */
+  padding: 10px 36px 10px 12px; /* extra padding on the right so typed text never runs under the (x) button */
+  font-size: 16px;
+  background: #fff;
+  color: navy;
+}
+
+/* The (x) button that clears the search box. Starts hidden - script.js
+   only shows it (by switching this to display: flex) once there's
+   actually something typed to clear. Positioned absolutely inside
+   .search-bar's right edge, vertically centered on the input. */
+.clear-search-button {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: #666;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.clear-search-button:hover {
+  background: #eee;
+  color: #333;
+}
+
+/* Holds the folder tabs and the privacy toggle side by side, in one
+   row. justify-content: space-between is what pushes the toggle over
+   to the right edge while the tabs stay on the left - flex-wrap lets
+   the toggle drop underneath the tabs on a narrow/phone-width screen
+   instead of squeezing everything into an unreadable single line. */
+.tabs-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 20px;
+  border-bottom: 2px solid #ddd;
+}
+
+/* Row of buttons for filtering the shelf by type (All/Manhwa/Other
+   Comics/Videos), plus the separate Characters tab. */
+.filter-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.filter-tab {
+  padding: 8px 16px;
+  font-size: 15px;
+  background: none;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+  color: #fff;
+}
+
+/* Applied via JS to whichever tab was clicked most recently. */
+.filter-tab.active {
+  color: #fff;
+  font-weight: bold;
+  border-bottom-color: #fff;
+}
+
+/* Lines the Characters tab's little gold star up nicely with its own
+   "Characters" text (an <svg> sits a bit low by default, next to
+   plain text on the same line - this nudges it back up). */
+.tab-star-icon {
+  vertical-align: -2px;
+  margin-right: 2px;
+}
+
+/* --- Privacy toggle --- */
+/* Wraps the "Cover" label, the switch itself, and the "Private" label
+   in one row, sitting at the right edge of .tabs-row. */
+.privacy-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.privacy-toggle-label {
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.privacy-toggle-label-cover {
+  color: #4169e1; /* same blue as the switch in "Cover" (off) position */
+}
+
+.privacy-toggle-label-private {
+  color: #d9453d; /* same red as the switch in "Private" (on) position */
+}
+
+/* The switch itself is a real <input type="checkbox"> - that's what
+   makes it clickable, keyboard-focusable, and screen-reader friendly
+   for free. We just hide the checkbox's normal box-and-tick look (see
+   ".switch input" below) and draw a pill + circle in its place using
+   ".switch-slider", a plain <span> that sits right next to it in the
+   HTML. ".switch" being "position: relative" is what lets that span
+   be positioned exactly on top of the checkbox with "position:
+   absolute" below.  */
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+/* Shrink the actual checkbox down to nothing and make it invisible -
+   it still exists and still receives clicks/keyboard input (that's
+   why we use opacity instead of display: none, which would remove it
+   from the tab order entirely), it just isn't what the user sees. */
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+/* The pill-shaped track. Blue = "Cover" is the currently active side,
+   since the checkbox starts unchecked. */
+.switch-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: #4169e1;
+  border-radius: 24px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+/* The round white circle ("thumb") that slides from one side of the
+   track to the other. ::before generates it as a pseudo-element
+   instead of needing an extra HTML element just to draw a circle. */
+.switch-slider::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+
+/* ":checked" is the browser's own built-in state for a checked
+   checkbox - no JS needed to know whether the switch is "on".
+   "input:checked + .switch-slider" means "the .switch-slider span
+   that comes immediately after a checked input" - i.e. this only
+   applies once the checkbox (privacyToggleInput) is checked, which is
+   exactly when script.js switches the shelf into Private mode. */
+.switch input:checked + .switch-slider {
+  background: #d9453d;
+}
+
+/* Slides the thumb to the right edge of the track (44px track - 18px
+   thumb - 3px padding on each side = 20px of travel). */
+.switch input:checked + .switch-slider::before {
+  transform: translateX(20px);
+}
+
+/* --- Status filter row --- */
+/* Sits directly under .tabs-row, only ever visible while a type tab
+   (Manhwa/Other Comics/Videos) is active - script.js toggles this
+   whole row's display, see #statusFilterRow in index.html and
+   updateStatusFilterRowUI() in script.js. Small/compact on purpose:
+   this is a secondary filter nested inside a type tab, not another
+   row of primary tabs, so it's deliberately smaller than .filter-tab. */
+.status-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.status-all-button {
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 14px;
+}
+
+.status-all-button:hover {
+  background: #444;
+}
+
+/* Highlighted the same way as an active .filter-tab (bold + a visible
+   border) whenever "All" - rather than a specific status - is the
+   active choice for the current type tab. */
+.status-all-button.active {
+  font-weight: bold;
+  border-color: #fff;
+}
+
+/* Positioning anchor for the dropdown menu below, which is placed with
+   position: absolute - it needs a positioned ancestor to line up
+   against, same reasoning as .cover-placeholder + .status-ribbon
+   further down this file. */
+.status-dropdown {
+  position: relative;
+}
+
+.status-dropdown-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 14px;
+}
+
+.status-dropdown-button:hover {
+  background: #444;
+}
+
+/* Highlighted whenever a specific status (not "All") is the active
+   choice for the current type tab - same look as .status-all-button.active. */
+.status-dropdown-button.active {
+  font-weight: bold;
+  border-color: #fff;
+}
+
+.status-dropdown-arrow {
+  font-size: 10px;
+}
+
+/* The expanded list of status choices. Positioned to drop down
+   directly below the button it belongs to, overlapping whatever's
+   underneath (z-index) rather than pushing the rest of the page down. */
+.status-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 140px;
+  background: #2b2b2b;
+  border: 1px solid #666;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.status-dropdown-option {
+  padding: 8px 12px;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  color: #fff;
+  border: none;
+}
+
+.status-dropdown-option:hover {
+  background: #444;
+}
+
+/* Zoom (Card Size) only makes sense for the card grid, so it's hidden
+   entirely while the shelf is in Private (list) mode. body.private-mode
+   is added/removed by script.js the moment the toggle is flipped - see
+   the "Privacy toggle" section there. */
+body.private-mode .zoom-controls {
+  display: none;
+}
+
+/* Zoom (Card Size) also doesn't apply to the Characters tab - its own
+   card grid (".characters-list" further down this file) is always
+   shown at a fixed size, with no slider to read a --card-scale value
+   from. The search bar is hidden the same way here too, since
+   searching by title/tag doesn't apply to a list of characters
+   either - there's nothing for it to filter. body.characters-tab-active
+   is added/removed by script.js the moment that tab is clicked (or
+   another tab is clicked away from it) - see the "Characters tab"
+   section there. (The status dropdown row needs no rule here - it's
+   already hidden for the Characters tab by updateStatusFilterRowUI()
+   in script.js, the same function that hides it for the "All" tab.) */
+body.characters-tab-active .zoom-controls,
+body.characters-tab-active .search-bar {
+  display: none;
+}
+
+/* Row of zoom controls (label, -, slider, +, percentage) that sits
+   above the shelf. Just a plain flex row - the actual zooming logic
+   lives in the --card-scale variable set on #manhwaList below. */
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.zoom-button {
+  padding: 4px 10px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+  border: 1px solid #666;
+  background: #2b2b2b;
+  color: #fff;
+}
+
+.zoom-button:hover {
+  background: #444;
+}
+
+#zoomSlider {
+  cursor: pointer;
+}
+
+/* Fixed-ish width so the "100%" text doesn't shift the slider left and
+   right by a few pixels as the number of digits changes (e.g. 90% vs
+   100%). font-variant-numeric keeps every digit the same width too. */
+#zoomValueLabel {
+  min-width: 42px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* This is the "shelf": a responsive grid that holds all the comic cards.
+   auto-fill + minmax is what makes it responsive: the browser fits as
+   many columns as it can on one row. On a wide screen that might be 5
+   or 6 columns; on a narrow screen (like a phone) it drops down to 1
+   or 2 - no media queries needed.
+
+   --card-scale is the zoom feature's one and only moving part. It's a
+   plain number (1 = 100%, 0.6 = 60%, 1.8 = 180%, etc) that script.js
+   updates whenever the slider or +/- buttons are used. Defaulting it
+   to 1 here means the page looks completely normal even before script.js
+   runs (or if JS is somehow disabled).
+
+   From here down, wherever a card needs to get bigger or smaller, you'll
+   see calc(<original size> * var(--card-scale)) instead of a plain
+   number - that's what makes changing this ONE variable resize the
+   minimum card width, every font size, every padding/gap, and every
+   icon all together, in the same proportion. Nothing is swapped out or
+   hidden at small sizes - it's the exact same card, just scaled down. */
+#manhwaList {
+  --card-scale: 1;
+
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(calc(160px * var(--card-scale)), 1fr));
+  gap: calc(16px * var(--card-scale));
+}
+
+/* Private mode: swap the card grid above for a single column of full-
+   width rows. body.private-mode is toggled by script.js the moment the
+   switch flips - see the "Privacy toggle" section there. This selector
+   is more specific than the plain "#manhwaList" rule above (an id +
+   an ancestor class beats an id alone), which is what lets it win
+   without needing !important. */
+body.private-mode #manhwaList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Each <li> is one comic card. Flexbox here just stacks its own
+   contents (cover, title, chapter, status, link) top to bottom and
+   centers them - unrelated to the grid above, which is only
+   arranging the cards themselves. */
+#manhwaList li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: calc(6px * var(--card-scale));
+  /* Was navy (#16213e). Switched to a slightly lighter charcoal gray
+     than the page background so the cards still stand out as
+     separate boxes, while the white title/chapter text (inherited
+     from body) still has something dark enough to read against. */
+  background: #2b2b2b;
+  padding: calc(12px * var(--card-scale));
+  border-radius: calc(8px * var(--card-scale));
+  /* Base text size for the card. Anything inside that doesn't set its
+     own font-size (like .entry-title) inherits this scaled value
+     automatically - that's regular CSS inheritance, nothing special. */
+  font-size: calc(16px * var(--card-scale));
+}
+
+/* Private mode's plain text row, used instead of the card layout
+   above. Added via JS (listItem.classList.add('private-row')) only
+   when displayMode is 'private' - see renderPrivateRow() in
+   script.js. Sizes here are fixed pixels, not calc(... *
+   var(--card-scale)), on purpose: the zoom/Card Size slider is hidden
+   in this mode (see "body.private-mode .zoom-controls" above) and
+   isn't meant to affect list rows at all. */
+#manhwaList li.private-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  gap: 16px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 15px;
+}
+
+/* Comic title, left-aligned. flex: 1 lets it take up all the leftover
+   space in the row, pushing the info text and action icons over
+   toward the right; the overflow/text-overflow/white-space trio is
+   what turns a too-long title into a "…" ellipsis instead of wrapping
+   the row onto a second line. */
+.private-row-title {
+  flex: 1;
+  min-width: 0; /* lets the ellipsis above actually kick in inside a flex item */
+  font-weight: bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Compact "Ch. # · Status" text sitting between the title and the
+   action icons. white-space: nowrap keeps it from wrapping mid-row. */
+.private-row-info {
+  color: #ccc;
+  white-space: nowrap;
+}
+
+/* Private rows keep the same edit/delete icon buttons as cards, but
+   fixed-size (not scaled by --card-scale) for the same reason the row
+   itself uses fixed pixels above. These selectors (two classes) are
+   more specific than the plain ".entry-actions" / ".icon-button"
+   rules further down, so they win without needing !important. */
+.private-row .entry-actions {
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.private-row .icon-button {
+  padding: 4px 8px;
+  font-size: 15px;
+  border-radius: 4px;
+}
+
+/* The comic link, sitting between the "Ch. # · Status" text and the
+   edit/delete icons. white-space: nowrap keeps "Link" from wrapping
+   onto its own line like the other private-row text. */
+.private-row .entry-link {
+  white-space: nowrap;
+}
+
+/* Placeholder box shown in place of a real cover image.
+   Every entry uses this same box for now - no uploads yet.
+
+   "position: relative" is what makes this box a positioning anchor
+   for the status ribbon below. The ribbon is placed with
+   "position: absolute", and an absolutely-positioned element always
+   positions itself relative to the nearest ancestor that has
+   "position" set to something other than the default ("static") -
+   so without this, the ribbon would jump to the corner of the whole
+   page instead of the corner of this box.
+
+   "overflow: hidden" clips anything that pokes outside this box's
+   edges. The ribbon is deliberately made wider than it needs to be
+   and rotated, so its corners stick out past the box - overflow:
+   hidden slices those corners off, leaving a clean diagonal band. */
+.cover-placeholder {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background: #ccc;
+  border: 1px solid #999;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: calc(11px * var(--card-scale));
+  color: #666;
+}
+
+/* Videos-only card shape. Added alongside the plain ".cover-placeholder"
+   class (see script.js, entry.type === 'Videos') so it only overrides
+   the one property that needs to change - the aspect ratio - while
+   still inheriting everything else (background, border, centering,
+   etc.) from ".cover-placeholder" above. This rule must come after
+   ".cover-placeholder" in the file so its "aspect-ratio" wins.
+   16 / 9 is the standard widescreen video shape, vs. the 2 / 3 portrait
+   shape used for comic covers. */
+.cover-placeholder.video-cover {
+  aspect-ratio: 16 / 9;
+}
+
+/* The diagonal "New"-style ribbon showing the entry's status.
+   How it works, step by step:
+   1. "position: absolute" + "top"/"left" lifts it out of the normal
+      flow and pins it near the top-left corner of .cover-placeholder
+      (its positioned ancestor, see above).
+   2. It's made wider (110px) than the corner it's covering, and
+      shifted partly off the left edge with a negative "left" value,
+      so it fully spans the corner once rotated.
+   3. "transform: rotate(-45deg)" tilts that whole band 45 degrees,
+      which is what turns a plain horizontal bar into a diagonal
+      ribbon. The rotation happens around the element's center by
+      default, which is what keeps it centered over the corner.
+   Each status gets its own background/text color below. */
+.status-ribbon {
+  position: absolute;
+  top: calc(12px * var(--card-scale));
+  left: calc(-32px * var(--card-scale));
+  width: calc(110px * var(--card-scale));
+  padding: calc(3px * var(--card-scale)) 0;
+  text-align: center;
+  font-size: calc(10px * var(--card-scale));
+  font-weight: bold;
+  text-transform: uppercase;
+  transform: rotate(-45deg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* Reading = green, white text reads best on it. */
+.status-ribbon.status-reading {
+  background: #1a8a3c;
+  color: #fff;
+}
+
+/* Ongoing = royal blue, white text reads best on it. */
+.status-ribbon.status-ongoing {
+  background: #4169e1;
+  color: #fff;
+}
+
+/* Completed = gold. Gold is a light color, so dark text is more
+   readable on it than white text would be. */
+.status-ribbon.status-completed {
+  background: #ffd700;
+  color: #333;
+}
+
+/* Recommended = purple, white text reads best on it. */
+.status-ribbon.status-recommended {
+  background: #7a1fa2;
+  color: #fff;
+}
+
+.entry-title {
+  font-weight: bold;
+}
+
+/* Quick Note cards. These sit in the exact same #manhwaList grid as
+   every comic card (see "#manhwaList li" above for the box shape/
+   background/padding they inherit from just being an <li> in that
+   list) - the alignment override is needed because a comic card
+   centers everything underneath its (roughly square) cover image, but
+   a note card has no picture at all, just two lines of text, which
+   reads much more naturally left-aligned like a little note card than
+   centered.
+
+   The selector is "#manhwaList li.note-card" (not just ".note-card")
+   for the same reason "#manhwaList li.private-row" further up does the
+   same thing: "#manhwaList li" uses an ID, and an ID always beats a
+   plain class in CSS's specificity rules regardless of which one is
+   written later in the file - so a bare ".note-card { text-align:
+   left }" would actually lose to "#manhwaList li"'s own "text-align:
+   center" and silently do nothing. Repeating "#manhwaList li" in the
+   selector here gives this rule an ID of its own to match, so it wins
+   the way it's supposed to.
+
+   "aspect-ratio: 16 / 9" is what gives the card its wide/horizontal
+   shape - the exact same ratio used for a Videos card's thumbnail (see
+   ".cover-placeholder.video-cover" above), just applied to the whole
+   card here instead of just one box inside it, since a note has no
+   image of its own to put that ratio on. Without something like this,
+   a note card's height is just whatever its two lines of text need,
+   which made it a random, inconsistent shape instead of matching the
+   other card types on the shelf.
+
+   "overflow: hidden" + "box-sizing: border-box" are the actual fix for
+   the old overflow bug: the title/snippet text below used to have no
+   width limit of its own, so as a flex item (align-items isn't
+   "stretch" here) it sized itself to fit its own content instead of
+   the card's width - a long word, a pasted link, or just a long note
+   title could end up wider than the card and spill out past its edges
+   onto the page. "overflow: hidden" clips anything that still doesn't
+   fit, and "box-sizing: border-box" makes sure the aspect-ratio above
+   is measured including this card's own padding, not on top of it, so
+   the card never quietly grows past the size that ratio implies. */
+#manhwaList li.note-card {
+  align-items: flex-start;
+  text-align: left;
+  cursor: pointer;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+/* "width: 100%" makes the title/snippet fill the card's own width
+   instead of shrinking to fit their text (see the big comment above
+   for why that shrinking is what let text spill outside the card).
+   "overflow-wrap: break-word" is the other half of the overflow fix:
+   normally a browser only wraps text at spaces, so one long unbroken
+   chunk of text (a pasted URL, a run-on word) would refuse to wrap and
+   push past the card's edge instead - this tells the browser it's
+   allowed to break in the middle of a long word if that's the only way
+   to keep it inside the box. */
+.note-card-title {
+  font-weight: bold;
+  width: 100%;
+  overflow-wrap: break-word;
+}
+
+/* The short preview/snippet under a note's title - built by
+   buildNoteSnippet() in script.js, which trims the note's full text
+   down to a short one-liner so the card stays just as compact as a
+   comic card, never the whole note. Dimmer than the title so the two
+   are easy to tell apart at a glance, same idea as
+   ".character-list-comic-title" further down this file. Same
+   "width: 100%" + "overflow-wrap" fix as .note-card-title above, for
+   the same reason. */
+.note-card-snippet {
+  color: #bbb;
+  font-size: calc(14px * var(--card-scale));
+  width: 100%;
+  overflow-wrap: break-word;
+}
+
+/* Row of 5 star SVGs shown under the title for Completed comics.
+   display: flex keeps the stars in one tight horizontal line. */
+.entry-rating {
+  display: flex;
+  gap: calc(2px * var(--card-scale));
+}
+
+/* The star SVGs set their own width/height="16" as HTML attributes
+   (see buildStarSVG() in script.js). A CSS width/height rule like this
+   one takes priority over those attributes, which is what lets the
+   zoom slider resize them too instead of them staying stuck at 16px. */
+.star-svg {
+  display: block;
+  width: calc(16px * var(--card-scale));
+  height: calc(16px * var(--card-scale));
+}
+
+/* Holds the chapter number and the link side by side in one row,
+   instead of each getting its own full line. */
+.entry-info-row {
+  display: flex;
+  align-items: center;
+  gap: calc(10px * var(--card-scale));
+  font-size: calc(14px * var(--card-scale));
+  color: #fff;
+}
+
+.entry-link {
+  color: #06c;
+}
+
+/* Nudges each inline SVG icon up slightly so it sits centered next to
+   its text instead of hanging low, and adds a little breathing room
+   before the text that follows it. Same trick as .star-svg above: the
+   width/height="14" HTML attributes on these icons (see the ICON_LINK
+   etc constants in script.js) get overridden by the CSS width/height
+   here, so they resize along with everything else. */
+.icon-svg {
+  vertical-align: calc(-2px * var(--card-scale));
+  margin-right: calc(2px * var(--card-scale));
+  width: calc(14px * var(--card-scale));
+  height: calc(14px * var(--card-scale));
+}
+
+/* Row holding the small edit/delete icon buttons at the bottom of
+   the card, side by side instead of stacked full-width buttons. */
+.entry-actions {
+  display: flex;
+  gap: calc(8px * var(--card-scale));
+}
+
+/* Shared sizing for the emoji icon buttons. Each button's actual
+   color scheme (below) still comes from .edit-button / .delete-button,
+   same as before - this class just makes both of them small and
+   square instead of full-width text buttons. */
+.icon-button {
+  padding: calc(4px * var(--card-scale)) calc(8px * var(--card-scale));
+  font-size: calc(15px * var(--card-scale));
+  line-height: 1;
+  border-radius: calc(4px * var(--card-scale));
+  cursor: pointer;
+}
+
+.save-button {
+  padding: calc(4px * var(--card-scale)) calc(10px * var(--card-scale));
+  font-size: calc(13px * var(--card-scale));
+  border-radius: calc(4px * var(--card-scale));
+  cursor: pointer;
+}
+
+.edit-button {
+  color: #444;
+  background: #fff;
+  border: 1px solid #444;
+}
+
+.edit-button:hover {
+  background: #444;
+  color: #fff;
+}
+
+.delete-button {
+  color: #a00;
+  background: #fff;
+  border: 1px solid #a00;
+}
+
+.delete-button:hover {
+  background: #a00;
+  color: #fff;
+}
+
+/* Text/select inputs shown in place of a card's normal text while
+   it's being edited. Full width of the card so they line up neatly. */
+.edit-input {
+  width: 100%;
+  padding: calc(6px * var(--card-scale));
+  font-size: calc(14px * var(--card-scale));
+  box-sizing: border-box;
+  background: #fff;
+  color: navy;
+}
+
+.save-button {
+  color: #060;
+  background: #fff;
+  border: 1px solid #060;
+}
+
+.save-button:hover {
+  background: #060;
+  color: #fff;
+}
+
+/* --- Detail view --- */
+/* Styles for the single-comic "detail page" (#detailView in
+   index.html). It's shown/hidden by script.js swapping its
+   style.display with #libraryView's - see the "Detail view" section
+   in script.js. None of the sizes here use the calc(... *
+   var(--card-scale)) pattern the shelf cards use, on purpose: the
+   zoom slider only ever applies to the shelf grid (--card-scale is
+   only ever set on #manhwaList), and this page is a fixed layout of
+   its own, same as .bulk-add-panel or .search-bar elsewhere in this
+   file. */
+
+.back-button {
+  padding: 8px 16px;
+  font-size: 15px;
+  margin-bottom: 20px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 4px;
+}
+
+.back-button:hover {
+  background: #444;
+}
+
+/* Holds the big cover box (left) and the info column (right) side by
+   side. flex-wrap lets the info column drop underneath the cover on a
+   narrow/phone-width screen instead of squeezing both into one
+   unreadably thin row. */
+.detail-content {
+  display: flex;
+  gap: 30px;
+  flex-wrap: wrap;
+}
+
+/* Same placeholder box every card uses (.cover-placeholder), just
+   given a bigger fixed width here instead of the "100% of the card"
+   width it uses on the shelf. Written as ".cover-placeholder.detail-
+   cover" (both classes together) so this width rule is specific
+   enough to win over ".cover-placeholder"'s own "width: 100%". */
+.cover-placeholder.detail-cover {
+  width: 100%;
+  font-size: 14px;
+}
+
+/* Wraps the big detail-page cover box together with the Choose
+   Image / Remove Image buttons underneath it, so the two stack as one
+   column. This column - not the cover box itself anymore - is what
+   carries the fixed 280px width now (see .cover-placeholder.detail-
+   cover above, which was changed from "width: 280px" to "width: 100%"
+   so it fills whichever width this column gives it). */
+.detail-cover-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 280px;
+  flex-shrink: 0;
+}
+
+.detail-cover-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Once a cover image has been picked, coverPlaceholder.style.
+   backgroundImage is set directly in script.js (see setCoverElementImage)
+   and this class is added alongside it. background-size: cover fills
+   the whole box with the photo (cropping slightly if its proportions
+   don't exactly match the box) instead of stretching or squashing it. */
+.cover-placeholder.has-image {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* The "No Cover" text is only meant to show while there's no image -
+   once .has-image is added, hide the text rather than letting it sit
+   on top of the photo. */
+.cover-placeholder.has-image .cover-placeholder-text {
+  display: none;
+}
+
+/* Standard "visually hidden" trick: makes the real file input
+   invisible to the eye but still fully present (and clickable via its
+   <label>, still reachable by keyboard/screen readers) rather than
+   using "display: none", which would hide it from assistive tech too. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.cover-upload-button {
+  display: inline-block;
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.cover-upload-button:hover {
+  background: #444;
+}
+
+.remove-cover-button {
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  background: #fff;
+  color: #a00;
+  border: 1px solid #a00;
+  border-radius: 4px;
+}
+
+.remove-cover-button:hover {
+  background: #a00;
+  color: #fff;
+}
+
+.detail-info {
+  flex: 1;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.detail-title {
+  margin: 0;
+  font-size: 28px;
+}
+
+/* A small rounded badge instead of the card's rotated corner ribbon
+   (there's no cover-image corner to wrap around on this page). Colors
+   per status are set right below, matching .status-ribbon's colors
+   further up this file exactly, so a comic's status reads as the same
+   color everywhere in the app. */
+.detail-status-badge {
+  display: inline-block;
+  width: fit-content;
+  padding: 4px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: bold;
+  text-transform: uppercase;
+}
+
+.detail-status-badge.status-reading {
+  background: #1a8a3c;
+  color: #fff;
+}
+
+.detail-status-badge.status-ongoing {
+  background: #4169e1;
+  color: #fff;
+}
+
+.detail-status-badge.status-completed {
+  background: #ffd700;
+  color: #333;
+}
+
+.detail-status-badge.status-recommended {
+  background: #7a1fa2;
+  color: #fff;
+}
+
+.detail-chapter {
+  font-size: 17px;
+  margin: 0;
+}
+
+.detail-link {
+  display: block;
+  width: fit-content;
+  max-width: 100%;
+  color: #6cf;
+  font-size: 15px;
+  /* The visible text is now the actual URL (see showDetailView() in
+     script.js) instead of a short fixed label like "Open Link" - a
+     real URL can be much longer, so it needs to be allowed to wrap
+     onto a new line rather than overflowing the page. */
+  overflow-wrap: break-word;
+}
+
+/* Shown instead of a real link when the comic has no link saved (see
+   showDetailView() in script.js) - plain gray text, not a clickable
+   blue link. */
+.detail-link.detail-link-empty {
+  color: #888;
+}
+
+.detail-tags {
+  margin-top: 4px;
+}
+
+/* .entry-rating (further up this file) already makes this a flex row
+   of stars; this just gives it a real, fixed gap. It needs its own
+   gap here because .entry-rating's own gap is written as
+   calc(2px * var(--card-scale)), and --card-scale only exists inside
+   #manhwaList (the shelf) - outside of it that calc() has nothing to
+   read, so it's ignored, leaving the stars with no gap at all. */
+.detail-rating {
+  gap: 4px;
+}
+
+/* Cursor hint + hover feedback for the card cover/title (Cover mode)
+   and the title text (Private mode), now that clicking any of them
+   opens the detail page - see renderList() and buildPrivateRow() in
+   script.js for where this class gets added. */
+.detail-link-target {
+  cursor: pointer;
+}
+
+.detail-link-target:hover {
+  opacity: 0.8;
+}
+
+#editEntryButton {
+  width: fit-content;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* detailEditForm: hidden until "Edit" is clicked (see #editEntryButton
+   above and its click handler in script.js). Same column-of-stacked-
+   fields layout as .add-scene-form just below in this file, so this
+   second edit form matches the rest of the detail page instead of
+   looking like a one-off.
+
+   "--card-scale: 1" is set here for the same reason .characters-list
+   sets it further down this file: several classes reused inside this
+   form (.edit-input, .tag-editor) size themselves with
+   calc(<size> * var(--card-scale)), a variable that's normally only
+   defined on #manhwaList (the shelf). Fixing it at 1 here makes those
+   same classes render at their normal, un-zoomed size on this page
+   too, instead of the calc() falling back to nothing. Custom
+   properties inherit down the page, so every field inside this form
+   picks it up automatically. */
+.detail-edit-form {
+  --card-scale: 1;
+
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 400px;
+}
+
+.detail-edit-form-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.detail-edit-form-controls button {
+  padding: 8px 16px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+/* Notes section: sits below .detail-content, full width, so it gets
+   its own top margin and border to visually separate it from the
+   cover/info block above rather than crowding right up against it. */
+.detail-notes-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #444;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 700px;
+}
+
+.detail-notes-label {
+  font-size: 15px;
+  font-weight: bold;
+}
+
+/* Same look as .bulk-add-textarea (white background, navy text) so
+   every textarea in the app is styled consistently. */
+.detail-notes-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  font-size: 15px;
+  font-family: Arial, sans-serif;
+  background: #fff;
+  color: navy;
+  resize: vertical;
+}
+
+#saveNotesButton {
+  width: fit-content;
+  padding: 8px 16px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+/* --- Favorite Scenes --- */
+/* Same "own full-width block, separated from what's above it with a
+   top border" idea as .detail-notes-section right above this. */
+.detail-scenes-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #444;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 700px;
+}
+
+.detail-scenes-heading {
+  font-size: 15px;
+  margin: 0;
+}
+
+/* Holds one row per saved scene. Unlike .tags-preview's chips (which
+   sit side by side and wrap), each scene here gets its own full-width
+   row stacked in a column - a scene's description can be a whole
+   sentence or more, so it needs the room a small chip doesn't have. */
+.detail-scenes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scene-entry {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  background: #333;
+  border-radius: 6px;
+}
+
+.scene-entry-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0; /* lets a long description/link wrap instead of overflowing the row */
+}
+
+.scene-description {
+  margin: 0;
+  font-size: 14px;
+  white-space: pre-wrap; /* keeps any line breaks typed into the textarea */
+  overflow-wrap: break-word;
+}
+
+.scene-link {
+  color: #6cf;
+  font-size: 13px;
+  width: fit-content;
+}
+
+/* Shown instead of a real link when a scene was saved with no link -
+   same idea as .detail-link.detail-link-empty above for the comic's
+   own link. */
+.scene-link.scene-link-empty {
+  color: #888;
+}
+
+.scene-delete-button {
+  background: none;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px;
+  flex-shrink: 0; /* keeps the (x) from getting squeezed if the description is long */
+}
+
+.scene-delete-button:hover {
+  color: #f66;
+}
+
+#addSceneButton {
+  width: fit-content;
+  padding: 8px 16px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+/* Hidden until "Add Scene" is clicked (see index.html's inline
+   style="display: none" and the addSceneButton handler in script.js).
+   Same white-textarea/navy-text look as .bulk-add-textarea and
+   .detail-notes-textarea, so every form in this app matches. */
+.add-scene-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scene-description-input,
+.scene-link-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  font-size: 15px;
+  font-family: Arial, sans-serif;
+  background: #fff;
+  color: navy;
+}
+
+.scene-description-input {
+  resize: vertical;
+}
+
+.scene-form-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.scene-form-controls button {
+  padding: 8px 16px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+/* --- Favorite Characters --- */
+/* Same "own full-width block, separated from what's above it with a
+   top border" idea as .detail-notes-section and .detail-scenes-section
+   above. */
+.detail-characters-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #444;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 700px;
+}
+
+.detail-characters-heading {
+  font-size: 15px;
+  margin: 0;
+}
+
+/* One row per saved character, stacked in a column - same idea as
+   .detail-scenes-list above. */
+.detail-characters-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.character-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: #333;
+  border-radius: 6px;
+}
+
+/* Same placeholder box every comic cover uses (.cover-placeholder,
+   defined up in the "Cover images" part of this file) - just shown
+   much smaller here, with smaller placeholder text to match. Written
+   as ".cover-placeholder.character-avatar" (both classes together) so
+   this width/font-size is specific enough to win over
+   ".cover-placeholder"'s own "width: 100%", same trick used by
+   ".cover-placeholder.detail-cover" above for the big detail-page
+   cover box. */
+.cover-placeholder.character-avatar {
+  width: 48px;
+  font-size: 8px;
+  flex-shrink: 0;
+}
+
+.character-name {
+  flex: 1;
+  min-width: 0; /* lets a long name wrap instead of overflowing the row */
+  overflow-wrap: break-word;
+}
+
+/* --- Characters tab (combined list, across every comic) --- */
+/* #charactersList itself - a responsive grid of character cards, laid
+   out the same way as #manhwaList's comic-card grid further up this
+   file (auto-fill + minmax, so the browser fits as many columns as it
+   can). "--card-scale: 1" is set fixed right here instead of being
+   read from a slider, because the Card Size zoom slider is hidden
+   while this tab is active (see "body.characters-tab-active
+   .zoom-controls" above) - there's no user-adjustable value to use,
+   so every calc(... * var(--card-scale)) rule reused below (via
+   .cover-placeholder, .entry-title, etc.) just resolves to its plain,
+   un-zoomed size. */
+.characters-list {
+  --card-scale: 1;
+
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+/* One character card. Same box shape/size as a comic card
+   (#manhwaList li above: dark background, centered column of
+   contents) - reused here so a character tile reads as part of the
+   same shelf, not a smaller/different kind of UI element. */
+.character-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  background: #2b2b2b;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+/* The comic title shown under each character's name here - smaller
+   and dimmer than the name itself, so it reads as a subtitle rather
+   than competing with it. This is what makes two characters that
+   happen to share the same name easy to tell apart at a glance. */
+.character-list-comic-title {
+  font-size: 13px;
+  color: #bbb;
+  overflow-wrap: break-word;
+}
+
+.character-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.character-edit-button,
+.character-delete-button {
+  padding: 4px 8px;
+  font-size: 13px;
+  line-height: 1;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.character-edit-button {
+  color: #444;
+  background: #fff;
+  border: 1px solid #444;
+}
+
+.character-edit-button:hover {
+  background: #444;
+  color: #fff;
+}
+
+.character-delete-button {
+  color: #a00;
+  background: #fff;
+  border: 1px solid #a00;
+}
+
+.character-delete-button:hover {
+  background: #a00;
+  color: #fff;
+}
+
+#addCharacterButton {
+  width: fit-content;
+  padding: 8px 16px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+/* Hidden until "Add Character" is clicked (see index.html's inline
+   style="display: none" and the addCharacterButton handler in
+   script.js) - same show/hide-panel idea as .add-scene-form above. */
+.add-character-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.character-name-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  font-size: 15px;
+  font-family: Arial, sans-serif;
+  background: #fff;
+  color: navy;
+}
+
+.character-image-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Live preview of whichever image is currently picked for this
+   character (or the plain placeholder, if none is) - same idea as
+   .character-avatar above, just a bit bigger since this is the only
+   image shown while the form is open, and not yet sitting inside a
+   saved .character-entry row. */
+.cover-placeholder.character-form-preview {
+  width: 80px;
+  font-size: 10px;
+}
+
+.character-form-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.character-form-controls button {
+  padding: 8px 16px;
+  font-size: 15px;
+  cursor: pointer;
+}
