@@ -1673,3 +1673,45 @@ body.private-mode #manhwaList {
   font-size: 15px;
   cursor: pointer;
 }
+
+/* --- Link popup ---
+   Shown above a link (card view, Private list view, or the detail
+   page) when it's clicked, instead of the link opening right away.
+   "position: fixed" (not "absolute") is on purpose: script.js
+   positions this using coordinates from getBoundingClientRect(), which
+   are measured relative to the browser window itself - "fixed" is the
+   one position mode that lines up with those coordinates no matter
+   where the link sits on the (possibly scrolled) page. Same
+   dark-box-with-border look as .status-dropdown-menu above, so it
+   reads as part of the same app instead of a foreign popup. */
+.link-popup {
+  position: fixed;
+  display: none;
+  flex-direction: row;
+  gap: 6px;
+  padding: 6px;
+  background: #2b2b2b;
+  border: 1px solid #666;
+  border-radius: 6px;
+  z-index: 1000;
+  /* Shifts the box up by its own full height (plus a small 8px gap)
+     so it appears ABOVE the point script.js positions it at, rather
+     than below/on top of it - without needing to know the box's exact
+     height ahead of time (that's what "100%" here refers to). */
+  transform: translateY(calc(-100% - 8px));
+}
+
+.link-popup-button {
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  background: #444;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.link-popup-button:hover {
+  background: #555;
+}

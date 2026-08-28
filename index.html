@@ -614,6 +614,20 @@ The End"></textarea>
     </div>
   </div>
 
+  <!-- Link popup: pops up right above whichever link you just clicked
+       (in the compact card view, the Private list view, or the "Open"
+       link on the detail page), instead of that link opening straight
+       away. Starts hidden (style.css sets display: none by default) -
+       script.js shows it and moves it into place above the link that
+       was clicked. Both buttons act on whatever link is currently
+       "open" - see the "Link popup" section in script.js for exactly
+       how that's tracked and how the Copy button talks to the
+       clipboard. -->
+  <div id="linkPopup" class="link-popup">
+    <button type="button" id="linkPopupOpenButton" class="link-popup-button">Open</button>
+    <button type="button" id="linkPopupCopyButton" class="link-popup-button">Copy</button>
+  </div>
+
   <script src="script.js"></script>
 </body>
 </html>

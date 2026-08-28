@@ -51,6 +51,9 @@ const detailAuthor = document.getElementById('detailAuthor');
 const detailLink = document.getElementById('detailLink');
 const detailTags = document.getElementById('detailTags');
 const detailRating = document.getElementById('detailRating');
+const linkPopup = document.getElementById('linkPopup');
+const linkPopupOpenButton = document.getElementById('linkPopupOpenButton');
+const linkPopupCopyButton = document.getElementById('linkPopupCopyButton');
 
 // --- Detail page "Edit" form (second edit entry point) ---
 // detailViewFields wraps everything above (title through rating) plus
@@ -1458,7 +1461,10 @@ function buildPrivateRow(listItem, entry) {
   infoElement.textContent = progressText ? (progressText + ' · ' + entry.status) : entry.status;
   listItem.appendChild(infoElement);
 
-  // Same clickable link as the card view - opens in a new tab.
+  // Same clickable link as the card view - clicking it pops open the
+  // Open/Copy popup instead of opening in a new tab right away, same
+  // as everywhere else - see the "Link popup" section near the bottom
+  // of this file for wireLinkPopup().
   const linkElement = document.createElement('a');
   linkElement.className = 'entry-link';
   linkElement.href = entry.link;
@@ -1467,6 +1473,7 @@ function buildPrivateRow(listItem, entry) {
   linkElement.innerHTML = ICON_LINK + ' Link';
   linkElement.target = '_blank';
   linkElement.rel = 'noopener noreferrer';
+  wireLinkPopup(linkElement);
   listItem.appendChild(linkElement);
 
   listItem.appendChild(buildEntryActions(entry));
@@ -2802,6 +2809,10 @@ function renderList() {
       linkElement.innerHTML = ICON_LINK + ' Link';
       linkElement.target = '_blank';
       linkElement.rel = 'noopener noreferrer';
+      // Clicking it pops open the Open/Copy popup instead of opening
+      // in a new tab right away - see "Link popup" near the bottom of
+      // this file for wireLinkPopup().
+      wireLinkPopup(linkElement);
       infoRow.appendChild(linkElement);
 
       listItem.appendChild(infoRow);
@@ -3494,6 +3505,162 @@ zoomOutButton.addEventListener('click', function () {
 // Set the starting zoom to 100%, matching the slider's default value
 // in the HTML.
 setCardScale(1);
+
+// --- Link popup ---
+// Every link in the app (the compact card view, the Private list view,
+// and the full URL on the detail page) used to be a plain <a href="...">
+// that opened the moment you clicked it. Now clicking one of those
+// links instead pops open #linkPopup (see index.html) right above it,
+// with two buttons: "Open" (does what clicking used to do) and "Copy"
+// (copies the link's URL to the clipboard).
+//
+// All three places share ONE small function, wireLinkPopup(), instead
+// of each one having to build its own popup logic. That function
+// doesn't need to be told the URL directly - it just reads it straight
+// off the link's own href attribute at the moment you click, using
+// linkElement.getAttribute('href'). That's the same string
+// showDetailView(), buildPrivateRow(), etc. already put there, so
+// there's nothing to keep in sync - wire the link once, and whatever
+// URL it happens to be pointing at NOW is what the popup will use.
+
+// Remembers which link the popup is currently open for, so the "Open"
+// and "Copy" buttons (wired up once, below) know which URL to act on.
+// '' means "the popup is closed" - see closeLinkPopup().
+let linkPopupUrl = '';
+
+// The Copy button briefly shows "Copied!" after a successful copy (see
+// linkPopupCopyButton's click handler below), then changes back. This
+// remembers that pending "change it back" timer so a second Copy click
+// (or the popup closing) can cancel a leftover one instead of two
+// timers stepping on each other.
+let linkPopupCopyResetTimeout = null;
+
+// Moves #linkPopup above linkElement and shows it, remembering url as
+// the one "Open"/"Copy" should act on. getBoundingClientRect() gives
+// linkElement's position relative to the browser window itself (NOT
+// the page - it already accounts for scrolling), which lines up with
+// "position: fixed" on .link-popup in style.css - that's why fixed
+// (not absolute) positioning was chosen for this popup. We only need
+// its top-left corner: the CSS's transform: translateY(...) is what
+// actually shifts the box upward so it appears ABOVE that corner
+// instead of below it, without us needing to know the popup's own
+// height ahead of time.
+function openLinkPopupFor(linkElement, url) {
+  const linkRect = linkElement.getBoundingClientRect();
+  linkPopup.style.left = linkRect.left + 'px';
+  linkPopup.style.top = linkRect.top + 'px';
+
+  linkPopupUrl = url;
+
+  // In case a previous popup was closed mid "Copied!" flash, make sure
+  // the button always starts fresh as plain "Copy" text.
+  clearTimeout(linkPopupCopyResetTimeout);
+  linkPopupCopyButton.textContent = 'Copy';
+
+  linkPopup.style.display = 'flex';
+}
+
+// Hides the popup and forgets which link it was for. Shared by: the
+// "Open" button (once it's done its job), the "Copy" button (once the
+// "Copied!" flash finishes), and the document-wide click listener
+// below that closes it when you click anywhere else on the page.
+function closeLinkPopup() {
+  linkPopup.style.display = 'none';
+  linkPopupUrl = '';
+  clearTimeout(linkPopupCopyResetTimeout);
+}
+
+// Wires up ONE link element so clicking it opens the popup above it
+// instead of navigating straight away. Called once for every link the
+// popup should apply to - see buildPrivateRow(), the card-view link in
+// renderList(), and the one-time call for #detailLink near the bottom
+// of this section.
+function wireLinkPopup(linkElement) {
+  linkElement.addEventListener('click', function (event) {
+    // Stops the browser from following the link immediately...
+    event.preventDefault();
+    // ...and stops this same click from also reaching the document
+    // click listener below (the one that closes the popup when you
+    // click "anywhere else"). Without this, that listener would see
+    // this very click and instantly close the popup we're about to
+    // open, since the link itself isn't inside #linkPopup.
+    event.stopPropagation();
+
+    // A link with nothing typed in has no href attribute at all (see
+    // showDetailView()'s "No link added" case) - nothing to open or
+    // copy, so do nothing rather than popping up an empty box.
+    const url = linkElement.getAttribute('href');
+    if (!url) {
+      return;
+    }
+
+    openLinkPopupFor(linkElement, url);
+  });
+}
+
+// "Open": exactly what clicking the link used to do - open the URL in
+// a new tab. window.open()'s third argument ('noopener,noreferrer') is
+// the same protection every link in this app already had via its
+// rel="noopener noreferrer" attribute: it stops that new tab from
+// getting a JavaScript handle back to this page.
+linkPopupOpenButton.addEventListener('click', function () {
+  if (linkPopupUrl) {
+    window.open(linkPopupUrl, '_blank', 'noopener,noreferrer');
+  }
+  closeLinkPopup();
+});
+
+// "Copy": writes the link's URL onto the system clipboard using the
+// Clipboard API (navigator.clipboard.writeText). This is the modern,
+// built-in way browsers let a page copy text FOR you, without needing
+// any hidden textarea + document.execCommand('copy') trick like older
+// code often uses. It's asynchronous (it returns a Promise) because
+// the browser may need to ask the user for clipboard permission first
+// - so the "Copied!" text only appears inside .then(), once the copy
+// has actually finished successfully, never before.
+linkPopupCopyButton.addEventListener('click', function () {
+  if (!linkPopupUrl) {
+    return;
+  }
+
+  navigator.clipboard.writeText(linkPopupUrl).then(function () {
+    linkPopupCopyButton.textContent = 'Copied!';
+
+    // Give the person a moment to see the "Copied!" confirmation, then
+    // close the popup automatically - same as if they'd clicked
+    // "Open". clearTimeout() first (also done in openLinkPopupFor())
+    // guards against two overlapping timers if Copy is somehow clicked
+    // twice in a row.
+    clearTimeout(linkPopupCopyResetTimeout);
+    linkPopupCopyResetTimeout = setTimeout(function () {
+      closeLinkPopup();
+    }, 1200);
+  });
+  // No .catch() fallback here: navigator.clipboard.writeText() only
+  // fails in situations this app doesn't run in (very old browsers, or
+  // a page loaded over plain http:// instead of https:///localhost) -
+  // this app is a PWA (see manifest.json), always served securely.
+});
+
+// Closes the popup on a click ANYWHERE else on the page - the same
+// "click outside to dismiss" pattern the status dropdown menu uses
+// further up this file (see the document click listener right after
+// buildStatusDropdownMenu()). linkPopup.contains(event.target) is true
+// for clicks on the popup itself (its Open/Copy buttons), which is
+// exactly what we want to NOT close for - those have their own click
+// handlers above that close the popup once they're done.
+document.addEventListener('click', function (event) {
+  if (!linkPopup.contains(event.target)) {
+    closeLinkPopup();
+  }
+});
+
+// #detailLink (unlike the card-view and Private-row links above) is
+// one fixed element that already exists in index.html - showDetailView()
+// just changes its href/text each time a different comic is opened,
+// it never gets recreated. So it only needs to be wired up ONCE, here,
+// rather than every time a card is built.
+wireLinkPopup(detailLink);
 
 // --- Page load ---
 // Check localStorage for comics saved from a previous visit. If any
