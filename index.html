@@ -60,11 +60,9 @@
          .modal-header on the Quick Note popup. Clicking the "X" just
          closes the sheet - see addEntrySheetCloseButton in script.js. -->
     <div class="add-entry-sheet-header">
-      <h3>Add Entry</h3>
+      <h3>Add entry</h3>
       <button id="addEntrySheetCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
     </div>
-
-    <input type="text" id="titleInput" placeholder="Enter title">
 
     <!-- Type: picks which kind of entry this is, which in turn decides
          which progress field(s) below actually apply. Manhwa is the
@@ -72,32 +70,63 @@
          progress fields start in the right state (Chapter # visible,
          Volume/Page/Episode hidden) even before script.js runs a
          single line - see the "Type" section in script.js for how
-         changing this dropdown swaps which field(s) are shown. -->
+         changing this dropdown swaps which field(s) are shown.
+
+         On phone widths, this real <select> is hidden (see style.css)
+         and the three buttons in .type-pill-row just below take over
+         as the visible control - but this select is still what
+         actually HOLDS the type value everywhere else in the code
+         (addButton's click handler reads typeInput.value, exactly like
+         before). The pill buttons work by setting this select's value
+         and firing a "change" event on it, so from script.js's point
+         of view a pill tap looks identical to picking an option from a
+         normal dropdown - see the "Type pills" section in script.js. -->
     <select id="typeInput">
       <option value="Manhwa">Manhwa</option>
       <option value="Other Comics">Other Comics</option>
       <option value="Videos">Videos</option>
     </select>
 
-    <!-- Author: only makes sense for Manhwa / Other Comics (a "Videos"
-         entry doesn't really have an "author" in the same sense), so
-         this is shown/hidden based on the Type dropdown above, the
-         same way the progress fields below are - see
-         updateAuthorFieldVisibility() in script.js. Manhwa is the
-         default Type (see the <select> just above), so this starts
-         visible with no inline style="display: none" needed here. -->
-    <input type="text" id="authorInput" placeholder="Author">
+    <!-- Type pills: phone-only restyle of the #typeInput select above as
+         three equal-width segmented buttons. Hidden on laptop/tablet
+         (see .type-pill-row in style.css) since the real dropdown
+         already shows there. data-type on each button matches one of
+         the <option value="..."> above exactly - script.js uses that to
+         know which type was tapped. -->
+    <div class="type-pill-row">
+      <button type="button" class="type-pill" data-type="Manhwa">Manhwa</button>
+      <button type="button" class="type-pill" data-type="Other Comics">Other Comics</button>
+      <button type="button" class="type-pill" data-type="Videos">Videos</button>
+    </div>
 
-    <!-- Progress fields: exactly ONE of these groups is visible at a
-         time, based on whichever type is picked above. All four still
-         exist in the page at all times (just hidden with style="display:
-         none") - script.js only ever toggles which are shown, it never
-         adds/removes them, which keeps the show/hide logic simple. See
-         updateProgressFieldsVisibility() in script.js. -->
-    <input type="text" id="chapterInput" placeholder="Chapter #">
-    <input type="text" id="volumeInput" placeholder="Volume #" style="display: none;">
-    <input type="text" id="pageInput" placeholder="Page #" style="display: none;">
-    <input type="text" id="episodeInput" placeholder="Episode # (optional)" style="display: none;">
+    <input type="text" id="titleInput" placeholder="Enter title">
+
+    <!-- Author + progress row: on phone widths these sit side by side in
+         one row (see .author-progress-row in style.css) - on
+         laptop/tablet this wrapper div has no visual effect at all
+         (display: contents), so the fields flow exactly like they did
+         before this wrapper was added. -->
+    <div class="author-progress-row">
+      <!-- Author: only makes sense for Manhwa / Other Comics (a "Videos"
+           entry doesn't really have an "author" in the same sense), so
+           this is shown/hidden based on the Type dropdown above, the
+           same way the progress fields below are - see
+           updateAuthorFieldVisibility() in script.js. Manhwa is the
+           default Type (see the <select> above), so this starts
+           visible with no inline style="display: none" needed here. -->
+      <input type="text" id="authorInput" placeholder="Author">
+
+      <!-- Progress fields: exactly ONE of these groups is visible at a
+           time, based on whichever type is picked above. All four still
+           exist in the page at all times (just hidden with style="display:
+           none") - script.js only ever toggles which are shown, it never
+           adds/removes them, which keeps the show/hide logic simple. See
+           updateProgressFieldsVisibility() in script.js. -->
+      <input type="text" id="chapterInput" placeholder="Chapter #">
+      <input type="text" id="volumeInput" placeholder="Volume #" style="display: none;">
+      <input type="text" id="pageInput" placeholder="Page #" style="display: none;">
+      <input type="text" id="episodeInput" placeholder="Episode # (optional)" style="display: none;">
+    </div>
 
     <input type="text" id="linkInput" placeholder="Link (URL)">
     <select id="statusInput">

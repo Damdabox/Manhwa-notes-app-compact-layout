@@ -1733,6 +1733,24 @@ body.private-mode #manhwaList {
   display: none;
 }
 
+/* .type-pill-row is the three-button Manhwa/Other Comics/Videos
+   restyle of the #typeInput dropdown (see index.html). Same reasoning
+   as .add-entry-sheet-header above: hidden by default so laptop/tablet
+   keeps showing the plain <select> exactly like before. */
+.type-pill-row {
+  display: none;
+}
+
+/* .author-progress-row wraps #authorInput and the four progress fields
+   (see index.html). "display: contents" makes the wrapper itself
+   invisible to layout - its children act as if they were direct
+   children of .form, which is exactly how they behaved before this
+   wrapper existed. Only the phone media query below turns this into a
+   real side-by-side row. */
+.author-progress-row {
+  display: contents;
+}
+
 /* .open-add-entry-sheet-button is the floating "+" button (see
    index.html, just after #addEntrySheetOverlay). Same reasoning: it
    would be redundant on laptop/tablet since the form is already sitting
@@ -1802,7 +1820,47 @@ body.private-mode #manhwaList {
     border-radius: 12px 12px 0 0;
     padding: 16px;
     box-sizing: border-box;
+    /* Base .form is "flex-wrap: wrap" (fields flow left-to-right,
+       wrapping when they run out of room). The sheet instead wants
+       every field stacked in one full-width column, so switch the
+       main axis to vertical here. flex-wrap no longer matters once
+       we're stacking in a column, but leaving it doesn't hurt. */
+    flex-direction: column;
+    gap: 14px;
   }
+
+  /* Every direct child of .form inside the sheet (the header, the type
+     pills, each input/select, the tag row, the Add entry button, etc.)
+     becomes one full-width row in that vertical stack. "flex: none"
+     cancels out the "flex: 1" some of these fields have from their
+     base rule further up this file - that flex: 1 means "grow to fill
+     the row" in the normal left-to-right layout, but in a column
+     layout it would mean "grow to fill the sheet's height" instead,
+     which isn't what we want. Nested fields, like the inputs inside
+     .author-progress-row below, are NOT direct children of .form
+     anymore (they're inside that wrapper div), so they keep their
+     normal flex: 1 side-by-side behavior untouched. */
+  .add-entry-sheet-overlay .form > * {
+    flex: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Visual order of the stack, top to bottom: header, type pills,
+     title, author+progress row, link, status, tag input, tag chips,
+     Add entry button. This uses the CSS "order" property instead of
+     moving elements around in index.html, so script.js never has to
+     care whether it's reading a field from the normal page layout or
+     from inside this popup sheet. */
+  .add-entry-sheet-header        { order: 1; }
+  .type-pill-row                 { order: 2; }
+  #titleInput                    { order: 3; }
+  .author-progress-row           { order: 4; }
+  #linkInput                     { order: 5; }
+  #statusInput                   { order: 6; }
+  .add-entry-sheet-overlay .tag-input-row { order: 7; }
+  #tagsPreview                   { order: 8; }
+  #addButton                     { order: 9; }
 
   .add-entry-sheet-header {
     display: flex;
@@ -1813,6 +1871,112 @@ body.private-mode #manhwaList {
 
   .add-entry-sheet-header h3 {
     margin: 0;
+  }
+
+  /* The real #typeInput dropdown is hidden on phone widths - the pill
+     buttons below take over as the visible, tappable control. It's
+     still present in the page (just invisible) because it's what
+     holds the actual type value everywhere else in the code. */
+  .add-entry-sheet-overlay #typeInput {
+    display: none;
+  }
+
+  /* Three equal-width segmented pills. */
+  .type-pill-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .type-pill {
+    flex: 1;
+    padding: 10px 4px;
+    font-size: 13px;
+    font-weight: bold;
+    text-align: center;
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    /* Unselected: dark gray pill, light gray text. */
+    background: #333;
+    color: #aaa;
+  }
+
+  /* Selected type: white pill, dark text. script.js toggles this class
+     onto whichever pill matches the current #typeInput value - see the
+     "Type pills" section in script.js. */
+  .type-pill.active {
+    background: #fff;
+    color: #1c1c1c;
+  }
+
+  /* Author + progress row: a real side-by-side flex row on phone
+     widths (on laptop/tablet, .author-progress-row is "display:
+     contents" instead - see the rule above this media query). The
+     inputs inside keep the "flex: 1" they already have from their base
+     rule further up this file, which is exactly what makes them share
+     this row's width evenly. */
+  .author-progress-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  /* Make every visible field in this row (Author, plus whichever
+     progress field is showing) share the row equally.
+
+     "flex: 1" here overrides each field's own base rule - #authorInput
+     doesn't have flex: 1 at all normally (it just sits at its default
+     input width), so without this override it wouldn't grow to share
+     space the way Chapter/Volume/Page/Episode do.
+
+     "min-width: 0" is needed too: flex items default to
+     "min-width: auto", which means they refuse to shrink smaller than
+     their own content - for a text <input> that's the browser's
+     default width (~170px+), wider than 1/2 or 1/3 of this row.
+     Without it, these fields would overflow off the right edge of the
+     sheet instead of sharing the row evenly. */
+  .author-progress-row > * {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Dark gray, rounded, generously padded fields to match the sheet's
+     dark theme - overrides the white/navy look those same fields have
+     everywhere else in the app (see the shared field rule near the top
+     of this file). */
+  .add-entry-sheet-overlay #titleInput,
+  .add-entry-sheet-overlay #authorInput,
+  .add-entry-sheet-overlay #chapterInput,
+  .add-entry-sheet-overlay #volumeInput,
+  .add-entry-sheet-overlay #pageInput,
+  .add-entry-sheet-overlay #episodeInput,
+  .add-entry-sheet-overlay #linkInput,
+  .add-entry-sheet-overlay #statusInput,
+  .add-entry-sheet-overlay #tagInput {
+    box-sizing: border-box;
+    padding: 14px 16px;
+    border: none;
+    border-radius: 10px;
+    background: #333;
+    color: #fff;
+    font-size: 16px;
+  }
+
+  /* Full-width teal "Add entry" button, matching the floating "+"
+     button's teal (see .open-add-entry-sheet-button below) but with
+     dark text instead of white, as requested. */
+  .add-entry-sheet-overlay #addButton {
+    padding: 14px 16px;
+    border: none;
+    border-radius: 10px;
+    background: #0d6e6e;
+    color: #1c1c1c;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  .add-entry-sheet-overlay #addButton:hover {
+    background: #094f4f;
   }
 
   /* Floating "+" button: fixed positioning (not absolute) is what keeps

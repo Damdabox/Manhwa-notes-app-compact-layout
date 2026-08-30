@@ -19,6 +19,7 @@ const bulkAddStatusInput = document.getElementById('bulkAddStatusInput');
 const bulkAddSubmitButton = document.getElementById('bulkAddSubmitButton');
 const bulkAddCancelButton = document.getElementById('bulkAddCancelButton');
 const quickNotesButton = document.getElementById('quickNotesButton');
+const typePillButtons = document.querySelectorAll('.type-pill');
 const addEntrySheetOverlay = document.getElementById('addEntrySheetOverlay');
 const openAddEntrySheetButton = document.getElementById('openAddEntrySheetButton');
 const addEntrySheetCloseButton = document.getElementById('addEntrySheetCloseButton');
@@ -2861,6 +2862,34 @@ typeInput.addEventListener('change', function () {
   updateAuthorFieldVisibility(typeInput.value, authorInput);
 });
 
+// Type pills (phone widths only - see .type-pill-row in index.html):
+// three buttons standing in for the #typeInput dropdown above. Gives
+// each pill the "active" look (white background, dark text) if it
+// matches whatever #typeInput's current value is, and the plain dark
+// look otherwise - see .type-pill / .type-pill.active in style.css.
+function updateTypePillActiveState() {
+  typePillButtons.forEach(function (pill) {
+    pill.classList.toggle('active', pill.dataset.type === typeInput.value);
+  });
+}
+
+// Tapping a pill sets the real #typeInput select to that pill's type,
+// then fires a "change" event on it - this makes the browser (and
+// every other listener on #typeInput, like the one just above) treat
+// it exactly the same as if that option had been picked from a normal
+// dropdown, so no other code needs to know pills exist at all.
+typePillButtons.forEach(function (pill) {
+  pill.addEventListener('click', function () {
+    typeInput.value = pill.dataset.type;
+    typeInput.dispatchEvent(new Event('change'));
+    updateTypePillActiveState();
+  });
+});
+
+// Set the correct pill active on page load, matching #typeInput's
+// starting value ("Manhwa" - see the <select> in index.html).
+updateTypePillActiveState();
+
 // Run this function whenever the button is clicked
 addButton.addEventListener('click', function () {
   const title = titleInput.value;
@@ -2942,9 +2971,11 @@ addButton.addEventListener('click', function () {
 
   // Type just got reset to 'Manhwa' above, so put the progress fields
   // (and the Author field) back to the matching visibility (Chapter #
-  // and Author shown, the rest hidden).
+  // and Author shown, the rest hidden), and re-highlight the Manhwa
+  // pill to match (see the "Type pills" section above).
   updateProgressFieldsVisibility('Manhwa', addFormProgressFields);
   updateAuthorFieldVisibility('Manhwa', authorInput);
+  updateTypePillActiveState();
 
   // Empty the tags array back out and redraw the (now empty) chip
   // preview, so the next comic starts with a blank tag list too.
