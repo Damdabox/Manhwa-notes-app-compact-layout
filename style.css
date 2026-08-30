@@ -1715,3 +1715,112 @@ body.private-mode #manhwaList {
 .link-popup-button:hover {
   background: #555;
 }
+
+/* =========================================================================
+   PHONE-ONLY STYLING
+   =========================================================================
+   Everything below is wrapped in a "media query" - a CSS rule that starts
+   with "@media (...)" and only applies when whatever condition is inside
+   those parentheses is true. This one, "(max-width: 600px)", is true only
+   when the browser window is 600px wide or less - basically just phones
+   held in portrait mode. A laptop or tablet screen is always much wider
+   than that, so every rule in this block is completely invisible to them;
+   they keep using the normal (non-media-query) rules earlier in this file,
+   exactly as before.
+
+   That's the trick that makes "different styles for different screen
+   sizes" possible with plain CSS: instead of writing JS to detect the
+   screen and swap classes around, you write a second, more specific set of
+   rules and let the BROWSER decide which set applies, just by checking its
+   own window width. It re-checks this automatically too - e.g. rotating a
+   phone from portrait to landscape (or resizing this window past 600px)
+   flips these styles on/off live, no reload needed.
+
+   Everything in here re-declares a selector that already exists above
+   (like "#titleInput" or ".filter-tab") with bigger font-size/padding
+   values. Because these rules are written LATER in the file, and a media
+   query doesn't lower a rule's specificity, they win over the earlier
+   plain versions whenever the media query is active - that's the whole
+   mechanism, no !important needed. Nothing here changes color, layout, or
+   behavior, only size, so the phone version still looks like the same
+   app, just easier to read and tap. */
+@media (max-width: 600px) {
+
+  /* --- Add-entry form: title, type, author, chapter/volume/page/
+     episode, link, status, and the tag input - all made bigger and
+     easier to tap without pinch-zooming in first. */
+  #titleInput,
+  #typeInput,
+  #authorInput,
+  #chapterInput,
+  #volumeInput,
+  #pageInput,
+  #episodeInput,
+  #linkInput,
+  #statusInput,
+  #tagInput {
+    font-size: 18px;
+    padding: 12px;
+  }
+
+  /* Add Entry / Bulk Add / Add Tag / Quick Notes buttons. */
+  #addButton,
+  #bulkAddButton,
+  #addTagButton,
+  .quick-notes-button {
+    font-size: 18px;
+    padding: 12px 20px;
+  }
+
+  /* --- Search bar, above the folder tabs. --- */
+  #searchInput {
+    font-size: 18px;
+    padding: 14px 40px 14px 14px;
+  }
+
+  /* --- Folder tabs (All / Manhwa / Other Comics / Videos / Characters)
+     and the Reading/Ongoing/Completed/etc. status row underneath them. */
+  .filter-tab {
+    font-size: 18px;
+    padding: 12px 18px;
+  }
+
+  .status-all-button,
+  .status-dropdown-button,
+  .status-dropdown-option {
+    font-size: 16px;
+    padding: 10px 16px;
+  }
+
+  /* --- Card Size (zoom) controls row: label text, the +/- buttons,
+     and the "100%" readout next to the slider. */
+  .zoom-controls label,
+  #zoomValueLabel {
+    font-size: 17px;
+  }
+
+  .zoom-button {
+    font-size: 18px;
+    padding: 8px 14px;
+  }
+
+  /* Card Size DEFAULT on phones: #manhwaList's own rule earlier in this
+     file starts --card-scale at 1 (100%), which is what makes every
+     comic card's font/padding/icon sizes so small on a phone that you'd
+     otherwise have to immediately drag the Card Size slider up to 180%
+     by hand. Overriding just this one variable, here, changes what
+     EVERY card's calc(<size> * var(--card-scale)) math starts from - so
+     cards render at 180% the instant the page loads on a phone, with no
+     extra JS and no per-property changes needed anywhere else.
+
+     The Card Size slider still works completely normally on top of
+     this: it's still free to move anywhere between its own 60%-180%
+     range (see ZOOM_MIN/ZOOM_MAX in script.js), it just now starts
+     from 180% instead of 100%. A tiny bit of script.js (search for
+     "Phone-width default Card Size") keeps the slider's own position
+     and its "100%" text in sync with this on page load, since those are
+     drawn by JS, not by this stylesheet. */
+  #manhwaList {
+    --card-scale: 1.8;
+  }
+}
