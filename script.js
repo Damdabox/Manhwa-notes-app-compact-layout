@@ -3502,25 +3502,6 @@ zoomOutButton.addEventListener('click', function () {
   setCardScale(parseFloat(zoomSlider.value) - ZOOM_STEP);
 });
 
-// --- Phone-width default Card Size ---
-// style.css has a "@media (max-width: 600px)" block that gives phone-
-// width screens a bigger DEFAULT --card-scale (1.8 instead of 1), so
-// cards aren't tiny the moment the page loads. That media query is pure
-// CSS though - it can resize the cards on its own, but it has no way to
-// also move the Card Size SLIDER to the right spot or update the "100%"
-// text next to it, since both of those are drawn by this script, not by
-// CSS. So we ask JS's own version of that same question -
-// matchMedia('(max-width: 600px)') checks the exact same "is this a
-// phone-width screen?" condition a CSS media query would - and if it's
-// true, call setCardScale() once up front. That keeps the slider
-// position and the percentage label truthful (showing "180%" instead of
-// a leftover "100%") while the cards are already at 180%. The 600px
-// here should always match the max-width used in style.css's phone
-// media query - if you ever change one, change the other to match.
-if (window.matchMedia('(max-width: 600px)').matches) {
-  setCardScale(1.8);
-}
-
 // Set the starting zoom to 100%, matching the slider's default value
 // in the HTML.
 setCardScale(1);
