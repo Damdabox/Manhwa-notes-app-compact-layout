@@ -1715,3 +1715,131 @@ body.private-mode #manhwaList {
 .link-popup-button:hover {
   background: #555;
 }
+
+/* ===========================================================================
+   Phone-width layout: Add-entry sheet
+   ===========================================================================
+   Everything below this point is scoped inside one @media rule further
+   down, EXCEPT these two "hidden by default" rules. They have to live
+   outside the media query so that on laptop/tablet widths (where the
+   media query never applies) the header and floating button simply
+   don't exist visually - .form keeps looking exactly like it did
+   before this feature was added.
+
+   .add-entry-sheet-header is the little "Add Entry" title + "X" button
+   row that only makes sense once .form is being shown as a popup sheet
+   (see index.html, right above #titleInput). */
+.add-entry-sheet-header {
+  display: none;
+}
+
+/* .open-add-entry-sheet-button is the floating "+" button (see
+   index.html, just after #addEntrySheetOverlay). Same reasoning: it
+   would be redundant on laptop/tablet since the form is already sitting
+   on the page there, so it stays hidden unless the media query below
+   turns it on. */
+.open-add-entry-sheet-button {
+  display: none;
+}
+
+/* max-width: 600px is our "phone width" cutoff - narrow enough to catch
+   phones in both portrait and landscape without also catching tablets,
+   which is what "laptop/tablet completely unaffected" above depends on. */
+@media (max-width: 600px) {
+
+  /* Bulk Add and Quick Notes aren't part of this step - they'll get
+     their own way into the phone layout later. For now they just
+     disappear on phone widths, wherever they happen to sit in the page
+     (both still live inside .form in index.html). */
+  #bulkAddButton,
+  #quickNotesButton {
+    display: none;
+  }
+
+  /* #addEntrySheetOverlay is the dimmed, full-screen backdrop - the
+     exact same idea as .modal-overlay above, just aligned to the
+     BOTTOM of the screen (justify-content isn't needed since we're
+     centering horizontally isn't the point; align-items: flex-end is
+     what makes .form sit at the bottom edge like a bottom sheet instead
+     of floating in the middle like the Quick Note popup does).
+
+     display: none by default = the sheet starts CLOSED. script.js adds
+     the "sheet-open" class (see the rule right below) when the "+"
+     button is tapped, and removes it again on close - it never touches
+     this element's inline style, so this media query stays in full
+     control of whether the sheet can ever be visible at all. */
+  .add-entry-sheet-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 1000;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .add-entry-sheet-overlay.sheet-open {
+    display: flex;
+  }
+
+  /* Once .form is inside the open sheet, give it the "popup box" look
+     (dark card, rounded top corners, its own scrollbar if the fields
+     don't all fit) instead of its normal "always on the page" look.
+     This only changes the BOX around the fields - none of the actual
+     input/select/button styles change, so the fields themselves still
+     look exactly like they do on laptop/tablet. */
+  .add-entry-sheet-overlay .form {
+    width: 100%;
+    max-width: none;
+    max-height: 85vh;
+    overflow-y: auto;
+    margin: 0;
+    background: #262626;
+    border: 1px solid #444;
+    border-radius: 12px 12px 0 0;
+    padding: 16px;
+    box-sizing: border-box;
+  }
+
+  .add-entry-sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .add-entry-sheet-header h3 {
+    margin: 0;
+  }
+
+  /* Floating "+" button: fixed positioning (not absolute) is what keeps
+     it pinned to the same spot in the browser WINDOW as you scroll the
+     page, rather than scrolling away with the content like the rest of
+     the page does. */
+  .open-add-entry-sheet-button {
+    display: block;
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border: 1px solid #094f4f;
+    border-radius: 50%;
+    background: #0d6e6e;
+    color: #fff;
+    font-size: 28px;
+    line-height: 54px;
+    text-align: center;
+    cursor: pointer;
+    z-index: 900;
+  }
+
+  .open-add-entry-sheet-button:hover {
+    background: #094f4f;
+  }
+
+}

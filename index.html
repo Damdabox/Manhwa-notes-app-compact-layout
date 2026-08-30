@@ -34,7 +34,35 @@
        together with #detailView below. -->
   <div id="libraryView">
 
+  <!-- addEntrySheetOverlay: on normal (laptop/tablet) widths this is just
+       a plain, unstyled wrapper div around .form - it has NO CSS rules
+       outside the phone-width media query in style.css, so .form renders
+       exactly like it always has and this div is invisible to the
+       layout.
+
+       On phone widths only, style.css turns this same div into a dimmed,
+       full-screen backdrop (the exact same trick #quickNoteModalOverlay
+       uses for Quick Notes - see that div further down this file) and
+       turns .form itself into the sheet box that slides up from the
+       bottom. Because it's the SAME .form element either way (same ids,
+       same fields), script.js's Add Entry logic doesn't need to know or
+       care whether the form is showing inline or inside a popup sheet.
+
+       #addEntrySheetOverlay starts WITHOUT the "sheet-open" class, so on
+       phone widths the sheet starts closed - see the "Add Entry sheet"
+       section in script.js for what adds/removes that class. -->
+  <div id="addEntrySheetOverlay" class="add-entry-sheet-overlay">
   <div class="form">
+    <!-- Sheet header: only shown on phone widths (see
+         .add-entry-sheet-header in style.css, hidden by default). Gives
+         the popup sheet a title and a close ("X") button, same idea as
+         .modal-header on the Quick Note popup. Clicking the "X" just
+         closes the sheet - see addEntrySheetCloseButton in script.js. -->
+    <div class="add-entry-sheet-header">
+      <h3>Add Entry</h3>
+      <button id="addEntrySheetCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
+    </div>
+
     <input type="text" id="titleInput" placeholder="Enter title">
 
     <!-- Type: picks which kind of entry this is, which in turn decides
@@ -113,6 +141,17 @@
          script.js for how Save/Delete work inside it). -->
     <button id="quickNotesButton" type="button" class="quick-notes-button">Quick Notes</button>
   </div>
+  </div><!-- /#addEntrySheetOverlay -->
+
+  <!-- Floating "+" button: only shown on phone widths (see
+       .open-add-entry-sheet-button in style.css, hidden by default on
+       laptop/tablet since the form is already visible there and this
+       button would be redundant). "position: fixed" in that CSS rule is
+       what keeps it pinned to the bottom-right corner of the screen
+       while scrolling, instead of scrolling away with the page.
+       Clicking it adds the "sheet-open" class to #addEntrySheetOverlay
+       above - see the "Add Entry sheet" section in script.js. -->
+  <button id="openAddEntrySheetButton" type="button" class="open-add-entry-sheet-button" aria-label="Add entry">+</button>
 
   <!-- Bulk Add panel: hidden until "Bulk Add" above is clicked. Paste a
        whole list of titles into the textarea, pick ONE status that will

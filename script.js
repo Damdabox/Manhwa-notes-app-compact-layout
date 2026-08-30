@@ -19,6 +19,9 @@ const bulkAddStatusInput = document.getElementById('bulkAddStatusInput');
 const bulkAddSubmitButton = document.getElementById('bulkAddSubmitButton');
 const bulkAddCancelButton = document.getElementById('bulkAddCancelButton');
 const quickNotesButton = document.getElementById('quickNotesButton');
+const addEntrySheetOverlay = document.getElementById('addEntrySheetOverlay');
+const openAddEntrySheetButton = document.getElementById('openAddEntrySheetButton');
+const addEntrySheetCloseButton = document.getElementById('addEntrySheetCloseButton');
 const quickNoteModalOverlay = document.getElementById('quickNoteModalOverlay');
 const quickNoteModalTitleInput = document.getElementById('quickNoteModalTitleInput');
 const quickNoteModalTextInput = document.getElementById('quickNoteModalTextInput');
@@ -3178,6 +3181,54 @@ function buildNoteSnippet(noteText) {
 
   return trimmedText.slice(0, NOTE_SNIPPET_LENGTH).trim() + '...';
 }
+
+// --- Add Entry sheet (phone widths only) ---
+// On laptop/tablet, .form (the Add Entry fields) just sits on the page
+// like it always has - none of this code changes that. On phone widths,
+// style.css turns #addEntrySheetOverlay into a dimmed backdrop and
+// .form into a popup "bottom sheet" sitting on top of it (see the
+// "Phone-width layout: Add-entry sheet" comment in style.css for the
+// full explanation), and the "+" button below is what opens it.
+//
+// This works by adding/removing one CSS class ("sheet-open") - it never
+// sets addEntrySheetOverlay.style.display directly the way the Quick
+// Note modal does. That distinction matters here: a JS-set inline style
+// would apply at EVERY screen width, but this feature must only ever do
+// anything on phone widths. Toggling a class instead lets style.css's
+// @media (max-width: 600px) rule stay in full control - on wider
+// screens, no CSS rule even looks at "sheet-open", so adding/removing
+// it has no effect at all.
+
+// "+" button: opens the sheet.
+openAddEntrySheetButton.addEventListener('click', function () {
+  addEntrySheetOverlay.classList.add('sheet-open');
+});
+
+// "X" button inside the sheet: closes it again. Doesn't touch any of
+// the typed-in field values - closing the sheet this way is exactly
+// like collapsing the always-visible form back down would be, nothing
+// gets cleared or saved.
+addEntrySheetCloseButton.addEventListener('click', function () {
+  addEntrySheetOverlay.classList.remove('sheet-open');
+});
+
+// Clicking the dimmed backdrop itself (anywhere OUTSIDE .form) also
+// closes the sheet - same "event.target === the overlay itself" check
+// used by the Quick Note modal below, so clicks inside the form fields
+// don't accidentally close it.
+addEntrySheetOverlay.addEventListener('click', function (event) {
+  if (event.target === addEntrySheetOverlay) {
+    addEntrySheetOverlay.classList.remove('sheet-open');
+  }
+});
+
+// Pressing Escape closes the sheet too, but only while it's actually
+// open.
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape' && addEntrySheetOverlay.classList.contains('sheet-open')) {
+    addEntrySheetOverlay.classList.remove('sheet-open');
+  }
+});
 
 // --- Quick Note popup/modal ---
 // Everywhere else in this app, "opening" something (a comic's detail
