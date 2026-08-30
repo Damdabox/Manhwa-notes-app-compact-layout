@@ -170,6 +170,25 @@
          out of plain HTML/CSS, and the "Quick Notes" section in
          script.js for how Save/Delete work inside it). -->
     <button id="quickNotesButton" type="button" class="quick-notes-button">Quick Notes</button>
+
+    <!-- Phone-only secondary links: hidden by default (see
+         .add-entry-sheet-secondary-row in style.css) so laptop/tablet
+         never sees them - #bulkAddButton and #quickNotesButton above
+         already do their jobs there. On phone widths only, those two
+         buttons are hidden instead (see style.css) and these two plain
+         text links take over as the way into the same two features,
+         styled much less prominently than "Add entry" so that button
+         still reads as the main action. "Bulk add" switches this same
+         sheet over to the bulk-add fields near the bottom of this file
+         (see #bulkAddPanel) instead of opening a new screen; "Quick
+         note" just opens the existing #quickNoteModalOverlay popup,
+         exactly like #quickNotesButton above already does - see the
+         "Add Entry sheet" section in script.js for both click
+         handlers. -->
+    <div class="add-entry-sheet-secondary-row">
+      <button type="button" id="sheetBulkAddLink" class="add-entry-sheet-secondary-link">Bulk add</button>
+      <button type="button" id="sheetQuickNoteLink" class="add-entry-sheet-secondary-link">Quick note</button>
+    </div>
   </div>
   </div><!-- /#addEntrySheetOverlay -->
 
@@ -189,6 +208,24 @@
        Add" section in script.js for how the pasted text gets split up
        into individual titles, and how duplicates are detected. -->
   <div id="bulkAddPanel" class="bulk-add-panel" style="display: none;">
+    <!-- Sheet-mode header: hidden by default (see .bulk-add-sheet-header
+         in style.css), same "invisible outside the phone media query"
+         trick as .add-entry-sheet-header up near the top of this file.
+         On phone widths, this only ever appears once "Bulk add" (see
+         #sheetBulkAddLink above) has swapped this whole panel in as the
+         Add Entry sheet's content - it gives that reused content the
+         exact same title-plus-X look as the rest of the sheet, even
+         though this panel itself has no such header on laptop/tablet,
+         where it's just a plain panel with a "Cancel" button at the
+         bottom like it's always had. Tapping the "X" here does the
+         exact same thing as "Cancel" below (see bulkAddSheetCloseButton
+         in script.js) - it's just a second, sheet-style way to get
+         there. -->
+    <div class="bulk-add-sheet-header">
+      <h3>Bulk add</h3>
+      <button id="bulkAddSheetCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
+    </div>
+
     <textarea id="bulkAddTextarea" class="bulk-add-textarea" rows="8" placeholder="Paste titles here - one blank line between each comic. If a title wraps onto a second line with no blank line after it, both lines get joined into one title.
 
 Example:

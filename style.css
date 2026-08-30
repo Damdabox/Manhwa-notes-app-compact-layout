@@ -1741,6 +1741,26 @@ body.private-mode #manhwaList {
   display: none;
 }
 
+/* .add-entry-sheet-secondary-row holds the "Bulk add" / "Quick note"
+   text links (see index.html, just below #quickNotesButton) - the
+   phone-only alternative to #bulkAddButton/#quickNotesButton, which are
+   hidden on phone instead (see the phone media query below). Same
+   "hidden by default so laptop/tablet is untouched" reasoning as
+   .add-entry-sheet-header/.type-pill-row above. */
+.add-entry-sheet-secondary-row {
+  display: none;
+}
+
+/* .bulk-add-sheet-header is the title-plus-X header #bulkAddPanel gets
+   ONLY while it's standing in for the Add Entry sheet's content on
+   phone widths (see index.html, right above #bulkAddTextarea). Hidden
+   by default for the same reason as the rules above it: on laptop/
+   tablet, #bulkAddPanel keeps its normal plain-panel look with no
+   header at all, exactly like before this feature existed. */
+.bulk-add-sheet-header {
+  display: none;
+}
+
 /* .author-progress-row wraps #authorInput and the four progress fields
    (see index.html). "display: contents" makes the wrapper itself
    invisible to layout - its children act as if they were direct
@@ -1765,10 +1785,11 @@ body.private-mode #manhwaList {
    which is what "laptop/tablet completely unaffected" above depends on. */
 @media (max-width: 600px) {
 
-  /* Bulk Add and Quick Notes aren't part of this step - they'll get
-     their own way into the phone layout later. For now they just
-     disappear on phone widths, wherever they happen to sit in the page
-     (both still live inside .form in index.html). */
+  /* The original teal "Bulk Add" and "Quick Notes" buttons disappear on
+     phone widths - .add-entry-sheet-secondary-row further down this
+     block ("Bulk add" / "Quick note") is what takes over as the way
+     into both features there instead. Both buttons stay exactly as they
+     were on laptop/tablet. */
   #bulkAddButton,
   #quickNotesButton {
     display: none;
@@ -1848,10 +1869,10 @@ body.private-mode #manhwaList {
 
   /* Visual order of the stack, top to bottom: header, type pills,
      title, author+progress row, link, status, tag input, tag chips,
-     Add entry button. This uses the CSS "order" property instead of
-     moving elements around in index.html, so script.js never has to
-     care whether it's reading a field from the normal page layout or
-     from inside this popup sheet. */
+     Add entry button, Bulk add/Quick note links. This uses the CSS
+     "order" property instead of moving elements around in index.html,
+     so script.js never has to care whether it's reading a field from
+     the normal page layout or from inside this popup sheet. */
   .add-entry-sheet-header        { order: 1; }
   .type-pill-row                 { order: 2; }
   #titleInput                    { order: 3; }
@@ -1861,6 +1882,7 @@ body.private-mode #manhwaList {
   .add-entry-sheet-overlay .tag-input-row { order: 7; }
   #tagsPreview                   { order: 8; }
   #addButton                     { order: 9; }
+  .add-entry-sheet-secondary-row { order: 10; }
 
   .add-entry-sheet-header {
     display: flex;
@@ -1977,6 +1999,136 @@ body.private-mode #manhwaList {
 
   .add-entry-sheet-overlay #addButton:hover {
     background: #094f4f;
+  }
+
+  /* "Bulk add" / "Quick note" links: side by side, centered, and
+     styled as plain muted text - not another button - so "Add entry"
+     above is still clearly the main action on this screen. */
+  .add-entry-sheet-secondary-row {
+    display: flex;
+    justify-content: center;
+    gap: 24px;
+  }
+
+  .add-entry-sheet-secondary-link {
+    background: none;
+    border: none;
+    padding: 4px;
+    font-size: 14px;
+    color: #999;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  .add-entry-sheet-secondary-link:hover {
+    color: #ccc;
+  }
+
+  /* --- Bulk Add, reused inside the Add Entry sheet ---
+     Tapping "Bulk add" above adds the "showing-bulk-add" class onto
+     #addEntrySheetOverlay (see script.js) - the two rules below react
+     to that class, but each in its own way:
+
+       - ".form" is INSIDE #addEntrySheetOverlay in index.html, so a
+         plain descendant selector hides it - it's what makes the
+         sheet's content look "replaced" instead of having both sets
+         of fields visible at once.
+
+       - "#bulkAddPanel" is NOT inside #addEntrySheetOverlay (it's a
+         separate panel that sits further down index.html, reused as-
+         is from the standalone Bulk Add feature - see the big comment
+         above #bulkAddPanel there). The "~" below is CSS's "general
+         sibling" combinator: it matches #bulkAddPanel because it comes
+         AFTER #addEntrySheetOverlay in the page, under the same parent
+         - so this styling can target it without moving it in the DOM
+         or duplicating its fields. script.js still controls whether
+         #bulkAddPanel is showing at all (its own display: flex/none,
+         exactly as it always has on laptop/tablet) - this class only
+         adds the positioning/look that makes it read as "the sheet"
+         once it IS showing. */
+  .add-entry-sheet-overlay.showing-bulk-add .form {
+    display: none;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1001;
+    max-width: none;
+    max-height: 85vh;
+    overflow-y: auto;
+    margin: 0;
+    background: #262626;
+    border: 1px solid #444;
+    border-radius: 12px 12px 0 0;
+    padding: 16px;
+    box-sizing: border-box;
+    gap: 14px;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel .bulk-add-sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel .bulk-add-sheet-header h3 {
+    margin: 0;
+  }
+
+  /* Dark-theme fields matching the rest of the sheet. The textarea
+     keeps a generous min-height here (on top of its existing rows="8")
+     so pasting a big list still feels roomy, same as the standalone
+     Bulk Add panel does on laptop/tablet. */
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel .bulk-add-textarea,
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel #bulkAddStatusInput {
+    box-sizing: border-box;
+    border: none;
+    border-radius: 10px;
+    background: #333;
+    color: #fff;
+    padding: 14px 16px;
+    font-size: 16px;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel .bulk-add-textarea {
+    min-height: 220px;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel .bulk-add-controls {
+    flex-direction: column;
+  }
+
+  /* "Add all": same full-width teal treatment as "Add entry" above. */
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel #bulkAddSubmitButton {
+    padding: 14px 16px;
+    border: none;
+    border-radius: 10px;
+    background: #0d6e6e;
+    color: #1c1c1c;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel #bulkAddSubmitButton:hover {
+    background: #094f4f;
+  }
+
+  /* "Cancel": same plain muted-link look as the secondary links above,
+     since the header's "X" (see .bulk-add-sheet-header above) is
+     already the sheet's main close control - this is just a second,
+     familiar way back. */
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel #bulkAddCancelButton {
+    background: none;
+    border: none;
+    color: #999;
+    text-decoration: underline;
+    padding: 8px;
+    font-size: 14px;
+    cursor: pointer;
   }
 
   /* Floating "+" button: fixed positioning (not absolute) is what keeps

@@ -23,6 +23,9 @@ const typePillButtons = document.querySelectorAll('.type-pill');
 const addEntrySheetOverlay = document.getElementById('addEntrySheetOverlay');
 const openAddEntrySheetButton = document.getElementById('openAddEntrySheetButton');
 const addEntrySheetCloseButton = document.getElementById('addEntrySheetCloseButton');
+const sheetBulkAddLink = document.getElementById('sheetBulkAddLink');
+const sheetQuickNoteLink = document.getElementById('sheetQuickNoteLink');
+const bulkAddSheetCloseButton = document.getElementById('bulkAddSheetCloseButton');
 const quickNoteModalOverlay = document.getElementById('quickNoteModalOverlay');
 const quickNoteModalTitleInput = document.getElementById('quickNoteModalTitleInput');
 const quickNoteModalTextInput = document.getElementById('quickNoteModalTextInput');
@@ -3059,12 +3062,32 @@ bulkAddButton.addEventListener('click', function () {
   bulkAddTextarea.focus();
 });
 
-// "Cancel" hides the panel again and throws away whatever was pasted,
-// without adding anything.
-bulkAddCancelButton.addEventListener('click', function () {
+// Hides the panel and throws away whatever was pasted, without adding
+// anything. Shared by "Cancel", the sheet's own "X" (see
+// bulkAddSheetCloseButton below), and by closeAddEntrySheet() in the
+// "Add Entry sheet" section further down this file, so there's only
+// ONE place that resets this panel back to empty/hidden no matter how
+// you back out of it.
+//
+// Removing "showing-bulk-add" here is what switches the phone sheet
+// back to showing the normal Add Entry fields instead of this panel
+// (see .add-entry-sheet-overlay.showing-bulk-add in style.css) - it's
+// simply a no-op on laptop/tablet, where that class is never added in
+// the first place.
+function resetBulkAddPanel() {
   bulkAddTextarea.value = '';
   bulkAddPanel.style.display = 'none';
-});
+  addEntrySheetOverlay.classList.remove('showing-bulk-add');
+}
+
+bulkAddCancelButton.addEventListener('click', resetBulkAddPanel);
+
+// The sheet-mode "X" (only ever visible on phone widths, once "Bulk
+// add" has swapped this panel in as the sheet's content - see
+// .bulk-add-sheet-header in style.css) does the exact same thing as
+// "Cancel" above - it's just a second, familiar way back that matches
+// how every other popup in this app closes.
+bulkAddSheetCloseButton.addEventListener('click', resetBulkAddPanel);
 
 bulkAddSubmitButton.addEventListener('click', function () {
   const titles = parseBulkTitles(bulkAddTextarea.value);
@@ -3150,9 +3173,10 @@ bulkAddSubmitButton.addEventListener('click', function () {
 
   alert(summaryMessage);
 
-  // Reset the panel so it's empty and ready next time it's opened.
-  bulkAddTextarea.value = '';
-  bulkAddPanel.style.display = 'none';
+  // Reset the panel so it's empty and ready next time it's opened (and,
+  // on phone widths, switch the sheet back to the normal Add Entry
+  // fields - see resetBulkAddPanel() above).
+  resetBulkAddPanel();
 });
 
 // --- Quick Notes ---
@@ -3235,13 +3259,23 @@ openAddEntrySheetButton.addEventListener('click', function () {
   addEntrySheetOverlay.classList.add('sheet-open');
 });
 
+// Closes the sheet completely and, via resetBulkAddPanel() (see the
+// "Bulk Add" section above), makes sure it's showing the normal Add
+// Entry fields again next time it's opened - rather than the Bulk Add
+// view someone may have swapped to. Without that reset, #bulkAddPanel
+// would also be left sitting there fixed on screen (it has its own,
+// separate display: flex/none - see resetBulkAddPanel()) even after
+// the dimmed backdrop behind it was gone.
+function closeAddEntrySheet() {
+  addEntrySheetOverlay.classList.remove('sheet-open');
+  resetBulkAddPanel();
+}
+
 // "X" button inside the sheet: closes it again. Doesn't touch any of
 // the typed-in field values - closing the sheet this way is exactly
 // like collapsing the always-visible form back down would be, nothing
 // gets cleared or saved.
-addEntrySheetCloseButton.addEventListener('click', function () {
-  addEntrySheetOverlay.classList.remove('sheet-open');
-});
+addEntrySheetCloseButton.addEventListener('click', closeAddEntrySheet);
 
 // Clicking the dimmed backdrop itself (anywhere OUTSIDE .form) also
 // closes the sheet - same "event.target === the overlay itself" check
@@ -3249,7 +3283,7 @@ addEntrySheetCloseButton.addEventListener('click', function () {
 // don't accidentally close it.
 addEntrySheetOverlay.addEventListener('click', function (event) {
   if (event.target === addEntrySheetOverlay) {
-    addEntrySheetOverlay.classList.remove('sheet-open');
+    closeAddEntrySheet();
   }
 });
 
@@ -3257,8 +3291,33 @@ addEntrySheetOverlay.addEventListener('click', function (event) {
 // open.
 document.addEventListener('keydown', function (event) {
   if (event.key === 'Escape' && addEntrySheetOverlay.classList.contains('sheet-open')) {
-    addEntrySheetOverlay.classList.remove('sheet-open');
+    closeAddEntrySheet();
   }
+});
+
+// "Bulk add" link: instead of opening a whole new screen, this swaps
+// the sheet's CONTENT over to the existing #bulkAddPanel (the exact
+// same fields/logic the standalone "Bulk Add" button already uses on
+// laptop/tablet - see the "Bulk Add" section above) by adding the
+// "showing-bulk-add" class, which style.css uses to hide .form and
+// style #bulkAddPanel to look like the sheet in its place (see
+// .add-entry-sheet-overlay.showing-bulk-add in style.css). The sheet
+// itself stays open ("sheet-open" is untouched) - only what's showing
+// INSIDE it changes.
+sheetBulkAddLink.addEventListener('click', function () {
+  addEntrySheetOverlay.classList.add('showing-bulk-add');
+  bulkAddPanel.style.display = 'flex';
+  bulkAddTextarea.focus();
+});
+
+// "Quick note" link: closes the Add Entry sheet first, then opens the
+// existing Quick Note popup exactly the way #quickNotesButton already
+// does (see openQuickNoteModal() in the "Quick Note popup/modal"
+// section below) - reused completely as-is, nothing about it changes
+// here.
+sheetQuickNoteLink.addEventListener('click', function () {
+  closeAddEntrySheet();
+  openQuickNoteModal(null);
 });
 
 // --- Quick Note popup/modal ---
