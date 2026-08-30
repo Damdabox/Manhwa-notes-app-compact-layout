@@ -53,7 +53,10 @@ h1 {
    #volumeInput, #pageInput, and #episodeInput are the "Type" dropdown
    and the extra progress fields it can reveal (see the Type section in
    script.js) - grouped into this same rule so every field in the form
-   matches, whether it's visible right now or not. */
+   matches, whether it's visible right now or not. #quickNoteModalTitleInput
+   used to be part of this group too, but now has its own dark-themed
+   rule further down (see "Quick Note modal" below) to match the rest
+   of today's redesign. */
 #titleInput,
 #typeInput,
 #chapterInput,
@@ -61,8 +64,7 @@ h1 {
 #pageInput,
 #episodeInput,
 #linkInput,
-#statusInput,
-#quickNoteModalTitleInput {
+#statusInput {
   flex: 1;
   padding: 8px;
   font-size: 16px;
@@ -126,7 +128,6 @@ h1 {
 
 #bulkAddSubmitButton,
 #bulkAddCancelButton,
-#quickNoteModalSaveButton,
 #quickNoteModalDeleteButton {
   padding: 8px 16px;
   font-size: 15px;
@@ -198,6 +199,46 @@ h1 {
 
 .modal-close-button:hover {
   color: #aaa;
+}
+
+/* Quick Note modal fields: dark gray, rounded, matching the fields on
+   the Add Entry / Bulk Add sheets (same background/padding/rounding as
+   ".add-entry-sheet-overlay #titleInput" etc. further down this file),
+   instead of the white/navy look #quickNoteModalTitleInput used to
+   share with the rest of the add-comic form. ::placeholder is set
+   separately below since it needs light gray text of its own to stay
+   readable on this dark background. */
+#quickNoteModalTitleInput,
+#quickNoteModalTextInput {
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 10px;
+  background: #333;
+  color: #fff;
+  font-size: 16px;
+}
+
+#quickNoteModalTitleInput::placeholder,
+#quickNoteModalTextInput::placeholder {
+  color: #999;
+}
+
+/* "Save Note": same full-width teal look as "Add entry" on the Add
+   Entry sheet (#0d6e6e background, dark text, 10px rounding). */
+#quickNoteModalSaveButton {
+  padding: 14px 16px;
+  border: none;
+  border-radius: 10px;
+  background: #0d6e6e;
+  color: #1c1c1c;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+#quickNoteModalSaveButton:hover {
+  background: #094f4f;
 }
 
 /* Tag input row (text box + "Add Tag" button) for the Add-comic form.
@@ -2002,8 +2043,10 @@ body.private-mode #manhwaList {
   }
 
   /* "Bulk add" / "Quick note" links: side by side, centered, and
-     styled as plain muted text - not another button - so "Add entry"
-     above is still clearly the main action on this screen. */
+     styled as plain underlined links - not another button - so "Add
+     entry" above is still clearly the main action on this screen.
+     Same blue as ".entry-link" (the "Link" text on comic cards), so
+     they read as links rather than muted secondary text. */
   .add-entry-sheet-secondary-row {
     display: flex;
     justify-content: center;
@@ -2015,13 +2058,13 @@ body.private-mode #manhwaList {
     border: none;
     padding: 4px;
     font-size: 14px;
-    color: #999;
+    color: #06c;
     text-decoration: underline;
     cursor: pointer;
   }
 
   .add-entry-sheet-secondary-link:hover {
-    color: #ccc;
+    color: #3a8fd9;
   }
 
   /* --- Bulk Add, reused inside the Add Entry sheet ---
