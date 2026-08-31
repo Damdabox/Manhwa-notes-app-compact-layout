@@ -759,6 +759,16 @@ function closePhoneStatusDropdown() {
 // can share this one copy of the logic instead of repeating it.
 function selectStatusAll() {
   const filterState = typeStatusFilters[currentFilter];
+
+  // No per-type filter state exists for "All"/"Characters" (see the big
+  // comment above typeStatusFilters) - the phone Status pill is always
+  // visible now, so it's reachable from those tabs too. There's simply
+  // nothing to switch to "All" in that case, so do nothing instead of
+  // crashing on filterState being undefined.
+  if (!filterState) {
+    return;
+  }
+
   filterState.mode = 'All';
 
   updateStatusFilterRowUI();
@@ -777,6 +787,14 @@ function selectStatus(status) {
   // typeStatusFilters['Videos'], never Manhwa's or Other Comics' own
   // filter.
   const filterState = typeStatusFilters[currentFilter];
+
+  // Same reasoning as the guard in selectStatusAll() just above: the
+  // phone Status pill is reachable from "All"/"Characters" now, and
+  // neither one has a filterState to update.
+  if (!filterState) {
+    return;
+  }
+
   filterState.status = status;
   filterState.mode = 'Status';
 
@@ -832,24 +850,37 @@ function buildPhoneStatusDropdownMenu() {
 }
 
 // Redraws #statusFilterRow (and its phone-pill equivalent,
-// #phoneStatusDropdown) so both match whichever type tab is active
-// right now: shows/hides them, and (when shown) updates their
-// label(s)/highlight to reflect THAT type's own remembered filter state
-// from typeStatusFilters above. Called every time the active tab
-// changes, and right after the status filter itself changes (picking a
-// status, or clicking "All").
+// #phoneStatusDropdown) so both reflect whichever type tab is active
+// right now: shows/hides the desktop row, and (when there's a real
+// per-type filter to show) updates both pills' label(s)/highlight to
+// match. Called every time the active tab changes, and right after the
+// status filter itself changes (picking a status, or clicking "All").
 function updateStatusFilterRowUI() {
   const isTypeTab = ENTRY_TYPES.includes(currentFilter);
 
   // The "All" top-level tab and the "Characters" tab don't get a
-  // status dropdown at all - see the big comment above the tabs-row
-  // div in index.html for why. Hiding the whole row (and the phone
-  // pill standing in for it) for both of those is simplest: there's
-  // nothing useful for either to show either way.
+  // status dropdown on desktop - see the big comment above the
+  // tabs-row div in index.html for why. Hiding the full-width row for
+  // both of those is still correct.
+  //
+  // #phoneStatusDropdown is NOT hidden here anymore. It used to get
+  // this exact same "isTypeTab ? '' : 'none'" treatment, which meant
+  // the phone Status pill stayed invisible until you picked a Manhwa
+  // /Other Comics/Videos tab - i.e. until you'd already interacted
+  // with the Type pill. On phone, Status and Type are two independent
+  // pills sitting side by side, so Status needs to be visible from the
+  // very first page load, not just after Type is touched. Its
+  // visibility is now controlled the exact same way the Type pill's
+  // already was: purely by the ".phone-filter-pill" CSS rule in
+  // style.css, which shows both pills unconditionally on phone widths.
   statusFilterRow.style.display = isTypeTab ? '' : 'none';
-  phoneStatusDropdown.style.display = isTypeTab ? '' : 'none';
 
   if (!isTypeTab) {
+    // There's no per-type filter state to read here (typeStatusFilters
+    // only knows about Manhwa/Other Comics/Videos - see the big
+    // comment above it), so just show the phone pill's default "All"
+    // label and stop, same as it shows on page load.
+    phoneStatusDropdownLabel.textContent = 'All';
     return;
   }
 

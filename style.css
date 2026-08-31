@@ -2484,14 +2484,14 @@ body.private-mode #manhwaList {
     justify-content: flex-start;
   }
 
-  /* Visual order in .tabs-row on phone: Status pill, Type pill,
+  /* Visual order in .tabs-row on phone: Type pill, Status pill,
      Characters star, then the Cover/Private toggle - kept last with an
      explicit order here so it stays exactly where it already was (the
      right-hand end of the row), rather than jumping in front of the
      newly-flattened .filter-tabs children, which would otherwise happen
      since un-ordered flex items default to "order: 0". */
-  #phoneStatusDropdown { order: 1; }
-  #typeFilterDropdown  { order: 2; }
+  #typeFilterDropdown  { order: 1; }
+  #phoneStatusDropdown { order: 2; }
   .filter-tab[data-filter="Characters"] { order: 3; }
 
   .privacy-toggle {
