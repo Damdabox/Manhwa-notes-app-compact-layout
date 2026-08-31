@@ -362,8 +362,57 @@ The End"></textarea>
            switch between full/half/empty. -->
       <button class="filter-tab" data-filter="Characters">
         <svg viewBox="0 0 24 24" width="14" height="14" class="star-svg tab-star-icon"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="#ffd700" stroke="#c9a400" stroke-width="1"></path></svg>
-        Characters
+        <!-- Wrapped in its own span (instead of being bare text like the
+             other tabs) purely so the phone media query below can hide
+             just this word and leave the star icon above showing on its
+             own - see ".filter-tab-label" in style.css. Laptop/tablet
+             never hides it, so this looks identical to before there. -->
+        <span class="filter-tab-label">Characters</span>
       </button>
+    </div>
+
+    <!-- Phone-only compact filter pills: on phone widths, these two
+         dropdown buttons REPLACE the full-width Status/Type tabs above
+         as the visible way to change those filters (see style.css's
+         phone media query, which hides the originals and shows these
+         instead). Both reuse the exact same ".status-dropdown" /
+         ".status-dropdown-button" / ".status-dropdown-menu" look already
+         built for the status dropdown just below in #statusFilterRow -
+         same dark pill, same chevron, same menu styling, just applied to
+         two new elements - so no new CSS "look" had to be invented here.
+
+         They don't hold any filtering logic themselves: clicking either
+         one just calls the exact same selectTypeFilter()/selectStatus()/
+         selectStatusAll() functions in script.js that the original
+         controls already use, so the shelf filters exactly like it
+         always did - see the "Phone filter pills" section in script.js.
+
+         Hidden by default (like .type-pill-row above) so laptop/tablet
+         never renders them at all. -->
+    <div id="phoneStatusDropdown" class="status-dropdown phone-filter-pill">
+      <button id="phoneStatusDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false">
+        <span id="phoneStatusDropdownLabel">All</span>
+        <span class="status-dropdown-arrow">&#9662;</span>
+      </button>
+
+      <!-- Filled in by buildPhoneStatusDropdownMenu() in script.js: one
+           "All" button plus one button per STATUS_OPTIONS entry, so
+           this never drifts out of sync with the desktop status
+           dropdown's own list. Starts hidden; script.js toggles it. -->
+      <div id="phoneStatusDropdownMenu" class="status-dropdown-menu" style="display: none;"></div>
+    </div>
+
+    <div id="typeFilterDropdown" class="status-dropdown phone-filter-pill">
+      <button id="typeFilterDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false">
+        <span id="typeFilterDropdownLabel">All</span>
+        <span class="status-dropdown-arrow">&#9662;</span>
+      </button>
+
+      <!-- Filled in by buildTypeFilterDropdownMenu() in script.js: one
+           button per TYPE_FILTER_OPTIONS entry (All/Manhwa/Other
+           Comics/Videos) - the same choices as the full-width tabs
+           above. Starts hidden; script.js toggles it. -->
+      <div id="typeFilterDropdownMenu" class="status-dropdown-menu" style="display: none;"></div>
     </div>
 
     <!-- Privacy toggle: a checkbox styled to look like a slider switch

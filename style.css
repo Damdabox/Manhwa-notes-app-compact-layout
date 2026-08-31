@@ -1835,6 +1835,16 @@ body.private-mode #manhwaList {
   display: none;
 }
 
+/* .phone-filter-pill marks the two compact Status/Type dropdown pills
+   (see #phoneStatusDropdown/#typeFilterDropdown in index.html) that
+   replace the full-width Status/Type tabs on phone widths. Same
+   reasoning as every other rule in this block: hidden unconditionally
+   here so laptop/tablet never renders them, no matter what script.js
+   does - only the phone media query below ever turns them on. */
+.phone-filter-pill {
+  display: none;
+}
+
 /* max-width: 600px is our "phone width" cutoff - narrow enough to catch
    phones in both portrait and landscape without also catching tablets,
    which is what "laptop/tablet completely unaffected" above depends on. */
@@ -2419,6 +2429,94 @@ body.private-mode #manhwaList {
     padding-top: calc(6px * var(--card-scale));
     margin-top: calc(2px * var(--card-scale));
     box-sizing: border-box;
+  }
+
+  /* ===========================================================================
+     Phone-width layout: Filter row
+     ===========================================================================
+     Replaces the full-width Status/Type tabs with two compact dropdown
+     pills, and shrinks the Characters tab down to just its star icon.
+     Nothing about HOW filtering works changes here - #statusFilterRow
+     and .filter-tabs still hold the real, only copy of that logic (see
+     script.js); this section only changes which elements are visible
+     and where they sit.
+
+     "display: contents" on .filter-tabs makes its five buttons (All /
+     Manhwa / Other Comics / Videos / Characters) act as if they were
+     direct children of .tabs-row instead of nested inside .filter-tabs -
+     the same trick .author-progress-row uses further up this file. That
+     lets the "order" values below freely interleave the Characters
+     button with the two new pills, which are ALSO direct children of
+     .tabs-row (see index.html). */
+  .filter-tabs {
+    display: contents;
+  }
+
+  /* The four Type tabs are fully replaced by #typeFilterDropdown below -
+     hide them on phone. The Characters tab is handled separately below
+     instead, since it stays visible (just shrunk to an icon). */
+  .filter-tab:not([data-filter="Characters"]) {
+    display: none;
+  }
+
+  /* The full Status row (the "All" button + its own dropdown) is
+     replaced by #phoneStatusDropdown below - hide it on phone. Note
+     this only overrides the CSS default: updateStatusFilterRowUI() in
+     script.js still sets this same element's inline display to "none"
+     whenever no type tab is active, which continues to work exactly as
+     before either way. */
+  .status-filter-row {
+    display: none;
+  }
+
+  /* .tabs-row normally uses "space-between" to push .filter-tabs (one
+     single flex item) over to the left edge and .privacy-toggle over to
+     the right edge, with empty space in between. Now that .filter-tabs
+     is "display: contents" above, its buttons count as SEPARATE flex
+     items in .tabs-row - "space-between" would spread all of them out
+     evenly across the row instead of keeping them grouped together on
+     the left. Switching to "flex-start" packs everything tightly
+     together from the left instead; .privacy-toggle's own
+     "margin-left: auto" below is what pushes IT specifically back over
+     to the right edge, recreating the same left-group/right-toggle look
+     as before. */
+  .tabs-row {
+    justify-content: flex-start;
+  }
+
+  /* Visual order in .tabs-row on phone: Status pill, Type pill,
+     Characters star, then the Cover/Private toggle - kept last with an
+     explicit order here so it stays exactly where it already was (the
+     right-hand end of the row), rather than jumping in front of the
+     newly-flattened .filter-tabs children, which would otherwise happen
+     since un-ordered flex items default to "order: 0". */
+  #phoneStatusDropdown { order: 1; }
+  #typeFilterDropdown  { order: 2; }
+  .filter-tab[data-filter="Characters"] { order: 3; }
+
+  .privacy-toggle {
+    order: 4;
+    margin-left: auto;
+  }
+
+  /* Both pills reuse .status-dropdown-button's look as-is (dark pill,
+     rounded, white text, small chevron) - no size/color overrides
+     needed here, just turning them on. */
+  .phone-filter-pill {
+    display: flex;
+  }
+
+  /* Shrink the Characters tab down to just its gold star: hide the
+     text label (see .filter-tab-label in index.html) and trim the
+     padding that used to make room for that text. The star icon itself
+     (.tab-star-icon) is untouched, so it still looks exactly the same,
+     just on its own now. */
+  .filter-tab[data-filter="Characters"] .filter-tab-label {
+    display: none;
+  }
+
+  .filter-tab[data-filter="Characters"] {
+    padding: 8px 10px;
   }
 
 }

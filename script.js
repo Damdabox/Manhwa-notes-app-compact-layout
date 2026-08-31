@@ -41,6 +41,18 @@ const statusDropdown = document.getElementById('statusDropdown');
 const statusDropdownButton = document.getElementById('statusDropdownButton');
 const statusDropdownLabel = document.getElementById('statusDropdownLabel');
 const statusDropdownMenu = document.getElementById('statusDropdownMenu');
+// Phone-only compact filter pills (see index.html and the "Phone filter
+// pills" section below) - the Status pill mirrors #statusFilterRow's
+// "All" button + dropdown combined into one dropdown, and the Type pill
+// mirrors the four Type tabs (All/Manhwa/Other Comics/Videos).
+const phoneStatusDropdown = document.getElementById('phoneStatusDropdown');
+const phoneStatusDropdownButton = document.getElementById('phoneStatusDropdownButton');
+const phoneStatusDropdownLabel = document.getElementById('phoneStatusDropdownLabel');
+const phoneStatusDropdownMenu = document.getElementById('phoneStatusDropdownMenu');
+const typeFilterDropdown = document.getElementById('typeFilterDropdown');
+const typeFilterDropdownButton = document.getElementById('typeFilterDropdownButton');
+const typeFilterDropdownLabel = document.getElementById('typeFilterDropdownLabel');
+const typeFilterDropdownMenu = document.getElementById('typeFilterDropdownMenu');
 const searchInput = document.getElementById('searchInput');
 const clearSearchButton = document.getElementById('clearSearchButton');
 const zoomSlider = document.getElementById('zoomSlider');
@@ -674,6 +686,13 @@ const STATUS_OPTIONS = ['Reading', 'Ongoing', 'Completed', 'Recommended'];
 // before "type" existed at all) get backfilled to match this shape.
 const ENTRY_TYPES = ['Manhwa', 'Other Comics', 'Videos'];
 
+// Same three types, plus "All" in front - this is the full list of
+// choices the Type tabs offer (see .filter-tab in index.html). Built
+// from ENTRY_TYPES instead of typed out separately so the phone Type
+// pill's menu (see buildTypeFilterDropdownMenu() below) can never drift
+// out of sync with the real tabs.
+const TYPE_FILTER_OPTIONS = ['All'].concat(ENTRY_TYPES);
+
 // --- Status filter (nested inside each type tab) ---
 // Each type tab (Manhwa / Other Comics / Videos) gets its OWN status
 // filter - the "All" toggle and status dropdown described in
@@ -724,6 +743,47 @@ function closeStatusDropdown() {
   statusDropdownButton.setAttribute('aria-expanded', 'false');
 }
 
+// Same idea as closeStatusDropdown() above, just for the phone-only
+// status pill's own menu (see #phoneStatusDropdownMenu in index.html) -
+// kept as a separate function since it's a separate element, but it
+// does the exact same job.
+function closePhoneStatusDropdown() {
+  phoneStatusDropdownMenu.style.display = 'none';
+  phoneStatusDropdownButton.setAttribute('aria-expanded', 'false');
+}
+
+// Switches the CURRENT type tab's own filter state (see
+// typeStatusFilters above) to "show every status". Pulled out into its
+// own function so both the desktop #statusAllButton AND the phone
+// status pill's "All" option (see buildPhoneStatusDropdownMenu() below)
+// can share this one copy of the logic instead of repeating it.
+function selectStatusAll() {
+  const filterState = typeStatusFilters[currentFilter];
+  filterState.mode = 'All';
+
+  updateStatusFilterRowUI();
+  renderList();
+}
+
+// Switches the CURRENT type tab's own filter state to "only show this
+// status". Same sharing reasoning as selectStatusAll() above - both the
+// desktop status-dropdown options (built below) and the phone status
+// pill's options (see buildPhoneStatusDropdownMenu() below) call this
+// same function.
+function selectStatus(status) {
+  // currentFilter (set by selectTypeFilter() further down this file)
+  // tells us which type's filter state to update - so picking
+  // "Completed" while the Videos tab is active only ever touches
+  // typeStatusFilters['Videos'], never Manhwa's or Other Comics' own
+  // filter.
+  const filterState = typeStatusFilters[currentFilter];
+  filterState.status = status;
+  filterState.mode = 'Status';
+
+  updateStatusFilterRowUI();
+  renderList();
+}
+
 // Builds the list of status choices inside #statusDropdownMenu, one
 // button per entry in STATUS_OPTIONS. Only ever needs to run once (the
 // list of possible statuses never changes while the app is running),
@@ -735,37 +795,59 @@ function buildStatusDropdownMenu() {
     optionButton.className = 'status-dropdown-option';
     optionButton.textContent = status;
     optionButton.addEventListener('click', function () {
-      // currentFilter (set by the type-tab click handler further down
-      // this file) tells us which type's filter state to update - so
-      // picking "Completed" while the Videos tab is active only ever
-      // touches typeStatusFilters['Videos'], never Manhwa's or Other
-      // Comics' own filter.
-      const filterState = typeStatusFilters[currentFilter];
-      filterState.status = status;
-      filterState.mode = 'Status';
-
+      selectStatus(status);
       closeStatusDropdown();
-      updateStatusFilterRowUI();
-      renderList();
     });
     statusDropdownMenu.appendChild(optionButton);
   });
 }
 
-// Redraws #statusFilterRow so it matches whichever type tab is active
-// right now: shows/hides the whole row, and (when shown) updates the
-// "All" button + dropdown label/highlight to reflect THAT type's own
-// remembered filter state from typeStatusFilters above. Called every
-// time the active tab changes, and right after the status filter
-// itself changes (picking a status, or clicking "All").
+// Builds the list of choices inside the phone status pill's menu - the
+// same STATUS_OPTIONS as buildStatusDropdownMenu() above, but with an
+// "All" choice added in front (since the phone pill replaces BOTH
+// #statusAllButton and the desktop status dropdown with this one
+// dropdown, it needs to offer everything both of those did combined).
+function buildPhoneStatusDropdownMenu() {
+  const allOptionButton = document.createElement('button');
+  allOptionButton.type = 'button';
+  allOptionButton.className = 'status-dropdown-option';
+  allOptionButton.textContent = 'All';
+  allOptionButton.addEventListener('click', function () {
+    selectStatusAll();
+    closePhoneStatusDropdown();
+  });
+  phoneStatusDropdownMenu.appendChild(allOptionButton);
+
+  STATUS_OPTIONS.forEach(function (status) {
+    const optionButton = document.createElement('button');
+    optionButton.type = 'button';
+    optionButton.className = 'status-dropdown-option';
+    optionButton.textContent = status;
+    optionButton.addEventListener('click', function () {
+      selectStatus(status);
+      closePhoneStatusDropdown();
+    });
+    phoneStatusDropdownMenu.appendChild(optionButton);
+  });
+}
+
+// Redraws #statusFilterRow (and its phone-pill equivalent,
+// #phoneStatusDropdown) so both match whichever type tab is active
+// right now: shows/hides them, and (when shown) updates their
+// label(s)/highlight to reflect THAT type's own remembered filter state
+// from typeStatusFilters above. Called every time the active tab
+// changes, and right after the status filter itself changes (picking a
+// status, or clicking "All").
 function updateStatusFilterRowUI() {
   const isTypeTab = ENTRY_TYPES.includes(currentFilter);
 
   // The "All" top-level tab and the "Characters" tab don't get a
   // status dropdown at all - see the big comment above the tabs-row
-  // div in index.html for why. Hiding the whole row for both of those
-  // is simplest: there's nothing useful for it to show either way.
+  // div in index.html for why. Hiding the whole row (and the phone
+  // pill standing in for it) for both of those is simplest: there's
+  // nothing useful for either to show either way.
   statusFilterRow.style.display = isTypeTab ? '' : 'none';
+  phoneStatusDropdown.style.display = isTypeTab ? '' : 'none';
 
   if (!isTypeTab) {
     return;
@@ -776,6 +858,11 @@ function updateStatusFilterRowUI() {
   statusAllButton.classList.toggle('active', filterState.mode === 'All');
   statusDropdownButton.classList.toggle('active', filterState.mode === 'Status');
   statusDropdownLabel.textContent = filterState.status;
+
+  // The phone pill only has room for ONE label, standing in for both
+  // #statusAllButton and #statusDropdownButton at once - so it shows
+  // "All" while mode is 'All', and the specific status otherwise.
+  phoneStatusDropdownLabel.textContent = filterState.mode === 'All' ? 'All' : filterState.status;
 }
 
 // Figures out which progress field(s) should be visible for a given
@@ -3473,54 +3560,102 @@ quickNoteModalDeleteButton.addEventListener('click', function () {
   closeQuickNoteModal();
 });
 
+// Switches the active Type tab to filterValue (e.g. "Videos" or
+// "Characters"), updates every bit of UI that depends on it, and
+// re-renders the shelf. Pulled out into its own function so both the
+// real filter tabs AND the phone Type pill's menu options (see
+// buildTypeFilterDropdownMenu() below) can share this one copy of the
+// logic instead of repeating it.
+function selectTypeFilter(filterValue) {
+  currentFilter = filterValue;
+
+  // Move the "active" highlight: strip it from every tab, then add it
+  // back only to whichever one matches filterValue. This still works
+  // correctly even when filterValue came from a phone pill option
+  // instead of a real tab click, since it just compares data-filter
+  // values - it doesn't care who triggered the change.
+  filterTabs.forEach(function (t) {
+    t.classList.toggle('active', t.dataset.filter === filterValue);
+  });
+
+  // "characters-tab-active" on <body> is what style.css's
+  // "body.characters-tab-active .zoom-controls, .search-bar" rule
+  // keys off of, to hide the Card Size slider AND the search bar
+  // whenever this tab is the one selected (neither one applies to a
+  // combined list of characters) - same idea as "private-mode"
+  // further down this file hiding the zoom slider for Private mode.
+  document.body.classList.toggle('characters-tab-active', currentFilter === 'Characters');
+
+  // Close both status dropdowns (if either happened to be open) and
+  // redraw #statusFilterRow/#phoneStatusDropdown so they show/hide
+  // themselves correctly and reflect THIS newly-active tab's own
+  // remembered status filter, not whichever tab was active a moment
+  // ago - see the big comment above typeStatusFilters for why every
+  // type tab keeps its own separate filter instead of sharing one.
+  closeStatusDropdown();
+  closePhoneStatusDropdown();
+  updateStatusFilterRowUI();
+
+  // Keep the phone Type pill's own label in sync too.
+  updateTypeFilterDropdownUI();
+
+  // Redraw the shelf using the new filter
+  renderList();
+}
+
 // Wire up each filter tab. forEach loops over the NodeList of
 // buttons and gives each one its own click listener.
 filterTabs.forEach(function (tab) {
   tab.addEventListener('click', function () {
     // The button's data-filter attribute (e.g. data-filter="Videos")
     // tells us which type to filter by. tab.dataset.filter reads it.
-    currentFilter = tab.dataset.filter;
-
-    // Move the "active" highlight: strip it from every tab, then add
-    // it back only to the one that was just clicked.
-    filterTabs.forEach(function (t) {
-      t.classList.remove('active');
-    });
-    tab.classList.add('active');
-
-    // "characters-tab-active" on <body> is what style.css's
-    // "body.characters-tab-active .zoom-controls, .search-bar" rule
-    // keys off of, to hide the Card Size slider AND the search bar
-    // whenever this tab is the one selected (neither one applies to a
-    // combined list of characters) - same idea as "private-mode"
-    // further down this file hiding the zoom slider for Private mode.
-    document.body.classList.toggle('characters-tab-active', currentFilter === 'Characters');
-
-    // Close the status dropdown (if it happened to be open) and redraw
-    // #statusFilterRow so it shows/hides itself correctly and reflects
-    // THIS newly-active tab's own remembered status filter, not
-    // whichever tab was active a moment ago - see the big comment
-    // above typeStatusFilters for why every type tab keeps its own
-    // separate filter instead of sharing one.
-    closeStatusDropdown();
-    updateStatusFilterRowUI();
-
-    // Redraw the shelf using the new filter
-    renderList();
+    selectTypeFilter(tab.dataset.filter);
   });
 });
+
+// Updates the phone Type pill's label to match currentFilter. Only
+// updates it for the four real TYPE_FILTER_OPTIONS values though -
+// while "Characters" is active (reached via the star button, not this
+// pill - see buildTypeFilterDropdownMenu() below), the pill just keeps
+// showing whichever real type was last selected, the same way the
+// phone status pill keeps remembering its last status while "All" is
+// active (see typeStatusFilters above for that same idea).
+function updateTypeFilterDropdownUI() {
+  if (TYPE_FILTER_OPTIONS.includes(currentFilter)) {
+    typeFilterDropdownLabel.textContent = currentFilter;
+  }
+}
+
+// Closes the phone Type pill's own menu (if it's open). Same idea as
+// closeStatusDropdown()/closePhoneStatusDropdown() above.
+function closeTypeFilterDropdown() {
+  typeFilterDropdownMenu.style.display = 'none';
+  typeFilterDropdownButton.setAttribute('aria-expanded', 'false');
+}
+
+// Builds the list of choices inside the phone Type pill's menu, one
+// button per entry in TYPE_FILTER_OPTIONS (All/Manhwa/Other Comics/
+// Videos) - the same choices the real tabs offer. Picking one just
+// calls selectTypeFilter(), exactly like clicking the real tab would.
+function buildTypeFilterDropdownMenu() {
+  TYPE_FILTER_OPTIONS.forEach(function (type) {
+    const optionButton = document.createElement('button');
+    optionButton.type = 'button';
+    optionButton.className = 'status-dropdown-option';
+    optionButton.textContent = type;
+    optionButton.addEventListener('click', function () {
+      selectTypeFilter(type);
+      closeTypeFilterDropdown();
+    });
+    typeFilterDropdownMenu.appendChild(optionButton);
+  });
+}
 
 // Clicking "All" switches the active type tab's own filter state to
 // 'All' (see typeStatusFilters above) - it only ever touches
 // typeStatusFilters[currentFilter], so it can never affect any other
 // type tab's own filter.
-statusAllButton.addEventListener('click', function () {
-  const filterState = typeStatusFilters[currentFilter];
-  filterState.mode = 'All';
-
-  updateStatusFilterRowUI();
-  renderList();
-});
+statusAllButton.addEventListener('click', selectStatusAll);
 
 // Clicking the dropdown button just toggles the menu open/closed - it
 // doesn't change the filter itself. Picking one of the options inside
@@ -3537,18 +3672,51 @@ statusDropdownButton.addEventListener('click', function () {
   }
 });
 
-// Clicking anywhere outside the dropdown (its button or its menu)
-// closes the menu if it's open - the standard "click elsewhere to
-// dismiss" behavior expected of any dropdown. statusDropdown.contains()
+// The phone status pill and phone Type pill work exactly the same way
+// as statusDropdownButton just above - toggle their own menu open/
+// closed, without changing any filter themselves.
+phoneStatusDropdownButton.addEventListener('click', function () {
+  const isCurrentlyOpen = phoneStatusDropdownMenu.style.display !== 'none';
+
+  if (isCurrentlyOpen) {
+    closePhoneStatusDropdown();
+  } else {
+    phoneStatusDropdownMenu.style.display = 'flex';
+    phoneStatusDropdownButton.setAttribute('aria-expanded', 'true');
+  }
+});
+
+typeFilterDropdownButton.addEventListener('click', function () {
+  const isCurrentlyOpen = typeFilterDropdownMenu.style.display !== 'none';
+
+  if (isCurrentlyOpen) {
+    closeTypeFilterDropdown();
+  } else {
+    typeFilterDropdownMenu.style.display = 'flex';
+    typeFilterDropdownButton.setAttribute('aria-expanded', 'true');
+  }
+});
+
+// Clicking anywhere outside a dropdown (its button or its menu) closes
+// that menu if it's open - the standard "click elsewhere to dismiss"
+// behavior expected of any dropdown. Each *Dropdown.contains() check
 // covers clicks on EITHER the button or the menu inside it, since both
 // live inside that one wrapping div (see index.html).
 document.addEventListener('click', function (event) {
   if (!statusDropdown.contains(event.target)) {
     closeStatusDropdown();
   }
+  if (!phoneStatusDropdown.contains(event.target)) {
+    closePhoneStatusDropdown();
+  }
+  if (!typeFilterDropdown.contains(event.target)) {
+    closeTypeFilterDropdown();
+  }
 });
 
 buildStatusDropdownMenu();
+buildPhoneStatusDropdownMenu();
+buildTypeFilterDropdownMenu();
 
 // --- Search bar ---
 // One text input filters the shelf live, combined with whichever
