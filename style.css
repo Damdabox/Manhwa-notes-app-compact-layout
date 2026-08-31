@@ -224,13 +224,14 @@ h1 {
   color: #999;
 }
 
-/* "Save Note": same full-width teal look as "Add entry" on the Add
-   Entry sheet (#0d6e6e background, dark text, 10px rounding). */
+/* "Save Note": same full-width button shape as "Add entry" on the Add
+   Entry sheet, but a lighter turquoise (#5eead4) so it reads as a
+   secondary action. Text stays dark (#1c1c1c) for readability. */
 #quickNoteModalSaveButton {
   padding: 14px 16px;
   border: none;
   border-radius: 10px;
-  background: #0d6e6e;
+  background: #5eead4;
   color: #1c1c1c;
   font-size: 16px;
   font-weight: bold;
@@ -238,7 +239,7 @@ h1 {
 }
 
 #quickNoteModalSaveButton:hover {
-  background: #094f4f;
+  background: #2dd4bf;
 }
 
 /* Tag input row (text box + "Add Tag" button) for the Add-comic form.
@@ -2042,29 +2043,30 @@ body.private-mode #manhwaList {
     background: #094f4f;
   }
 
-  /* "Bulk add" / "Quick note" links: side by side, centered, and
-     styled as plain underlined links - not another button - so "Add
-     entry" above is still clearly the main action on this screen.
-     Same blue as ".entry-link" (the "Link" text on comic cards), so
-     they read as links rather than muted secondary text. */
+  /* "Bulk add" / "Quick note" buttons: same full-width teal button
+     look as "Add entry" above (#0d6e6e background, dark text, 10px
+     rounding, same padding) instead of the old underlined-link look.
+     "flex: 1" on each button splits the row evenly so together they
+     still read as one full-width bar, matching "Add entry" above them. */
   .add-entry-sheet-secondary-row {
     display: flex;
-    justify-content: center;
-    gap: 24px;
+    gap: 10px;
   }
 
   .add-entry-sheet-secondary-link {
-    background: none;
+    flex: 1;
+    padding: 14px 16px;
     border: none;
-    padding: 4px;
-    font-size: 14px;
-    color: #06c;
-    text-decoration: underline;
+    border-radius: 10px;
+    background: #0d6e6e;
+    color: #1c1c1c;
+    font-size: 16px;
+    font-weight: bold;
     cursor: pointer;
   }
 
   .add-entry-sheet-secondary-link:hover {
-    color: #3a8fd9;
+    background: #094f4f;
   }
 
   /* --- Bulk Add, reused inside the Add Entry sheet ---
@@ -2144,12 +2146,15 @@ body.private-mode #manhwaList {
     flex-direction: column;
   }
 
-  /* "Add all": same full-width teal treatment as "Add entry" above. */
+  /* "Add all": same full-width button shape as "Add entry" above, but
+     a lighter turquoise (#5eead4) so it reads as a secondary action
+     rather than the sheet's main button. Text stays dark (#1c1c1c) for
+     readability, same as the darker-teal buttons elsewhere. */
   .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel #bulkAddSubmitButton {
     padding: 14px 16px;
     border: none;
     border-radius: 10px;
-    background: #0d6e6e;
+    background: #5eead4;
     color: #1c1c1c;
     font-size: 16px;
     font-weight: bold;
@@ -2157,7 +2162,7 @@ body.private-mode #manhwaList {
   }
 
   .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel #bulkAddSubmitButton:hover {
-    background: #094f4f;
+    background: #2dd4bf;
   }
 
   /* "Cancel": same plain muted-link look as the secondary links above,
