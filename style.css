@@ -2364,4 +2364,61 @@ body.private-mode #manhwaList {
     padding-bottom: 0;
   }
 
+  /* Phone-only card reorder. Every comic card (#manhwaList li) is
+     already a column flexbox (see "#manhwaList li" near the top of this
+     file), so its direct children can be put in any visual order with
+     the same "order" trick used above for the Add Entry sheet - no
+     script.js changes needed, laptop/tablet never sees this media
+     query, and no colors/icons/fonts change at all, just position.
+
+     ":not(.private-row)" on every selector here keeps all of this
+     scoped to normal Cover-mode cards only - the Private list view
+     (#manhwaList li.private-row, styled way above) reuses the
+     ".entry-link"/".entry-actions" classes too, and must stay exactly
+     as it already looks, untouched.
+
+     Cover-mode card children, in DOM order, are: .cover-placeholder,
+     .entry-title, .entry-rating (only for rated/Completed comics),
+     .entry-info-row (a row holding .entry-chapter + .entry-link
+     together), then .entry-actions. .cover-placeholder is left with no
+     "order" below, so it keeps its default order (0) and stays first,
+     same as always - "below the cover" is exactly what everything else
+     here is reordering. */
+
+  /* .entry-chapter and .entry-link normally live inside .entry-info-row,
+     one row together. "display: contents" makes that wrapper row
+     invisible to layout - its two children act as if they were direct
+     children of the card itself, which is what lets them each get
+     their own "order" below and end up on their own separate line,
+     instead of being stuck side by side. (Same "display: contents"
+     trick as .author-progress-row further up this file.) */
+  #manhwaList li:not(.private-row) .entry-info-row {
+    display: contents;
+  }
+
+  /* New order, top to bottom: Title, then (if present) the star
+     rating, then the Link, then the Chapter/Volume+Page/Episode
+     progress text, then the Edit/Delete icons. Every reordered piece
+     needs an explicit number here - if even one were left out it would
+     default to "order: 0" and jump back in front of .cover-placeholder,
+     which also sits at the default 0. */
+  #manhwaList li:not(.private-row) .entry-title { order: 1; }
+  #manhwaList li:not(.private-row) .entry-rating { order: 2; }
+  #manhwaList li:not(.private-row) .entry-link { order: 3; }
+  #manhwaList li:not(.private-row) .entry-chapter { order: 4; }
+
+  /* The thin divider line the icons now sit below. Just a top border
+     plus a little breathing room above it, added only here on phone -
+     laptop/tablet's .entry-actions (styled further up this file) is
+     completely untouched. */
+  #manhwaList li:not(.private-row) .entry-actions {
+    order: 5;
+    width: 100%;
+    justify-content: center;
+    border-top: 1px solid #444;
+    padding-top: calc(6px * var(--card-scale));
+    margin-top: calc(2px * var(--card-scale));
+    box-sizing: border-box;
+  }
+
 }
