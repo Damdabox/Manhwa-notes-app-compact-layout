@@ -224,14 +224,14 @@ h1 {
   color: #999;
 }
 
-/* "Save Note": same full-width button shape as "Add entry" on the Add
-   Entry sheet, but a lighter turquoise (#5eead4) so it reads as a
-   secondary action. Text stays dark (#1c1c1c) for readability. */
+/* "Save Note": same full-width button shape and turquoise (#40e0d0)
+   as the other add-entry buttons, so they all read as one consistent
+   set of actions. Text stays dark (#1c1c1c) for readability. */
 #quickNoteModalSaveButton {
   padding: 14px 16px;
   border: none;
   border-radius: 10px;
-  background: #5eead4;
+  background: #40e0d0;
   color: #1c1c1c;
   font-size: 16px;
   font-weight: bold;
@@ -2026,13 +2026,13 @@ body.private-mode #manhwaList {
   }
 
   /* Full-width teal "Add entry" button, matching the floating "+"
-     button's teal (see .open-add-entry-sheet-button below) but with
-     dark text instead of white, as requested. */
+     button's teal (see .open-add-entry-sheet-button below) - both use
+     dark text for readability on this lighter turquoise. */
   .add-entry-sheet-overlay #addButton {
     padding: 14px 16px;
     border: none;
     border-radius: 10px;
-    background: #0d6e6e;
+    background: #40e0d0;
     color: #1c1c1c;
     font-size: 16px;
     font-weight: bold;
@@ -2044,7 +2044,7 @@ body.private-mode #manhwaList {
   }
 
   /* "Bulk add" / "Quick note" buttons: same full-width teal button
-     look as "Add entry" above (#0d6e6e background, dark text, 10px
+     look as "Add entry" above (#40e0d0 background, dark text, 10px
      rounding, same padding) instead of the old underlined-link look.
      "flex: 1" on each button splits the row evenly so together they
      still read as one full-width bar, matching "Add entry" above them. */
@@ -2058,7 +2058,7 @@ body.private-mode #manhwaList {
     padding: 14px 16px;
     border: none;
     border-radius: 10px;
-    background: #0d6e6e;
+    background: #40e0d0;
     color: #1c1c1c;
     font-size: 16px;
     font-weight: bold;
@@ -2146,15 +2146,14 @@ body.private-mode #manhwaList {
     flex-direction: column;
   }
 
-  /* "Add all": same full-width button shape as "Add entry" above, but
-     a lighter turquoise (#5eead4) so it reads as a secondary action
-     rather than the sheet's main button. Text stays dark (#1c1c1c) for
-     readability, same as the darker-teal buttons elsewhere. */
+  /* "Add all": same full-width button shape and turquoise (#40e0d0)
+     as the other add-entry buttons. Text stays dark (#1c1c1c) for
+     readability. */
   .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel #bulkAddSubmitButton {
     padding: 14px 16px;
     border: none;
     border-radius: 10px;
-    background: #5eead4;
+    background: #40e0d0;
     color: #1c1c1c;
     font-size: 16px;
     font-weight: bold;
@@ -2193,8 +2192,8 @@ body.private-mode #manhwaList {
     padding: 0;
     border: 1px solid #094f4f;
     border-radius: 50%;
-    background: #0d6e6e;
-    color: #fff;
+    background: #40e0d0;
+    color: #1c1c1c;
     font-size: 28px;
     line-height: 54px;
     text-align: center;
