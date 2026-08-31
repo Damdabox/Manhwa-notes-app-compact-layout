@@ -26,6 +26,71 @@
 
   <h1>Manhwa Notes App</h1>
 
+  <!-- Phone-only settings menu: a three-dot button fixed to the top-left
+       corner of the screen, plus the dropdown panel it opens. Both are
+       hidden by default (see .phone-settings-button /
+       .phone-settings-overlay in style.css, same "hidden outside the
+       phone media query" pattern used by the floating "+" button
+       further down this file) so laptop/tablet never sees any of this.
+
+       The panel reuses the same dark, rounded "sheet" look as the Add
+       Entry sheet and Quick Note modal elsewhere in this file (see
+       .phone-settings-panel in style.css).
+
+       Of the four "View" options below, only "Grid (large)" actually
+       does anything right now - it's simply what the shelf already
+       looks like, so selecting it needs no extra code. The other three
+       can be tapped and will show the checkmark moving to them, but
+       don't change the shelf yet - see the "Phone settings menu"
+       section in script.js.
+
+       #phoneSettingsCardSizeSlot and #phoneSettingsPrivacySlot start
+       EMPTY on purpose. The Card Size slider (.zoom-controls) and the
+       Cover/Private toggle (.privacy-toggle) both still live in their
+       normal spots further down this file - script.js physically moves
+       those SAME elements into these two slots while this menu is open
+       on phone widths, then moves them straight back when it closes.
+       Moving the existing element (instead of building a second copy
+       here) means there's only ever one #zoomSlider and one
+       #privacyToggleInput on the page, so all their existing click/
+       change logic in script.js keeps working with zero changes - see
+       the "Phone settings menu" section in script.js. -->
+  <button id="phoneSettingsButton" type="button" class="phone-settings-button" aria-label="Open settings menu" aria-haspopup="true" aria-expanded="false">&#8942;</button>
+
+  <div id="phoneSettingsOverlay" class="phone-settings-overlay">
+    <div id="phoneSettingsPanel" class="phone-settings-panel" role="dialog" aria-modal="true" aria-labelledby="phoneSettingsHeading">
+      <div class="modal-header">
+        <h3 id="phoneSettingsHeading">Settings</h3>
+        <button id="phoneSettingsCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
+      </div>
+
+      <!-- View section: a vertical list of four choices. The checkmark
+           span in each button only shows once that button has the
+           "active" class - see .phone-view-option-check in style.css.
+           script.js just moves "active" between these four buttons on
+           click; see the note above for why only Grid (large) is wired
+           up to actually change anything yet. -->
+      <div class="phone-settings-section">
+        <div class="phone-settings-section-label">View</div>
+        <button type="button" class="phone-view-option active" data-view="grid-large">
+          <span class="phone-view-option-check">&#10003;</span>Grid (large)
+        </button>
+        <button type="button" class="phone-view-option" data-view="grid-small">
+          <span class="phone-view-option-check">&#10003;</span>Grid (small)
+        </button>
+        <button type="button" class="phone-view-option" data-view="list">
+          <span class="phone-view-option-check">&#10003;</span>List
+        </button>
+        <button type="button" class="phone-view-option" data-view="simple-list">
+          <span class="phone-view-option-check">&#10003;</span>Simple list
+        </button>
+      </div>
+
+      <div id="phoneSettingsCardSizeSlot" class="phone-settings-section"></div>
+      <div id="phoneSettingsPrivacySlot" class="phone-settings-section"></div>
+    </div>
+  </div>
+
   <!-- libraryView wraps EVERYTHING that makes up the normal shelf page
        (the add form, bulk add, search, tabs, zoom controls, and the
        list of comics itself). Wrapping it all in one div means

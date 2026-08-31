@@ -1822,6 +1822,19 @@ body.private-mode #manhwaList {
   display: none;
 }
 
+/* .phone-settings-button / .phone-settings-overlay are the three-dot
+   settings button and the dropdown panel it opens (see index.html).
+   Same reasoning as the rules above: hidden unconditionally so laptop/
+   tablet never renders them at all, no matter what state script.js
+   puts them in - only the phone media query below ever turns them on. */
+.phone-settings-button {
+  display: none;
+}
+
+.phone-settings-overlay {
+  display: none;
+}
+
 /* max-width: 600px is our "phone width" cutoff - narrow enough to catch
    phones in both portrait and landscape without also catching tablets,
    which is what "laptop/tablet completely unaffected" above depends on. */
@@ -2203,6 +2216,152 @@ body.private-mode #manhwaList {
 
   .open-add-entry-sheet-button:hover {
     background: #094f4f;
+  }
+
+  /* ===========================================================================
+     Phone-width layout: Settings menu
+     ===========================================================================
+     Same "fixed to the viewport, not the page's normal scroll flow" idea
+     as the floating "+" button above - it stays pinned to the top-left
+     corner of the screen no matter how far down the shelf you've
+     scrolled. */
+  .phone-settings-button {
+    display: block;
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid #444;
+    border-radius: 50%;
+    background: #262626;
+    color: #fff;
+    font-size: 20px;
+    line-height: 38px;
+    text-align: center;
+    cursor: pointer;
+    z-index: 900;
+  }
+
+  .phone-settings-button:hover {
+    background: #333;
+  }
+
+  /* Dimmed, full-screen backdrop - same trick .modal-overlay uses for
+     the Quick Note popup, just anchored to the top-left corner instead
+     of centered (align-items/justify-content: flex-start, plus some
+     top/left padding to clear the round button above) so the panel
+     reads as a dropdown coming out of the three-dot button rather than
+     a centered popup. Starts hidden; script.js adds "menu-open" to
+     open it, same pattern as "sheet-open" on the Add Entry sheet. */
+  .phone-settings-overlay.menu-open {
+    display: flex;
+  }
+
+  .phone-settings-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 1000;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 64px 16px 16px 14px;
+    box-sizing: border-box;
+  }
+
+  /* The panel box itself: same dark charcoal, rounded-corner "sheet"
+     look as .add-entry-sheet-overlay .form and .modal-box elsewhere in
+     this file. flex-direction: column + gap is what stacks the View
+     section, Card Size slider, and Cover/Private toggle evenly, in
+     whatever order they appear in the HTML/DOM. */
+  .phone-settings-panel {
+    background: #262626;
+    border: 1px solid #444;
+    border-radius: 12px;
+    padding: 16px;
+    width: 100%;
+    max-width: 260px;
+    max-height: 75vh;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    box-sizing: border-box;
+  }
+
+  .phone-settings-panel .modal-header {
+    margin: 0;
+  }
+
+  /* Each section (View, Card Size, Cover/Private) gets a thin divider
+     ABOVE it, except the first one - the "+" combinator only matches a
+     .phone-settings-section that comes right after another one, so the
+     View section (nothing before it) is left alone. */
+  .phone-settings-section + .phone-settings-section {
+    border-top: 1px solid #444;
+    padding-top: 14px;
+  }
+
+  .phone-settings-section-label {
+    font-size: 12px;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #999;
+    margin-bottom: 2px;
+  }
+
+  /* One row per View choice, stacked in a plain vertical list. */
+  .phone-view-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 8px;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: #fff;
+    font-size: 15px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .phone-view-option:hover {
+    background: #333;
+  }
+
+  /* "visibility: hidden" (not "display: none") on the checkmark keeps
+     its space reserved at all times, so the text of every option lines
+     up in the same spot whether or not that option is the active one -
+     it would shift a few pixels to the left every time you switched
+     options otherwise. */
+  .phone-view-option-check {
+    width: 14px;
+    visibility: hidden;
+    color: #40e0d0;
+    font-weight: bold;
+  }
+
+  .phone-view-option.active .phone-view-option-check {
+    visibility: visible;
+  }
+
+  /* Once .zoom-controls and .privacy-toggle are moved into their slots
+     (see the "Phone settings menu" section in script.js), trim the
+     bottom spacing they normally have on their own in the page - the
+     panel's own "gap" above already spaces every section out evenly,
+     so keeping their old margin/padding too would just double it up. */
+  #phoneSettingsCardSizeSlot .zoom-controls {
+    margin-bottom: 0;
+  }
+
+  #phoneSettingsPrivacySlot .privacy-toggle {
+    padding-bottom: 0;
   }
 
 }
