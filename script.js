@@ -3849,8 +3849,15 @@ zoomOutButton.addEventListener('click', function () {
 });
 
 // Set the starting zoom to 100%, matching the slider's default value
-// in the HTML.
-setCardScale(1);
+// in the HTML - except on phone widths, where cards start a bit
+// smaller (90%) so more of the shelf fits without any manual
+// adjustment. This only changes the STARTING value; the slider itself
+// still moves through its full 60%-180% range exactly as before.
+// "(max-width: 600px)" is the same phone-width breakpoint used by the
+// @media rule in style.css, so this switches at the same screen size
+// as the rest of the phone layout.
+const isPhoneWidth = window.matchMedia('(max-width: 600px)').matches;
+setCardScale(isPhoneWidth ? 0.9 : 1);
 
 // --- Phone settings menu ---
 // The three-dot button (top-left, phone widths only - see
