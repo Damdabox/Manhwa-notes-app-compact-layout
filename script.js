@@ -2644,7 +2644,7 @@ function renderList() {
     // "entry.type === 'Note'" branch right after it - that branch
     // used to run unconditionally for every note regardless of
     // displayMode, which was the actual bug: it always built the
-    // large 16:9 Cover-mode card (see "#manhwaList li.note-card" in
+    // full comic-sized Cover-mode card (see ".note-card" in
     // style.css), even in Private mode where every other entry type
     // was already switching to the small text-row layout. Checking
     // Private mode first, here, is what makes notes follow that same
@@ -2656,34 +2656,61 @@ function renderList() {
       return;
     }
 
-    // Quick Notes get their own much simpler card, built here as an
-    // early branch before any of the comic-card code below even runs -
-    // a note has no status/chapter/cover/link/etc. for that code to
-    // read, and (unlike a comic card) a note card has no separate
-    // Edit/Delete icons of its own at all: the whole card is just one
-    // big click target that opens the Quick Note popup (see
-    // openQuickNoteModal() in the "Quick Notes" section further down
-    // this file), where editing/deleting actually happens. "return"
-    // here skips straight to the next entry, same as the Private-mode
-    // row branch just below this one does. (This branch only runs in
-    // Cover mode now - the Private-mode case is already handled and
-    // returned above.)
+    // Quick Notes get their own card, built here as an early branch
+    // before any of the comic-card code below even runs - a note has
+    // no status/chapter/link/etc. for that code to read. But the card
+    // is now built out of the SAME pieces a comic card uses (a cover-
+    // shaped box, a bold title below it, then the shared edit/delete
+    // icon row from buildEntryActions()), just with a text preview
+    // standing in for the missing cover image - so a note card ends up
+    // the same size/shape as a comic card instead of looking like a
+    // completely different kind of box. "return" here skips straight
+    // to the next entry, same as the Private-mode row branch just
+    // below this one does. (This branch only runs in Cover mode now -
+    // the Private-mode case is already handled and returned above.)
     if (entry.type === 'Note') {
-      listItem.className = 'note-card detail-link-target';
+      // Just a marker class now (see ".note-card" in style.css) - the
+      // actual sizing/shape comes from the same "#manhwaList li" rule
+      // every comic card uses, plus the child elements below.
+      listItem.className = 'note-card';
 
-      const noteTitleElement = document.createElement('div');
-      noteTitleElement.className = 'note-card-title';
-      noteTitleElement.textContent = entry.title;
-      listItem.appendChild(noteTitleElement);
-
-      const noteSnippetElement = document.createElement('div');
-      noteSnippetElement.className = 'note-card-snippet';
-      noteSnippetElement.textContent = buildNoteSnippet(entry.noteText);
-      listItem.appendChild(noteSnippetElement);
-
-      listItem.addEventListener('click', function () {
+      // Stands in for a comic's cover-placeholder: same box shape/size
+      // (see ".note-preview" in style.css, sized to match
+      // ".cover-placeholder"), but tinted its own distinct color and
+      // filled with a preview of this note's own text instead of an
+      // image - that's what keeps a note from ever being mistaken for
+      // a cover-less comic at a glance.
+      const notePreview = document.createElement('div');
+      notePreview.className = 'note-preview detail-link-target';
+      notePreview.addEventListener('click', function () {
         openQuickNoteModal(entry);
       });
+
+      const notePreviewText = document.createElement('span');
+      notePreviewText.className = 'note-preview-text';
+      notePreviewText.textContent = buildNoteSnippet(entry.noteText);
+      notePreview.appendChild(notePreviewText);
+
+      listItem.appendChild(notePreview);
+
+      // Title below the preview box, bold - same spot and look as a
+      // comic's ".entry-title" below its cover.
+      const noteTitleElement = document.createElement('div');
+      noteTitleElement.className = 'note-card-title detail-link-target';
+      noteTitleElement.textContent = entry.title;
+      noteTitleElement.addEventListener('click', function () {
+        openQuickNoteModal(entry);
+      });
+      listItem.appendChild(noteTitleElement);
+
+      // Same edit/delete icon row every comic card gets - Edit here
+      // opens the Quick Note popup instead of the inline comic-editing
+      // form (see the "onEditClick" comment on buildEntryActions()
+      // above for why), since a note has no status/chapter/type fields
+      // for that form to edit in the first place.
+      listItem.appendChild(buildEntryActions(entry, function () {
+        openQuickNoteModal(entry);
+      }));
 
       manhwaList.appendChild(listItem);
       return;
@@ -3515,13 +3542,21 @@ bulkAddSubmitButton.addEventListener('click', function () {
 // down this file for why it gets a small popup instead, and how that's
 // built differently from showDetailView()/showLibraryView() above.
 
-// Builds the short one-line preview shown on a note's card (never the
-// full text - that's only shown once you open the note's own detail
-// page). "(noteText || '').trim()" covers a brand new note that was
-// saved with no text typed in at all. NOTE_SNIPPET_LENGTH characters is
-// roughly one short line - long enough to recognize the note, short
-// enough that the card stays exactly as compact as a comic card.
-const NOTE_SNIPPET_LENGTH = 80;
+// Builds the preview shown inside a note's card (never the full text -
+// that's only shown once you open the note's own detail page/popup).
+// "(noteText || '').trim()" covers a brand new note that was saved
+// with no text typed in at all.
+//
+// The preview box itself (".note-preview-text" in style.css) uses
+// "-webkit-line-clamp" to visually clip the text to a few lines and
+// add its own "..." right where it clips - so most of the time, this
+// function doesn't need to do any truncating itself, it just hands
+// over the text. NOTE_SNIPPET_LENGTH is only a safety net for
+// unusually long notes: without SOME cap, a note with thousands of
+// characters would still get its entire text stuffed into the page
+// for every single card, even though only the first few lines are
+// ever visible.
+const NOTE_SNIPPET_LENGTH = 280;
 function buildNoteSnippet(noteText) {
   const trimmedText = (noteText || '').trim();
 

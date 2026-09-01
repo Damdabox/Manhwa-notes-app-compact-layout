@@ -907,80 +907,69 @@ body.private-mode #manhwaList {
   font-weight: bold;
 }
 
-/* Quick Note cards. These sit in the exact same #manhwaList grid as
-   every comic card (see "#manhwaList li" above for the box shape/
-   background/padding they inherit from just being an <li> in that
-   list) - the alignment override is needed because a comic card
-   centers everything underneath its (roughly square) cover image, but
-   a note card has no picture at all, just two lines of text, which
-   reads much more naturally left-aligned like a little note card than
-   centered.
+/* Quick Note cards. ".note-card" is just a marker class now - it has
+   no styling of its own. A note card gets the exact same size/shape as
+   a comic card for free, just by being an "#manhwaList li" (see that
+   rule above for the shared background/padding/centering every card
+   already gets) and by being built out of the same kinds of pieces: a
+   cover-shaped box (".note-preview" below, standing in for
+   ".cover-placeholder"), a bold title under it (".note-card-title",
+   standing in for ".entry-title"), and the same shared edit/delete
+   icon row (".entry-actions", built by buildEntryActions() in
+   script.js - the very same function every comic card also calls). */
 
-   The selector is "#manhwaList li.note-card" (not just ".note-card")
-   for the same reason "#manhwaList li.private-row" further up does the
-   same thing: "#manhwaList li" uses an ID, and an ID always beats a
-   plain class in CSS's specificity rules regardless of which one is
-   written later in the file - so a bare ".note-card { text-align:
-   left }" would actually lose to "#manhwaList li"'s own "text-align:
-   center" and silently do nothing. Repeating "#manhwaList li" in the
-   selector here gives this rule an ID of its own to match, so it wins
-   the way it's supposed to.
-
-   "aspect-ratio: 16 / 9" is what gives the card its wide/horizontal
-   shape - the exact same ratio used for a Videos card's thumbnail (see
-   ".cover-placeholder.video-cover" above), just applied to the whole
-   card here instead of just one box inside it, since a note has no
-   image of its own to put that ratio on. Without something like this,
-   a note card's height is just whatever its two lines of text need,
-   which made it a random, inconsistent shape instead of matching the
-   other card types on the shelf.
-
-   "overflow: hidden" + "box-sizing: border-box" are the actual fix for
-   the old overflow bug: the title/snippet text below used to have no
-   width limit of its own, so as a flex item (align-items isn't
-   "stretch" here) it sized itself to fit its own content instead of
-   the card's width - a long word, a pasted link, or just a long note
-   title could end up wider than the card and spill out past its edges
-   onto the page. "overflow: hidden" clips anything that still doesn't
-   fit, and "box-sizing: border-box" makes sure the aspect-ratio above
-   is measured including this card's own padding, not on top of it, so
-   the card never quietly grows past the size that ratio implies. */
-#manhwaList li.note-card {
-  align-items: flex-start;
-  text-align: left;
-  cursor: pointer;
-  aspect-ratio: 16 / 9;
-  width: 100%;
-  box-sizing: border-box;
+/* Stands in for a comic's cover image. Same box shape/size as
+   ".cover-placeholder" above (same width, same 2/3 aspect ratio, same
+   rounded corners) so a note's "cover area" takes up exactly the same
+   footprint a comic's does - but tinted its own warm brown, instead of
+   comic gray (laptop/tablet) or the teal used by the phone-width
+   title-cover treatment further down this file. That color difference
+   is deliberate: it's what makes a note recognizable as "a note" at a
+   glance, never confusable with a cover-less comic. */
+.note-preview {
+  position: relative;
   overflow: hidden;
+  box-sizing: border-box;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background: #3a2f1a;
+  border: 1px solid #5c4a2a;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(10px * var(--card-scale));
 }
 
-/* "width: 100%" makes the title/snippet fill the card's own width
-   instead of shrinking to fit their text (see the big comment above
-   for why that shrinking is what let text spill outside the card).
-   "overflow-wrap: break-word" is the other half of the overflow fix:
-   normally a browser only wraps text at spaces, so one long unbroken
-   chunk of text (a pasted URL, a run-on word) would refuse to wrap and
-   push past the card's edge instead - this tells the browser it's
-   allowed to break in the middle of a long word if that's the only way
-   to keep it inside the box. */
+/* The preview text itself, built from buildNoteSnippet() in script.js.
+   "white-space: pre-wrap" keeps line breaks the user actually typed
+   into their note, instead of squashing everything onto one line.
+   "display: -webkit-box" + "-webkit-box-orient: vertical" +
+   "-webkit-line-clamp: 6" together are what clip the text down to 6
+   lines and add a "..." right at the cutoff, automatically - the
+   multi-line version of the more familiar single-line
+   "text-overflow: ellipsis". Despite the "-webkit-" prefix, every
+   major browser (Chrome, Safari, Firefox, Edge) supports this combo;
+   it's the standard way to do multi-line text clamping in CSS today. */
+.note-preview-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  width: 100%;
+  color: #f2e6cf;
+  font-size: calc(13px * var(--card-scale));
+  line-height: 1.4;
+}
+
+/* The note's title, in the same spot below the preview box that
+   ".entry-title" sits in below a comic's cover. "overflow-wrap:
+   break-word" stops one long unbroken word (a pasted link, a run-on
+   title) from pushing past the card's edge instead of wrapping. */
 .note-card-title {
   font-weight: bold;
-  width: 100%;
-  overflow-wrap: break-word;
-}
-
-/* The short preview/snippet under a note's title - built by
-   buildNoteSnippet() in script.js, which trims the note's full text
-   down to a short one-liner so the card stays just as compact as a
-   comic card, never the whole note. Dimmer than the title so the two
-   are easy to tell apart at a glance, same idea as
-   ".character-list-comic-title" further down this file. Same
-   "width: 100%" + "overflow-wrap" fix as .note-card-title above, for
-   the same reason. */
-.note-card-snippet {
-  color: #bbb;
-  font-size: calc(14px * var(--card-scale));
   width: 100%;
   overflow-wrap: break-word;
 }
