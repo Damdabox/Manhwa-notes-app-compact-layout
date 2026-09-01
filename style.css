@@ -829,6 +829,16 @@ body.private-mode #manhwaList {
   color: #666;
 }
 
+/* .cover-placeholder-title is the big-title-on-the-cover treatment for
+   phone width (see the @media (max-width: 600px) block further down,
+   and script.js where this span is created alongside the plain "No
+   Cover" text). Hidden by default here so laptop/tablet keeps showing
+   the plain gray box with "No Cover" text exactly as before - only the
+   phone media query below ever turns this on. */
+.cover-placeholder-title {
+  display: none;
+}
+
 /* Videos-only card shape. Added alongside the plain ".cover-placeholder"
    class (see script.js, entry.type === 'Videos') so it only overrides
    the one property that needs to change - the aspect ratio - while
@@ -1166,10 +1176,12 @@ body.private-mode #manhwaList {
   background-repeat: no-repeat;
 }
 
-/* The "No Cover" text is only meant to show while there's no image -
-   once .has-image is added, hide the text rather than letting it sit
-   on top of the photo. */
-.cover-placeholder.has-image .cover-placeholder-text {
+/* The "No Cover" text (and, on phone width, the big title text that
+   takes its place - see .cover-placeholder-title above) are only meant
+   to show while there's no image - once .has-image is added, hide both
+   rather than letting either sit on top of the photo. */
+.cover-placeholder.has-image .cover-placeholder-text,
+.cover-placeholder.has-image .cover-placeholder-title {
   display: none;
 }
 
@@ -1869,6 +1881,34 @@ body.private-mode #manhwaList {
    phones in both portrait and landscape without also catching tablets,
    which is what "laptop/tablet completely unaffected" above depends on. */
 @media (max-width: 600px) {
+
+  /* Cover-image placeholder, phone width only: instead of the plain
+     gray box + "No Cover" text used on laptop/tablet, give the box a
+     muted dark teal tint and show the entry's own title, big/bold/
+     centered, directly on it. ":not(.has-image)" keeps this scoped to
+     entries with no uploaded cover - the moment a real photo is picked,
+     .has-image takes over (see ".cover-placeholder.has-image" above)
+     and this whole treatment is bypassed automatically. The status
+     ribbon (.status-ribbon) is a separate absolutely-positioned element
+     appended into this same box, so it keeps sitting in the corner on
+     top of this exactly as it already did on top of the old gray box. */
+  #manhwaList li .cover-placeholder:not(.has-image) {
+    background: #16333a;
+  }
+
+  #manhwaList li .cover-placeholder-text {
+    display: none;
+  }
+
+  #manhwaList li .cover-placeholder-title {
+    display: block;
+    font-size: calc(20px * var(--card-scale));
+    font-weight: bold;
+    color: #eef6f5;
+    line-height: 1.3;
+    padding: calc(10px * var(--card-scale));
+    overflow-wrap: break-word;
+  }
 
   /* The original teal "Bulk Add" and "Quick Notes" buttons disappear on
      phone widths - .add-entry-sheet-secondary-row further down this

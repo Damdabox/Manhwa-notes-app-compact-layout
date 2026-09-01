@@ -2728,6 +2728,18 @@ function renderList() {
     coverPlaceholderText.className = 'cover-placeholder-text';
     coverPlaceholderText.textContent = 'No Cover';
     coverPlaceholder.appendChild(coverPlaceholderText);
+
+    // Phone-width version of the same "no cover" state: the entry's own
+    // title, shown big/bold/centered right on the cover box instead of
+    // the plain "No Cover" text above. Both spans always exist - which
+    // one is actually visible is decided purely by CSS (see
+    // ".cover-placeholder-title" in style.css), so nothing here needs to
+    // know the screen width or react to the window being resized.
+    const coverPlaceholderTitle = document.createElement('span');
+    coverPlaceholderTitle.className = 'cover-placeholder-title';
+    coverPlaceholderTitle.textContent = entry.title;
+    coverPlaceholder.appendChild(coverPlaceholderTitle);
+
     listItem.appendChild(coverPlaceholder);
 
     // Comics added before the cover-image feature existed (or that
