@@ -951,6 +951,20 @@ function formatProgressText(entry) {
 // can compare it against each entry in the loop below with "===".
 let entryBeingEdited = null;
 
+// Stamps an entry with "right now" as its last-modified time, in
+// entry.updatedAt. Call this any time an entry is created OR edited -
+// status change, rating change, notes/scenes/characters added, etc -
+// right before saveToStorage(). renderList() further down this file
+// sorts the shelf using this timestamp (newest first), so this one
+// function is what keeps that sort order accurate everywhere.
+//
+// Date.now() returns the current time as a plain number (milliseconds
+// since Jan 1 1970) - a bigger number always means a later time, which
+// is exactly what a "sort by newest" comparison needs.
+function touchEntry(entry) {
+  entry.updatedAt = Date.now();
+}
+
 // The name/key we save our data under in localStorage. Using one
 // constant instead of retyping the string means saveToStorage() and
 // loadFromStorage() can never accidentally use different keys.
@@ -1033,6 +1047,18 @@ function loadFromStorage() {
         entry.episode = '';
         backfilledSomething = true;
       }
+
+      // NOTE: entry.updatedAt (see touchEntry() near the top of this
+      // file) is deliberately NOT backfilled here, unlike every field
+      // above. Every other field gets a default value because the rest
+      // of the code assumes it's always there. updatedAt is different:
+      // renderList()'s sort further down this file treats "no
+      // updatedAt at all" as its own special case meaning "put this at
+      // the bottom, below anything with a real timestamp" - which is
+      // exactly what we want for comics that existed before this
+      // feature shipped. Giving them a fake timestamp here would
+      // defeat that entirely, so we just leave the field missing and
+      // let the sort handle it.
     });
 
     // Write the backfilled ids/hasImage back to localStorage right
@@ -1870,6 +1896,7 @@ backButton.addEventListener('click', showLibraryView);
 // page refresh.
 saveNotesButton.addEventListener('click', function () {
   currentDetailEntry.notes = detailNotesTextarea.value;
+  touchEntry(currentDetailEntry);
   saveToStorage();
 
   // Quick "Saved!" confirmation on the button itself, then switch the
@@ -2022,6 +2049,10 @@ saveEntryEditButton.addEventListener('click', function () {
     entry.rating = null;
   }
 
+  // Mark this entry as just-modified so it moves back to the top of
+  // the shelf - see touchEntry() and renderList()'s sort step.
+  touchEntry(entry);
+
   saveToStorage();
 
   showDetailView(entry);
@@ -2068,6 +2099,7 @@ saveSceneButton.addEventListener('click', function () {
     link: link
   });
 
+  touchEntry(currentDetailEntry);
   saveToStorage();
   renderSceneEntries(currentDetailEntry);
 
@@ -2196,6 +2228,7 @@ removeCharacterImageButton.addEventListener('click', function () {
 // inside it, so saving the whole entry is what actually persists the
 // character), redraw the character list, and close/reset the form.
 function finishSavingCharacter(entry) {
+  touchEntry(entry);
   saveToStorage();
   renderCharacterEntries(entry);
 
@@ -2479,6 +2512,32 @@ function renderList() {
     });
 
     return titleMatches || tagsMatch;
+  });
+
+  // --- Sort: newest-added/most-recently-edited entries first ---
+  // entry.updatedAt (see touchEntry() near the top of this file) is a
+  // timestamp set the moment an entry is created, and refreshed every
+  // time it's edited - status/rating change, notes/scenes/characters
+  // added, bulk add, etc. Sorting by it here, AFTER filtering by
+  // tab/status/search above but BEFORE any cards get built below,
+  // means this "newest first" order applies no matter which tab or
+  // search term is active, without touching how that filtering works.
+  //
+  // "(b.updatedAt || 0) - (a.updatedAt || 0)" sorts biggest timestamp
+  // first (b minus a, not a minus b). Comics saved before this feature
+  // existed have no updatedAt at all (it's undefined), and
+  // "undefined || 0" becomes 0 - which is smaller than every real
+  // timestamp (real ones are huge numbers, like 1750000000000). That's
+  // what sends every pre-existing entry to the bottom automatically.
+  //
+  // Array.prototype.sort() in JavaScript is "stable": entries that tie
+  // (the comparison returns exactly 0) keep their original relative
+  // order instead of getting shuffled. Every pre-existing entry ties
+  // at 0, so this is what keeps all of them in their same order
+  // relative to each other - they just move together as a block to
+  // the end, nothing about them gets scrambled or lost.
+  entriesToShow.sort(function (a, b) {
+    return (b.updatedAt || 0) - (a.updatedAt || 0);
   });
 
   entriesToShow.forEach(function (entry) {
@@ -2852,6 +2911,10 @@ function renderList() {
         // No card is being edited anymore.
         entryBeingEdited = null;
 
+        // Mark this entry as just-modified so it moves back to the top
+        // of the shelf - see touchEntry() and renderList()'s sort step.
+        touchEntry(entry);
+
         // Save the updated entry to localStorage so the edit survives
         // a page refresh.
         saveToStorage();
@@ -3075,7 +3138,10 @@ addButton.addEventListener('click', function () {
     notes: '',
     scenes: [],
     characters: [],
-    hasImage: false
+    hasImage: false,
+    // Stamped as "now" so this brand new entry sorts to the very top
+    // of the shelf - see touchEntry() and renderList()'s sort step.
+    updatedAt: Date.now()
   });
 
   // Save the new full list to localStorage so the new entry survives
@@ -3264,7 +3330,14 @@ bulkAddSubmitButton.addEventListener('click', function () {
       notes: '',
       scenes: [],
       characters: [],
-      hasImage: false
+      hasImage: false,
+      // Same "now" stamp a normal Add gets - see touchEntry() near the
+      // top of this file. Every title pasted in this same batch gets
+      // its own Date.now() call, so if two happen in the exact same
+      // millisecond they'll tie and just keep the order they were
+      // typed in (see the sort step in renderList()) - either way,
+      // the whole freshly-added batch lands above older entries.
+      updatedAt: Date.now()
     });
 
     addedTitles.push(title);
@@ -3557,11 +3630,15 @@ quickNoteModalSaveButton.addEventListener('click', function () {
       id: generateComicId(),
       title: title,
       type: 'Note',
-      noteText: quickNoteModalTextInput.value
+      noteText: quickNoteModalTextInput.value,
+      // Stamped as "now" so this note sorts to the top of "All" -
+      // see touchEntry() and renderList()'s sort step.
+      updatedAt: Date.now()
     });
   } else {
     editingQuickNoteEntry.title = title;
     editingQuickNoteEntry.noteText = quickNoteModalTextInput.value;
+    touchEntry(editingQuickNoteEntry);
   }
 
   saveToStorage();
