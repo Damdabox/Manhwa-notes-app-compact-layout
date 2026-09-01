@@ -98,7 +98,6 @@ const editEntryPage = document.getElementById('editEntryPage');
 const editEntryEpisode = document.getElementById('editEntryEpisode');
 const editEntryLink = document.getElementById('editEntryLink');
 const editEntryStatus = document.getElementById('editEntryStatus');
-const editEntryRating = document.getElementById('editEntryRating');
 const editEntryTagsPreview = document.getElementById('editEntryTagsPreview');
 const editEntryTagInput = document.getElementById('editEntryTagInput');
 const editEntryTagAddButton = document.getElementById('editEntryTagAddButton');
@@ -228,6 +227,96 @@ function buildStarsHTML(rating) {
   }
 
   return starsHTML;
+}
+
+// --- Tappable star rating (detail page only) ---
+// buildStarsHTML() above draws a plain, read-only row of stars (used
+// on the shelf card, where clicking a star isn't supported). This
+// function draws the SAME 5 stars for the entry currently open on the
+// detail page, but wraps each one in a real clickable element so
+// tapping it sets a new rating immediately - no Edit form, no Save
+// button, just tap and it's saved.
+//
+// Called once when the detail page first opens (see showDetailView()
+// above) and again every time a star is tapped, so the filled-in stars
+// on screen always match whatever entry.rating currently is.
+function renderDetailRatingStars(entry) {
+  // Wipe out whatever was there before (either nothing yet, or the
+  // previous rating's stars) and rebuild from scratch - same
+  // "clear the container, then re-add everything" approach used all
+  // over this file (e.g. renderTagChips()).
+  detailRating.innerHTML = '';
+
+  // entry.rating is null until a comic has actually been rated once.
+  // "entry.rating || 0" turns that null into a plain 0, so a
+  // never-rated Completed comic just starts out showing 5 empty stars
+  // instead of this function breaking on a null value.
+  const currentRating = entry.rating || 0;
+
+  for (let i = 0; i < 5; i++) {
+    // Stars are numbered 1 through 5 for people, even though the loop
+    // itself counts 0 through 4 - starNumber is that human-facing
+    // number, and it's also exactly the rating that tapping this
+    // star's RIGHT half should set (see the click handler below).
+    const starNumber = i + 1;
+
+    let fillType;
+    if (currentRating >= starNumber) {
+      fillType = 'full';
+    } else if (currentRating >= starNumber - 0.5) {
+      fillType = 'half';
+    } else {
+      fillType = 'empty';
+    }
+
+    // One <span> per star, holding that star's SVG. This span - not
+    // the SVG or the shapes drawn inside it - is what the click
+    // handler below measures, so it doesn't matter which exact pixel
+    // inside the star icon the tap actually landed on.
+    const starSlot = document.createElement('span');
+    starSlot.className = 'star-slot';
+    starSlot.innerHTML = buildStarSVG(fillType);
+
+    // This is the new part: tapping/clicking a star sets a rating on
+    // the spot, based on WHICH HALF of that star was tapped.
+    //
+    // getBoundingClientRect() gives this star's real position and
+    // width on screen right now. Comparing the click's x position
+    // (event.clientX) against the left edge of that box tells us how
+    // far into the star (in pixels) the click landed; comparing THAT
+    // to half the box's width is what tells left half from right half.
+    //
+    // Left half of star N -> rating N - 0.5 (e.g. left half of the
+    // 3rd star sets 2.5 stars).
+    // Right half of star N -> rating N, the whole number (e.g. right
+    // half of the 3rd star sets 3 stars).
+    starSlot.addEventListener('click', function (event) {
+      const starBox = starSlot.getBoundingClientRect();
+      const clickXInsideStar = event.clientX - starBox.left;
+      const clickedLeftHalf = clickXInsideStar < starBox.width / 2;
+
+      entry.rating = clickedLeftHalf ? starNumber - 0.5 : starNumber;
+
+      // Same "stamp it as just-edited, then save" pattern every other
+      // edit in this file follows - see touchEntry() near the top of
+      // this file. This is what makes a tapped rating count as an
+      // edit for the shelf's "newest first" sort, exactly like editing
+      // a rating through the old number input used to.
+      touchEntry(entry);
+      saveToStorage();
+
+      // Redraw immediately so the newly tapped star (and every star
+      // before it) fills in right away - this is the whole point of
+      // making the row tappable instead of hiding rating behind Edit.
+      renderDetailRatingStars(entry);
+
+      // Also redraw the shelf underneath, so this comic's card already
+      // shows the new rating by the time Back is pressed.
+      renderList();
+    });
+
+    detailRating.appendChild(starSlot);
+  }
 }
 
 // --- Tags ---
@@ -1786,12 +1875,15 @@ function showDetailView(entry) {
   // existed, same as everywhere else in this file that reads entry.tags.
   buildReadOnlyTagChips(detailTags, entry.tags || []);
 
-  // Star rating: same condition renderList() uses to decide whether to
-  // draw stars on the card at all - only Completed comics that have
-  // actually been given a rating.
-  if (entry.status === 'Completed' && entry.rating !== null && entry.rating !== undefined) {
+  // Star rating: shown for every Completed comic, even ones with no
+  // rating yet (renderDetailRatingStars() below just draws those as 5
+  // empty stars) - unlike the read-only stars on the shelf card, this
+  // row is how a rating gets SET now, so it has to be visible before a
+  // rating exists, not just after. Any other status still hides the
+  // row completely, same as before.
+  if (entry.status === 'Completed') {
     detailRating.style.display = '';
-    detailRating.innerHTML = buildStarsHTML(entry.rating);
+    renderDetailRatingStars(entry);
   } else {
     detailRating.style.display = 'none';
     detailRating.innerHTML = '';
@@ -1959,11 +2051,9 @@ function openDetailEditForm() {
   editEntryEpisode.value = entry.episode || '';
   editEntryLink.value = entry.link || '';
   editEntryStatus.value = entry.status;
-  editEntryRating.value = (entry.rating === null || entry.rating === undefined) ? '' : entry.rating;
 
   updateAuthorFieldVisibility(entry.type, editEntryAuthor);
   updateProgressFieldsVisibility(entry.type, editEntryProgressFields);
-  editEntryRating.style.display = (entry.status === 'Completed') ? '' : 'none';
 
   detailEditTags = (entry.tags || []).slice();
   renderTagChips(editEntryTagsPreview, detailEditTags);
@@ -1980,12 +2070,6 @@ editEntryButton.addEventListener('click', openDetailEditForm);
 editEntryType.addEventListener('change', function () {
   updateAuthorFieldVisibility(editEntryType.value, editEntryAuthor);
   updateProgressFieldsVisibility(editEntryType.value, editEntryProgressFields);
-});
-
-// Status dropdown changing live-toggles the Rating field, same as the
-// card's edit mode.
-editEntryStatus.addEventListener('change', function () {
-  editEntryRating.style.display = (editEntryStatus.value === 'Completed') ? '' : 'none';
 });
 
 // Tag editor: same "Add Tag" button + Enter-key shortcut as the
@@ -2041,11 +2125,16 @@ saveEntryEditButton.addEventListener('click', function () {
   // changes onto the real entry.
   entry.tags = detailEditTags;
 
-  // Only keep a rating for Completed comics, same rule as the card's
-  // edit mode.
-  if (editEntryStatus.value === 'Completed') {
-    entry.rating = editEntryRating.value === '' ? null : parseFloat(editEntryRating.value);
-  } else {
+  // There's no Rating field in this form anymore (rating is set by
+  // tapping the star row directly on the detail page - see
+  // renderDetailRatingStars() below), so the only rating-related thing
+  // left for Save to do here is clear it out if Status is being
+  // changed AWAY from Completed - same rule as before: a rating only
+  // ever makes sense for a Completed comic. If Status is staying (or
+  // becoming) Completed, entry.rating is left exactly as it already
+  // was - editing the title/chapter/etc. here should never wipe out a
+  // rating that was set separately by tapping stars.
+  if (editEntryStatus.value !== 'Completed') {
     entry.rating = null;
   }
 

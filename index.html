@@ -579,10 +579,16 @@ The End"></textarea>
                now. -->
           <div id="detailTags" class="tags-preview detail-tags"></div>
 
-          <!-- Star rating row. Only shown for Completed comics that
-               already have a rating - see showDetailView() in
-               script.js, which sets this div's display to "none" for
-               every other comic. -->
+          <!-- Star rating row. Shown for every Completed comic (rated
+               or not yet), hidden entirely for every other status -
+               see showDetailView() in script.js, which sets this div's
+               display to "none" for every other comic. Unlike the
+               read-only stars on the shelf card, these stars are real
+               tappable buttons: tapping one sets a new rating
+               immediately, no Edit/Save step needed - see
+               renderDetailRatingStars() in script.js for how tapping a
+               star's left vs right half is turned into a .5 vs whole
+               number rating. -->
           <div id="detailRating" class="entry-rating detail-rating"></div>
 
           <!-- Opens #detailEditForm below in place of this whole
@@ -635,10 +641,15 @@ The End"></textarea>
             <option value="Recommended">Recommended</option>
           </select>
 
-          <!-- Rating: only relevant once Status is "Completed" -
-               script.js shows/hides this live as Status above is
-               changed, same as the card's edit mode. -->
-          <input type="number" id="editEntryRating" class="edit-input rating-edit-input" min="0" max="5" step="0.5" placeholder="Rating (0-5)">
+          <!-- There is deliberately no Rating field in this form
+               anymore. Rating is now set by tapping directly on the
+               star row on the detail page itself (see #detailRating
+               above and renderDetailRatingStars() in script.js) -
+               that tap saves instantly, so there's nothing left for
+               this Edit form to do for rating. Changing Status away
+               from "Completed" here still clears any existing rating
+               though - see saveEntryEditButton's click handler in
+               script.js. -->
 
           <!-- Tag editor: same chips-plus-input-box idea as the
                Add-comic form and the card's edit mode - see

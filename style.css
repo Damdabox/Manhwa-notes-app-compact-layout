@@ -1307,6 +1307,26 @@ body.private-mode #manhwaList {
   gap: 4px;
 }
 
+/* Each star on the detail page is wrapped in a <span class="star-slot">
+   (see renderDetailRatingStars() in script.js) so it can be tapped -
+   this makes that span a real tap target: padding gives it more room
+   to tap than just the bare 16px icon, and the pointer cursor is a
+   hint (for mouse users) that it does something when clicked. */
+.detail-rating .star-slot {
+  display: inline-flex;
+  padding: 4px;
+  cursor: pointer;
+}
+
+/* Bigger than the plain read-only .star-svg size used everywhere else
+   (16px) - these stars are the actual controls for setting a rating
+   now, not just a small status display, so they get more room to tap
+   accurately (left half vs. right half) especially on a phone. */
+.detail-rating .star-slot .star-svg {
+  width: 28px;
+  height: 28px;
+}
+
 /* Cursor hint + hover feedback for the card cover/title (Cover mode)
    and the title text (Private mode), now that clicking any of them
    opens the detail page - see renderList() and buildPrivateRow() in
