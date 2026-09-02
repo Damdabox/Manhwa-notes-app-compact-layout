@@ -4140,12 +4140,12 @@ document.addEventListener('keydown', function (event) {
   }
 });
 
-// View options: four choices, styled as a vertical list with a
-// checkmark next to whichever one is active. "Grid (large)" and
-// "Grid (small)" are the two wired up to actually change the shelf's
-// layout so far - picking "List" or "Simple list" still just moves the
-// checkmark for now; making those actually change the shelf's layout
-// is separate, future work.
+// View options: three choices, styled as a vertical list with a
+// checkmark next to whichever one is active. "Grid (large)" is the
+// only one wired up to actually change the shelf's layout so far -
+// picking "List" or "Simple list" still just moves the checkmark for
+// now; making those actually change the shelf's layout is separate,
+// future work.
 
 // The key we save the chosen view under in localStorage - same idea as
 // STORAGE_KEY further up this file (which saves the comic list
@@ -4153,43 +4153,14 @@ document.addEventListener('keydown', function (event) {
 // still selected the next time the app opens.
 const VIEW_STORAGE_KEY = 'manhwaViewMode';
 
-// Grid (small) always draws every card at the Card Size slider's own
-// smallest setting (ZOOM_MIN, 60%) instead of whatever the slider
-// happens to be set to - that's already a size every card is built to
-// handle correctly (it's the bottom of the slider's allowed range),
-// and shrinking every card down to it is exactly what makes room for a
-// third column (see "body.grid-small-mode #manhwaList" in style.css).
-// Because the size is fixed while this view is active, the slider
-// itself is hidden too (also in style.css) - so nothing else needs to
-// touch --card-scale while Grid (small) is showing.
-//
-// This remembers whatever scale was active the last time we were in
-// Grid (large), so switching back from Grid (small) restores it
-// exactly instead of leaving the forced small-grid scale behind.
-let savedGridLargeScale = parseFloat(zoomSlider.value);
-
-// Switches the shelf to the given view ('grid-large', 'grid-small',
-// 'list', or 'simple-list'): moves the checkmark to match, and - only
-// for the two grid views so far - swaps the column count and card
-// scale to go with it. Called both when a View option is clicked below
-// and once on page load to restore whichever view was saved last time.
+// Switches the shelf to the given view ('grid-large', 'list', or
+// 'simple-list'): moves the checkmark to match. Called both when a
+// View option is clicked below and once on page load to restore
+// whichever view was saved last time.
 function applyViewMode(view) {
   phoneViewOptionButtons.forEach(function (optionButton) {
     optionButton.classList.toggle('active', optionButton.dataset.view === view);
   });
-
-  const wasGridSmall = document.body.classList.contains('grid-small-mode');
-  const isGridSmall = view === 'grid-small';
-  document.body.classList.toggle('grid-small-mode', isGridSmall);
-
-  if (isGridSmall && !wasGridSmall) {
-    // Leaving Grid (large) for Grid (small): remember its scale first.
-    savedGridLargeScale = parseFloat(zoomSlider.value);
-    setCardScale(ZOOM_MIN);
-  } else if (!isGridSmall && wasGridSmall) {
-    // Coming back from Grid (small): restore the scale Grid (large) had.
-    setCardScale(savedGridLargeScale);
-  }
 
   localStorage.setItem(VIEW_STORAGE_KEY, view);
 }
@@ -4203,8 +4174,11 @@ phoneViewOptionButtons.forEach(function (optionButton) {
 // Restore whichever view was saved from a previous visit. If nothing
 // has been saved yet, localStorage.getItem() returns null and we fall
 // back to 'grid-large' - matching the "active" class already sitting
-// on that button in index.html.
-applyViewMode(localStorage.getItem(VIEW_STORAGE_KEY) || 'grid-large');
+// on that button in index.html. Anyone who had the now-removed
+// "Grid (small)" selected also falls back to 'grid-large' here, since
+// that saved value no longer matches any option button.
+const savedViewMode = localStorage.getItem(VIEW_STORAGE_KEY);
+applyViewMode(savedViewMode === 'grid-small' ? 'grid-large' : savedViewMode || 'grid-large');
 
 // --- Link popup ---
 // Every link in the app (the compact card view, the Private list view,

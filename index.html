@@ -64,21 +64,17 @@
         <button id="phoneSettingsCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
       </div>
 
-      <!-- View section: a vertical list of four choices. The checkmark
+      <!-- View section: a vertical list of three choices. The checkmark
            span in each button only shows once that button has the
            "active" class - see .phone-view-option-check in style.css.
-           script.js's applyViewMode() moves "active" between these four
-           buttons on click. "Grid (large)" and "Grid (small)" also
-           change the shelf's actual layout; "List" and "Simple list"
-           still just move the checkmark for now - see applyViewMode()
-           in script.js. -->
+           script.js's applyViewMode() moves "active" between these three
+           buttons on click. "Grid (large)" also changes the shelf's
+           actual layout; "List" and "Simple list" still just move the
+           checkmark for now - see applyViewMode() in script.js. -->
       <div class="phone-settings-section">
         <div class="phone-settings-section-label">View</div>
         <button type="button" class="phone-view-option active" data-view="grid-large">
           <span class="phone-view-option-check">&#10003;</span>Grid (large)
-        </button>
-        <button type="button" class="phone-view-option" data-view="grid-small">
-          <span class="phone-view-option-check">&#10003;</span>Grid (small)
         </button>
         <button type="button" class="phone-view-option" data-view="list">
           <span class="phone-view-option-check">&#10003;</span>List

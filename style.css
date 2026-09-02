@@ -619,16 +619,6 @@ body.private-mode .zoom-controls {
   display: none;
 }
 
-/* Grid (small) forces every card down to a fixed scale (see
-   "body.grid-small-mode #manhwaList" below), so the Card Size slider
-   has nothing left to do while it's active - hide it here, same as
-   Private mode above. body.grid-small-mode is added/removed by
-   script.js's applyViewMode() the moment "Grid (small)" or another
-   view is picked from the phone settings menu. */
-body.grid-small-mode .zoom-controls {
-  display: none;
-}
-
 /* Zoom (Card Size) also doesn't apply to the Characters tab - its own
    card grid (".characters-list" further down this file) is always
    shown at a fixed size, with no slider to read a --card-scale value
@@ -721,19 +711,6 @@ body.private-mode #manhwaList {
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-
-/* Grid (small): same grid as #manhwaList above, just forced to exactly
-   3 equal columns instead of "as many as fit at 160px each". Nothing
-   about a card's own content changes here - every card is still built
-   out of the exact same pieces (cover, ribbon, title, link,
-   chapter/volume/episode text, edit/delete icons), just drawn at the
-   Card Size slider's smallest scale (see applyViewMode() in script.js,
-   which forces --card-scale to ZOOM_MIN while this class is on), which
-   is what actually makes each card small enough for 3 to fit on one
-   row on a phone screen. */
-body.grid-small-mode #manhwaList {
-  grid-template-columns: repeat(3, 1fr);
 }
 
 /* Each <li> is one comic card. Flexbox here just stacks its own
