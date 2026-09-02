@@ -929,7 +929,14 @@ body.private-mode #manhwaList {
 .note-preview {
   position: relative;
   overflow: hidden;
-  box-sizing: border-box;
+  /* No box-sizing override, and no padding, on this outer box - on
+     purpose, both times. .cover-placeholder above doesn't set either
+     one (just width: 100% + a 1px border, browser-default content-box),
+     and matching that exactly - border only, padding pushed down onto
+     .note-preview-text below instead - is what keeps the two boxes
+     pixel-for-pixel the same width/height. Padding here would have
+     inflated this box past 100% the same way it's excluded from
+     .cover-placeholder. */
   width: 100%;
   aspect-ratio: 2 / 3;
   background: #3a2f1a;
@@ -938,7 +945,6 @@ body.private-mode #manhwaList {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: calc(10px * var(--card-scale));
 }
 
 /* The preview text itself, built from buildNoteSnippet() in script.js.
@@ -958,7 +964,12 @@ body.private-mode #manhwaList {
   overflow: hidden;
   overflow-wrap: break-word;
   white-space: pre-wrap;
+  box-sizing: border-box;
   width: 100%;
+  /* This is the padding that used to live on .note-preview itself - moved
+     down here, with box-sizing: border-box, so it stays inside this
+     element's own 100% width instead of adding to .note-preview's size. */
+  padding: calc(10px * var(--card-scale));
   color: #f2e6cf;
   font-size: calc(13px * var(--card-scale));
   line-height: 1.4;
