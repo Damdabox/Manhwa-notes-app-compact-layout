@@ -67,9 +67,11 @@
       <!-- View section: a vertical list of four choices. The checkmark
            span in each button only shows once that button has the
            "active" class - see .phone-view-option-check in style.css.
-           script.js just moves "active" between these four buttons on
-           click; see the note above for why only Grid (large) is wired
-           up to actually change anything yet. -->
+           script.js's applyViewMode() moves "active" between these four
+           buttons on click. "Grid (large)" and "Grid (small)" also
+           change the shelf's actual layout; "List" and "Simple list"
+           still just move the checkmark for now - see applyViewMode()
+           in script.js. -->
       <div class="phone-settings-section">
         <div class="phone-settings-section-label">View</div>
         <button type="button" class="phone-view-option active" data-view="grid-large">
