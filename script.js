@@ -780,7 +780,16 @@ const ENTRY_TYPES = ['Manhwa', 'Other Comics', 'Videos'];
 // from ENTRY_TYPES instead of typed out separately so the phone Type
 // pill's menu (see buildTypeFilterDropdownMenu() below) can never drift
 // out of sync with the real tabs.
-const TYPE_FILTER_OPTIONS = ['All'].concat(ENTRY_TYPES);
+//
+// "Notes" is tacked on at the very end, after Videos - it's NOT one of
+// ENTRY_TYPES (a Quick Note's entry.type is 'Note', not a real comic
+// type - see the "Quick Notes" section further down), so it's added
+// separately here rather than folded into ENTRY_TYPES itself. This is
+// what makes "Notes" show up as the last option in the phone Type
+// pill's menu, right after Videos - see the matchesFolder check inside
+// renderList() for how picking it actually filters the shelf down to
+// just Quick Notes.
+const TYPE_FILTER_OPTIONS = ['All'].concat(ENTRY_TYPES).concat(['Notes']);
 
 // --- Status filter (nested inside each type tab) ---
 // Each type tab (Manhwa / Other Comics / Videos) gets its OWN status
@@ -2552,7 +2561,15 @@ function renderList() {
     // entries whose type matches that tab. This compares against
     // entry.type (not entry.status) - see typeInput in index.html for
     // where that value comes from when a comic is added.
-    const matchesFolder = (currentFilter === 'All') || (entry.type === currentFilter);
+    //
+    // "Notes" is a special case: the tab is called "Notes" (plural,
+    // matching TYPE_FILTER_OPTIONS above), but a Quick Note's own
+    // entry.type is 'Note' (singular) - see the "Quick Notes" section
+    // further down for why. So instead of comparing entry.type straight
+    // against currentFilter like every other tab does, this one extra
+    // branch checks for entry.type === 'Note' instead.
+    const matchesFolder = (currentFilter === 'All')
+      || (currentFilter === 'Notes' ? entry.type === 'Note' : entry.type === currentFilter);
 
     if (!matchesFolder) {
       // Already fails the folder check - no need to even look at the
@@ -2561,13 +2578,18 @@ function renderList() {
     }
 
     // --- Check 1b: does this entry match the active type tab's OWN status filter? ---
-    // Only type tabs (Manhwa/Other Comics/Videos) have a status filter
-    // at all - the top-level "All" tab has no #statusFilterRow (see
-    // index.html), so it always shows every status, same as before.
-    // When a type tab's own filter state is 'All' (see
-    // typeStatusFilters above), this check is skipped too - it only
-    // narrows things down once a specific status has been picked.
-    if (currentFilter !== 'All') {
+    // Only the real type tabs (Manhwa/Other Comics/Videos) have a status
+    // filter at all - "All" and "Notes" have no #statusFilterRow (see
+    // index.html and updateStatusFilterRowUI()'s isTypeTab check), so
+    // both always show every entry that made it past Check 1 above,
+    // same as before. ENTRY_TYPES.includes(...) (rather than just
+    // "!== 'All'") is what excludes "Notes" here too - typeStatusFilters
+    // only ever has entries for Manhwa/Other Comics/Videos, so looking
+    // one up for "Notes" would find nothing. When a type tab's own
+    // filter state is 'All' (see typeStatusFilters above), this check is
+    // skipped too - it only narrows things down once a specific status
+    // has been picked.
+    if (ENTRY_TYPES.includes(currentFilter)) {
       const filterState = typeStatusFilters[currentFilter];
       if (filterState.mode === 'Status' && entry.status !== filterState.status) {
         return false;
@@ -2685,6 +2707,20 @@ function renderList() {
       notePreview.addEventListener('click', function () {
         openQuickNoteModal(entry);
       });
+
+      // Same corner ribbon badge every comic card gets (see
+      // ".status-ribbon" further down, and the matching one built for
+      // comic cards later in this function) - reusing that exact class
+      // is what puts it in the same spot with the same shape/rotation.
+      // Unlike a comic's ribbon, this one never reads entry.status (a
+      // note doesn't have one) - it always just says the fixed word
+      // "Note", and ".status-ribbon.status-note" in style.css always
+      // colors it the same orange for every note, regardless of
+      // anything the user typed.
+      const noteRibbon = document.createElement('div');
+      noteRibbon.className = 'status-ribbon status-note';
+      noteRibbon.textContent = 'Note';
+      notePreview.appendChild(noteRibbon);
 
       const notePreviewText = document.createElement('span');
       notePreviewText.className = 'note-preview-text';
@@ -3516,27 +3552,30 @@ bulkAddSubmitButton.addEventListener('click', function () {
 // separate array off on its own.
 //
 // That one shared array is really the whole trick behind "notes show up
-// in All, but never in Manhwa/Other Comics/Videos, with no Notes tab of
-// their own": look back at the "matchesFolder" check inside renderList()
-// -
-//   const matchesFolder = (currentFilter === 'All') || (entry.type === currentFilter);
+// in All, AND also have their own dedicated Notes tab (phone width
+// only - see TYPE_FILTER_OPTIONS above), but never show up under
+// Manhwa/Other Comics/Videos": look back at the "matchesFolder" check
+// inside renderList() -
+//   const matchesFolder = (currentFilter === 'All')
+//     || (currentFilter === 'Notes' ? entry.type === 'Note' : entry.type === currentFilter);
 // - "All" always lets every entry through no matter its type, so a note
-// shows up there right alongside every comic. But none of the three
+// shows up there right alongside every comic. "Notes" has its own
+// explicit "entry.type === 'Note'" branch, since the tab itself is
+// named "Notes" (plural) while entry.type is 'Note' (singular) - so
+// only Quick Notes make it through that tab. And none of the three real
 // type tabs' data-filter values ("Manhwa", "Other Comics", "Videos")
-// ever equal "Note", so that same check quietly filters every note back
-// out the moment you're on any tab OTHER than All - with no extra
-// "is this a note?" check needed anywhere in that filtering logic. A
+// ever equal "Note" either, so that same check quietly filters every
+// note back out on any of those - with no extra checks needed there. A
 // Quick Note simply doesn't fit any of those three tabs, the same way a
-// Manhwa never shows up under the Videos tab - it's the exact same
-// mechanism already doing the work, not a special case bolted on for
-// notes.
+// Manhwa never shows up under the Videos tab.
 //
 // A note's card (built inside renderList() below) is handled as its own
 // early, separate branch though - reusing the comic-card code as-is
 // would mean constantly checking "does this field even apply to a
-// note?" (a note has no entry.status to build a ribbon out of, no
-// entry.chapter to format, etc.) - simpler to keep the "this is a note"
-// and "this is a comic" rendering code as two clearly separate paths.
+// note?" (a note has no entry.status - its ribbon always just says the
+// fixed word "Note" instead, see below - no entry.chapter to format,
+// etc.) - simpler to keep the "this is a note" and "this is a comic"
+// rendering code as two clearly separate paths.
 // And unlike a comic, a note doesn't open a detail PAGE at all when its
 // card is clicked - see the "Quick Note popup/modal" section further
 // down this file for why it gets a small popup instead, and how that's
@@ -3879,7 +3918,8 @@ function closeTypeFilterDropdown() {
 
 // Builds the list of choices inside the phone Type pill's menu, one
 // button per entry in TYPE_FILTER_OPTIONS (All/Manhwa/Other Comics/
-// Videos) - the same choices the real tabs offer. Picking one just
+// Videos/Notes) - the same choices the real tabs offer, plus the
+// phone-only "Notes" option tacked onto the end. Picking one just
 // calls selectTypeFilter(), exactly like clicking the real tab would.
 function buildTypeFilterDropdownMenu() {
   TYPE_FILTER_OPTIONS.forEach(function (type) {

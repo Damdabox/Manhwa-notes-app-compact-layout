@@ -903,6 +903,16 @@ body.private-mode #manhwaList {
   color: #fff;
 }
 
+/* Quick Note ribbon: always the same orange for every note, never
+   user-changeable, since a note has no entry.status to pick a color
+   from the way a comic's ribbon does above - see script.js where
+   entry.type === 'Note' cards are built. White text reads best on this
+   orange. */
+.status-ribbon.status-note {
+  background: #e08000;
+  color: #fff;
+}
+
 .entry-title {
   font-weight: bold;
 }
