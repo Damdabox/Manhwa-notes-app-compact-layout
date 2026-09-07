@@ -60,12 +60,6 @@ const zoomValueLabel = document.getElementById('zoomValueLabel');
 const zoomInButton = document.getElementById('zoomInButton');
 const zoomOutButton = document.getElementById('zoomOutButton');
 const privacyToggleInput = document.getElementById('privacyToggleInput');
-const phoneSettingsButton = document.getElementById('phoneSettingsButton');
-const phoneSettingsOverlay = document.getElementById('phoneSettingsOverlay');
-const phoneSettingsCloseButton = document.getElementById('phoneSettingsCloseButton');
-const phoneSettingsCardSizeSlot = document.getElementById('phoneSettingsCardSizeSlot');
-const phoneSettingsPrivacySlot = document.getElementById('phoneSettingsPrivacySlot');
-const phoneViewOptionButtons = document.querySelectorAll('.phone-view-option');
 const libraryView = document.getElementById('libraryView');
 const detailView = document.getElementById('detailView');
 const backButton = document.getElementById('backButton');
@@ -4111,114 +4105,6 @@ zoomOutButton.addEventListener('click', function () {
 // as the rest of the phone layout.
 const isPhoneWidth = window.matchMedia('(max-width: 600px)').matches;
 setCardScale(isPhoneWidth ? 0.9 : 1);
-
-// --- Phone settings menu ---
-// The three-dot button (top-left, phone widths only - see
-// .phone-settings-button in style.css) opens a small dropdown panel
-// with a "View" section, the Card Size slider, and the Cover/Private
-// toggle.
-//
-// The Card Size slider (.zoom-controls, holding #zoomSlider) and the
-// Cover/Private toggle (.privacy-toggle, holding #privacyToggleInput)
-// already exist elsewhere on the page, with all their real behavior
-// wired up in the "Zoom controls" and "Privacy toggle" sections above.
-// Rather than building a second slider/toggle inside this menu (which
-// would mean keeping two copies of the same logic in sync forever),
-// we just MOVE those exact same elements into this menu's slots
-// whenever it opens, and move them straight back to their normal spot
-// whenever it closes. Because it's the same element (same #zoomSlider,
-// same #privacyToggleInput) either way, every event listener already
-// attached to it above keeps working with no extra code here.
-//
-// zoomControlsHomeParent/zoomControlsHomeNextSibling (and the matching
-// pair for the privacy toggle) remember exactly where each element
-// started out in the page, so closePhoneSettingsMenu() can put them
-// back in that exact spot - "insertBefore(element, null)" behaves the
-// same as appendChild(element), so this still works correctly even if
-// the element was originally the very last child of its parent.
-const zoomControls = document.querySelector('.zoom-controls');
-const zoomControlsHomeParent = zoomControls.parentNode;
-const zoomControlsHomeNextSibling = zoomControls.nextSibling;
-
-const privacyToggleRow = document.querySelector('.privacy-toggle');
-const privacyToggleHomeParent = privacyToggleRow.parentNode;
-const privacyToggleHomeNextSibling = privacyToggleRow.nextSibling;
-
-function openPhoneSettingsMenu() {
-  phoneSettingsCardSizeSlot.appendChild(zoomControls);
-  phoneSettingsPrivacySlot.appendChild(privacyToggleRow);
-
-  phoneSettingsOverlay.classList.add('menu-open');
-  phoneSettingsButton.setAttribute('aria-expanded', 'true');
-}
-
-function closePhoneSettingsMenu() {
-  zoomControlsHomeParent.insertBefore(zoomControls, zoomControlsHomeNextSibling);
-  privacyToggleHomeParent.insertBefore(privacyToggleRow, privacyToggleHomeNextSibling);
-
-  phoneSettingsOverlay.classList.remove('menu-open');
-  phoneSettingsButton.setAttribute('aria-expanded', 'false');
-}
-
-phoneSettingsButton.addEventListener('click', openPhoneSettingsMenu);
-phoneSettingsCloseButton.addEventListener('click', closePhoneSettingsMenu);
-
-// Clicking the dimmed backdrop (anywhere outside the panel itself)
-// closes the menu too - same "event.target === the overlay itself"
-// check the Quick Note modal uses above, so a click that starts inside
-// the panel (the slider, the toggle, a View option) never counts as a
-// click "on" the backdrop.
-phoneSettingsOverlay.addEventListener('click', function (event) {
-  if (event.target === phoneSettingsOverlay) {
-    closePhoneSettingsMenu();
-  }
-});
-
-document.addEventListener('keydown', function (event) {
-  if (event.key === 'Escape' && phoneSettingsOverlay.classList.contains('menu-open')) {
-    closePhoneSettingsMenu();
-  }
-});
-
-// View options: three choices, styled as a vertical list with a
-// checkmark next to whichever one is active. "Grid (large)" is the
-// only one wired up to actually change the shelf's layout so far -
-// picking "List" or "Simple list" still just moves the checkmark for
-// now; making those actually change the shelf's layout is separate,
-// future work.
-
-// The key we save the chosen view under in localStorage - same idea as
-// STORAGE_KEY further up this file (which saves the comic list
-// itself), just for this one setting, so the view picked last time is
-// still selected the next time the app opens.
-const VIEW_STORAGE_KEY = 'manhwaViewMode';
-
-// Switches the shelf to the given view ('grid-large', 'list', or
-// 'simple-list'): moves the checkmark to match. Called both when a
-// View option is clicked below and once on page load to restore
-// whichever view was saved last time.
-function applyViewMode(view) {
-  phoneViewOptionButtons.forEach(function (optionButton) {
-    optionButton.classList.toggle('active', optionButton.dataset.view === view);
-  });
-
-  localStorage.setItem(VIEW_STORAGE_KEY, view);
-}
-
-phoneViewOptionButtons.forEach(function (optionButton) {
-  optionButton.addEventListener('click', function () {
-    applyViewMode(optionButton.dataset.view);
-  });
-});
-
-// Restore whichever view was saved from a previous visit. If nothing
-// has been saved yet, localStorage.getItem() returns null and we fall
-// back to 'grid-large' - matching the "active" class already sitting
-// on that button in index.html. Anyone who had the now-removed
-// "Grid (small)" selected also falls back to 'grid-large' here, since
-// that saved value no longer matches any option button.
-const savedViewMode = localStorage.getItem(VIEW_STORAGE_KEY);
-applyViewMode(savedViewMode === 'grid-small' ? 'grid-large' : savedViewMode || 'grid-large');
 
 // --- Link popup ---
 // Every link in the app (the compact card view, the Private list view,
