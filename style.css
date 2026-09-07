@@ -2485,6 +2485,20 @@ body.private-mode #manhwaList {
   #manhwaList li:not(.private-row) .entry-title { order: 1; }
   #manhwaList li:not(.private-row) .entry-rating { order: 2; }
   #manhwaList li:not(.private-row) .entry-link { order: 3; }
+
+  /* Makes the "Link" text twice as big on phone width only - laptop/
+     tablet never sees this media query, so they're untouched. "2em"
+     means "2x whatever size this text would otherwise be", so it just
+     scales up from its normal size instead of a fixed number that
+     could look wrong at different Card Size slider settings. Only
+     font-size is set here - color (#06c, from .entry-link above) and
+     the little link icon (sized separately by .icon-svg, not affected
+     by font-size) both stay exactly as they were, and the "order: 3"
+     line above still controls where it sits, untouched too. */
+  #manhwaList li:not(.private-row) .entry-link {
+    font-size: 2em;
+  }
+
   #manhwaList li:not(.private-row) .entry-chapter { order: 4; }
 
   /* The thin divider line the icons now sit below. Just a top border
