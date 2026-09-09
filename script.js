@@ -822,8 +822,13 @@ const TYPE_FILTER_OPTIONS = ['All'].concat(ENTRY_TYPES).concat(['Notes']);
 // Every type starts on mode: 'All', matching how the shelf looked
 // before this feature existed - nothing is filtered out by status
 // until you actually pick one.
+// The phone Status pill is reachable from the "All" tab too (see the
+// isTypeTab comment in updateStatusFilterRowUI() below), so "All" gets
+// its own filter state here as well, alongside the three real types -
+// otherwise picking a status while on "All" would have nowhere to save
+// that choice and would silently do nothing.
 const typeStatusFilters = {};
-ENTRY_TYPES.forEach(function (type) {
+['All'].concat(ENTRY_TYPES).forEach(function (type) {
   typeStatusFilters[type] = { mode: 'All', status: STATUS_OPTIONS[0] };
 });
 
@@ -852,9 +857,9 @@ function closePhoneStatusDropdown() {
 function selectStatusAll() {
   const filterState = typeStatusFilters[currentFilter];
 
-  // No per-type filter state exists for "All"/"Characters" (see the big
-  // comment above typeStatusFilters) - the phone Status pill is always
-  // visible now, so it's reachable from those tabs too. There's simply
+  // "All" now has its own filter state (see the comment above
+  // typeStatusFilters), but "Characters"/"Notes" still don't - the phone
+  // Status pill is reachable from those two as well, and there's simply
   // nothing to switch to "All" in that case, so do nothing instead of
   // crashing on filterState being undefined.
   if (!filterState) {
@@ -881,7 +886,7 @@ function selectStatus(status) {
   const filterState = typeStatusFilters[currentFilter];
 
   // Same reasoning as the guard in selectStatusAll() just above: the
-  // phone Status pill is reachable from "All"/"Characters" now, and
+  // phone Status pill is reachable from "Characters"/"Notes" too, and
   // neither one has a filterState to update.
   if (!filterState) {
     return;
@@ -967,20 +972,25 @@ function updateStatusFilterRowUI() {
   // style.css, which shows both pills unconditionally on phone widths.
   statusFilterRow.style.display = isTypeTab ? '' : 'none';
 
-  if (!isTypeTab) {
-    // There's no per-type filter state to read here (typeStatusFilters
-    // only knows about Manhwa/Other Comics/Videos - see the big
-    // comment above it), so just show the phone pill's default "All"
-    // label and stop, same as it shows on page load.
+  // "All" now carries its own filter state too (see the comment above
+  // typeStatusFilters), so the phone pill's label reflects it just like
+  // it does for a real type tab. Only "Characters"/"Notes" still have no
+  // filterState at all - for those, fall back to the static "All" label,
+  // same as it shows on page load.
+  const filterState = typeStatusFilters[currentFilter];
+  if (!filterState) {
     phoneStatusDropdownLabel.textContent = 'All';
     return;
   }
 
-  const filterState = typeStatusFilters[currentFilter];
-
-  statusAllButton.classList.toggle('active', filterState.mode === 'All');
-  statusDropdownButton.classList.toggle('active', filterState.mode === 'Status');
-  statusDropdownLabel.textContent = filterState.status;
+  // The desktop #statusAllButton/#statusDropdownButton pair only exists
+  // inside #statusFilterRow, which stays hidden for "All" (see above) -
+  // so only update their highlight/label while a real type tab is active.
+  if (isTypeTab) {
+    statusAllButton.classList.toggle('active', filterState.mode === 'All');
+    statusDropdownButton.classList.toggle('active', filterState.mode === 'Status');
+    statusDropdownLabel.textContent = filterState.status;
+  }
 
   // The phone pill only has room for ONE label, standing in for both
   // #statusAllButton and #statusDropdownButton at once - so it shows
@@ -2571,23 +2581,20 @@ function renderList() {
       return false;
     }
 
-    // --- Check 1b: does this entry match the active type tab's OWN status filter? ---
-    // Only the real type tabs (Manhwa/Other Comics/Videos) have a status
-    // filter at all - "All" and "Notes" have no #statusFilterRow (see
-    // index.html and updateStatusFilterRowUI()'s isTypeTab check), so
-    // both always show every entry that made it past Check 1 above,
-    // same as before. ENTRY_TYPES.includes(...) (rather than just
-    // "!== 'All'") is what excludes "Notes" here too - typeStatusFilters
-    // only ever has entries for Manhwa/Other Comics/Videos, so looking
-    // one up for "Notes" would find nothing. When a type tab's own
-    // filter state is 'All' (see typeStatusFilters above), this check is
-    // skipped too - it only narrows things down once a specific status
-    // has been picked.
-    if (ENTRY_TYPES.includes(currentFilter)) {
-      const filterState = typeStatusFilters[currentFilter];
-      if (filterState.mode === 'Status' && entry.status !== filterState.status) {
-        return false;
-      }
+    // --- Check 1b: does this entry match the active tab's OWN status filter? ---
+    // "All" and every real type tab (Manhwa/Other Comics/Videos) have a
+    // status filter - "Notes" doesn't (a Quick Note has no entry.status
+    // to compare against), so it always shows every entry that made it
+    // past Check 1 above, same as before. Looking filterState up directly
+    // (rather than checking ENTRY_TYPES.includes(currentFilter)) is what
+    // makes this cover "All" too - typeStatusFilters has real entries for
+    // "All" plus the three types, so only "Notes"/"Characters" come back
+    // undefined here. When a tab's own filter state is 'All' (see
+    // typeStatusFilters above), this check is skipped too - it only
+    // narrows things down once a specific status has been picked.
+    const statusFilterState = typeStatusFilters[currentFilter];
+    if (statusFilterState && statusFilterState.mode === 'Status' && entry.status !== statusFilterState.status) {
+      return false;
     }
 
     // --- Check 2: does this entry match what's typed in the search box? ---
