@@ -4071,10 +4071,12 @@ privacyToggleInput.addEventListener('change', function () {
 
 // How far the slider (and the +/- buttons) are allowed to go, and how
 // much one +/- click changes the zoom by. These match the min/max/step
-// already set on the <input type="range"> in index.html.
-const ZOOM_MIN = 0.6;
-const ZOOM_MAX = 1.8;
-const ZOOM_STEP = 0.1;
+// already set on the <input type="range"> in index.html. They're "let"
+// instead of "const" because the phone-width block further down
+// overrides them with a narrower range.
+let ZOOM_MIN = 0.6;
+let ZOOM_MAX = 1.8;
+let ZOOM_STEP = 0.1;
 
 // Applies a new zoom level: clamps it to the allowed range, writes it
 // onto the --card-scale CSS variable (which is what actually resizes
@@ -4111,6 +4113,23 @@ zoomOutButton.addEventListener('click', function () {
 // @media rule in style.css, so this switches at the same screen size
 // as the rest of the phone layout.
 const isPhoneWidth = window.matchMedia('(max-width: 600px)').matches;
+
+// On phone widths, the slider gets its own, narrower range: 60%-100%
+// in 5% steps (instead of the desktop range of 60%-180% in 10% steps).
+// Cards can't usefully get bigger than 100% on a narrow phone screen,
+// and smaller steps make fine-tuning easier on a small slider. This
+// updates both the JS constants (used by the +/- buttons and the
+// clamp in setCardScale) and the <input> attributes (used by the
+// browser when you drag the slider itself), so they stay in sync.
+if (isPhoneWidth) {
+  ZOOM_MIN = 0.6;
+  ZOOM_MAX = 1;
+  ZOOM_STEP = 0.05;
+  zoomSlider.min = ZOOM_MIN;
+  zoomSlider.max = ZOOM_MAX;
+  zoomSlider.step = ZOOM_STEP;
+}
+
 setCardScale(isPhoneWidth ? 0.9 : 1);
 
 // --- Link popup ---
