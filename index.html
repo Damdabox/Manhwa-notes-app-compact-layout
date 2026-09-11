@@ -797,5 +797,17 @@ The End"></textarea>
   </div>
 
   <script src="script.js"></script>
+
+  <!-- Registers service-worker.js, which forces the installed home-screen
+       app to always re-check the network for fresh files instead of
+       silently replaying whatever it first cached. See the comment at the
+       top of service-worker.js for the full explanation. -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js');
+      });
+    }
+  </script>
 </body>
 </html>
