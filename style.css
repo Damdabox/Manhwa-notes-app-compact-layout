@@ -754,11 +754,13 @@ body.private-mode #manhwaList {
   font-size: 15px;
 }
 
-/* Comic title, left-aligned. flex: 1 lets it take up all the leftover
-   space in the row, pushing the info text and action icons over
-   toward the right; the overflow/text-overflow/white-space trio is
-   what turns a too-long title into a "…" ellipsis instead of wrapping
-   the row onto a second line. */
+/* Title text, left-aligned, shared by a comic's private row and a
+   Quick Note's private row. flex: 1 lets it take up all the leftover
+   space in the row (there's nothing else in a note row to share that
+   space with); the comic row below overrides this with a fixed width
+   instead. The overflow/text-overflow/white-space trio is what turns
+   a too-long title into a "…" ellipsis instead of wrapping the row
+   onto a second line. */
 .private-row-title {
   flex: 1;
   min-width: 0; /* lets the ellipsis above actually kick in inside a flex item */
@@ -768,18 +770,22 @@ body.private-mode #manhwaList {
   white-space: nowrap;
 }
 
-/* Compact "Ch. # · Status" text sitting between the title and the
-   action icons. white-space: nowrap keeps it from wrapping mid-row. */
-.private-row-info {
-  color: #ccc;
-  white-space: nowrap;
+/* A comic's private row only (buildPrivateRow() in script.js adds this
+   extra class alongside ".private-row-title" - Quick Notes don't get
+   it). Caps the title at roughly the left 70-75% of the row instead of
+   letting it stretch, so there's always room left over for the link
+   on the right - see ".private-row .entry-link" below. */
+.private-row-title-wide {
+  flex: 0 0 72%;
 }
 
 /* Private rows keep the same edit/delete icon buttons as cards, but
    fixed-size (not scaled by --card-scale) for the same reason the row
-   itself uses fixed pixels above. These selectors (two classes) are
-   more specific than the plain ".entry-actions" / ".icon-button"
-   rules further down, so they win without needing !important. */
+   itself uses fixed pixels above. Only Quick Note rows still have
+   these buttons - see buildPrivateRow()/buildPrivateNoteRow() in
+   script.js. These selectors (two classes) are more specific than the
+   plain ".entry-actions" / ".icon-button" rules further down, so they
+   win without needing !important. */
 .private-row .entry-actions {
   gap: 8px;
   flex-shrink: 0;
@@ -791,10 +797,12 @@ body.private-mode #manhwaList {
   border-radius: 4px;
 }
 
-/* The comic link, sitting between the "Ch. # · Status" text and the
-   edit/delete icons. white-space: nowrap keeps "Link" from wrapping
-   onto its own line like the other private-row text. */
+/* The comic link. margin-left: auto pushes it all the way to the
+   right edge of the row, past the title's fixed 72% width, instead of
+   sitting right up against it. white-space: nowrap keeps "Link" from
+   wrapping onto its own line. */
 .private-row .entry-link {
+  margin-left: auto;
   white-space: nowrap;
 }
 

@@ -1692,14 +1692,27 @@ function buildEntryActions(entry, onEditClick) {
   return actionsRow;
 }
 
-// Fills in one Private-mode row for a comic: the title on the left, a
-// plain "<progress> · Status" text next, then the link, then the same
-// edit/delete icons on the right. listItem already exists (renderList()
-// created it and gave it the "private-row" class) - this function just
-// adds the pieces inside it.
+// Fills in one Private-mode row for a comic: the title, given most of
+// the row's width (see ".private-row-title" in style.css), and the
+// link on the right. listItem already exists (renderList() created it
+// and gave it the "private-row" class) - this function just adds the
+// pieces inside it.
+//
+// The chapter/status text and the edit/delete icons used to live here
+// too, but there wasn't enough room for all of it alongside a wide
+// title - long titles were getting truncated down to almost nothing.
+// Editing is still reachable from here (click the title to open the
+// detail page, which has its own Edit button). Deleting isn't - the
+// only way to delete a comic while Private mode is on is to switch it
+// off first and use the delete icon on the card in Cover view.
 function buildPrivateRow(listItem, entry) {
   const titleElement = document.createElement('div');
-  titleElement.className = 'private-row-title detail-link-target';
+  // "private-row-title-wide" is what caps this title at ~72% of the
+  // row's width instead of letting it stretch to fill everything -
+  // see the CSS comment on that class in style.css. Quick Note rows
+  // (buildPrivateNoteRow() below) don't add this class, so their
+  // titles still behave the old way.
+  titleElement.className = 'private-row-title private-row-title-wide detail-link-target';
   titleElement.textContent = entry.title;
   // Clicking the title opens this comic's detail page - see the
   // "Detail view" section above for what showDetailView() actually does.
@@ -1707,18 +1720,6 @@ function buildPrivateRow(listItem, entry) {
     showDetailView(entry);
   });
   listItem.appendChild(titleElement);
-
-  const infoElement = document.createElement('div');
-  infoElement.className = 'private-row-info';
-  // formatProgressText() (see the "Type" section near the top of this
-  // file) returns something like "Ch. 12" or "Vol. 3, Pg. 45" - or ''
-  // if this entry's progress field(s) are blank. Only stick the "·"
-  // separator (a plain middle-dot character, not an icon or HTML) in
-  // front of the status when there's actually progress text to
-  // separate it from.
-  const progressText = formatProgressText(entry);
-  infoElement.textContent = progressText ? (progressText + ' · ' + entry.status) : entry.status;
-  listItem.appendChild(infoElement);
 
   // Same clickable link as the card view - clicking it pops open the
   // Open/Copy popup instead of opening in a new tab right away, same
@@ -1734,8 +1735,6 @@ function buildPrivateRow(listItem, entry) {
   linkElement.rel = 'noopener noreferrer';
   wireLinkPopup(linkElement);
   listItem.appendChild(linkElement);
-
-  listItem.appendChild(buildEntryActions(entry));
 }
 
 // Fills in one Private-mode row for a Quick Note. Same idea as
