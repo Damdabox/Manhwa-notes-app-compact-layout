@@ -4311,6 +4311,7 @@ const authEmail = document.getElementById('authEmail');
 const authPassword = document.getElementById('authPassword');
 const signUpBtn = document.getElementById('signUpBtn');
 const signInBtn = document.getElementById('signInBtn');
+const logoutBtn = document.getElementById('logoutBtn');
 const authError = document.getElementById('authError');
 
 async function signUp() {
@@ -4364,5 +4365,6 @@ supabaseClient.auth.onAuthStateChange((_event, session) => {
 
 signUpBtn.addEventListener('click', signUp);
 signInBtn.addEventListener('click', signIn);
+logoutBtn.addEventListener('click', signOut);
 
 checkSession();
