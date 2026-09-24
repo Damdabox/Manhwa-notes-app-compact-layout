@@ -4303,3 +4303,66 @@ wireLinkPopup(detailLink);
 loadFromStorage();
 updateStatusFilterRowUI();
 renderList();
+
+// --- Auth ---
+const authScreen = document.getElementById('authScreen');
+const appScreen = document.getElementById('appScreen');
+const authEmail = document.getElementById('authEmail');
+const authPassword = document.getElementById('authPassword');
+const signUpBtn = document.getElementById('signUpBtn');
+const signInBtn = document.getElementById('signInBtn');
+const authError = document.getElementById('authError');
+
+async function signUp() {
+  authError.textContent = '';
+  const { error } = await supabaseClient.auth.signUp({
+    email: authEmail.value,
+    password: authPassword.value
+  });
+  if (error) {
+    authError.textContent = error.message;
+    return;
+  }
+  console.log('Signed up successfully');
+}
+
+async function signIn() {
+  authError.textContent = '';
+  const { error } = await supabaseClient.auth.signInWithPassword({
+    email: authEmail.value,
+    password: authPassword.value
+  });
+  if (error) {
+    authError.textContent = error.message;
+    return;
+  }
+  console.log('Signed in successfully');
+}
+
+async function signOut() {
+  await supabaseClient.auth.signOut();
+}
+
+async function checkSession() {
+  const { data } = await supabaseClient.auth.getSession();
+  showAuthOrApp(data.session);
+}
+
+function showAuthOrApp(session) {
+  if (session) {
+    authScreen.style.display = 'none';
+    appScreen.style.display = '';
+  } else {
+    authScreen.style.display = '';
+    appScreen.style.display = 'none';
+  }
+}
+
+supabaseClient.auth.onAuthStateChange((_event, session) => {
+  showAuthOrApp(session);
+});
+
+signUpBtn.addEventListener('click', signUp);
+signInBtn.addEventListener('click', signIn);
+
+checkSession();
