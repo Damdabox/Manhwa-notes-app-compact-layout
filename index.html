@@ -24,6 +24,24 @@
 </head>
 <body>
 
+  <!-- authScreen: email/password login gate, shown before the app itself.
+       No functionality wired up yet (see script.js) - just the markup for
+       the email/password fields, Sign Up / Log In buttons, and a spot to
+       show auth errors. -->
+  <div id="authScreen">
+    <input type="email" id="authEmail" placeholder="Email">
+    <input type="password" id="authPassword" placeholder="Password">
+    <button id="signUpBtn" type="button">Sign Up</button>
+    <button id="signInBtn" type="button">Log In</button>
+    <div id="authError"></div>
+  </div>
+
+  <!-- appScreen: wraps the entire existing app (everything that used to
+       sit directly in <body>) so it can be shown/hidden as one unit once
+       auth is wired up, the same way #libraryView/#detailView already
+       get swapped elsewhere in this file. -->
+  <div id="appScreen">
+
   <h1>Manhwa Notes App</h1>
 
   <!-- libraryView wraps EVERYTHING that makes up the normal shelf page
@@ -795,6 +813,8 @@ The End"></textarea>
     <button type="button" id="linkPopupOpenButton" class="link-popup-button">Open</button>
     <button type="button" id="linkPopupCopyButton" class="link-popup-button">Copy</button>
   </div>
+
+  </div><!-- /#appScreen -->
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="script.js"></script>
