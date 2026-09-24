@@ -1,3 +1,7 @@
+const SUPABASE_URL = 'https://frqqrpqwtuxdwizockzn.supabase.co' ;
+const SUPABASE_ANON_KEY = 'sb_publishable_w4vMi-reeCIjNY95HiWFDw_FnNdaRIc' ;
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 // Grab the elements we need from the page
 const titleInput = document.getElementById('titleInput');
 const typeInput = document.getElementById('typeInput');
