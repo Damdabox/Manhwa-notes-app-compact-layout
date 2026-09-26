@@ -1086,6 +1086,78 @@ function saveToStorage() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(manhwaEntries));
 }
 
+// Comics saved before the cover-image feature existed have no
+// "id" or "hasImage" field yet (those didn't exist when they were
+// first written out). Gives one entry every field the rest of this
+// file assumes is always there (id, hasImage, type, volume, page,
+// episode), filling in defaults for whichever ones are missing.
+// Returns true if anything was actually backfilled, so callers can
+// decide whether they need to persist the change.
+//
+// Shared by loadFromStorage() (below) and loadFromSupabase() (further
+// down), since entries can now arrive from either place and both need
+// the exact same defaults applied.
+function backfillEntryDefaults(entry) {
+  let backfilledSomething = false;
+
+  if (!entry.id) {
+    entry.id = generateComicId();
+    backfilledSomething = true;
+  }
+  if (entry.hasImage === undefined) {
+    entry.hasImage = false;
+    backfilledSomething = true;
+  }
+
+  // Comics saved before the Type feature existed have no "type"
+  // field yet either - give every one of THOSE type: 'Manhwa'.
+  // This is the key piece of the migration: it's exactly what the
+  // task means by "existing comics should automatically be treated
+  // as type Manhwa" - an old entry already has its chapter number
+  // sitting in entry.chapter untouched, so once it's labeled
+  // 'Manhwa' here, formatProgressText() above reads that same
+  // entry.chapter field and displays "Ch. <whatever it already
+  // was>" exactly as before. Nothing about the comic's existing
+  // data is moved, renamed, or rewritten - it just gains one new
+  // label.
+  if (entry.type === undefined) {
+    entry.type = 'Manhwa';
+    backfilledSomething = true;
+  }
+
+  // Likewise, an entry from before Other Comics/Videos existed has
+  // no volume/page/episode fields at all yet. Give it empty ones so
+  // every entry - old or new - has the same four progress fields,
+  // which is what the rest of this file assumes (see the "Type"
+  // section further up).
+  if (entry.volume === undefined) {
+    entry.volume = '';
+    backfilledSomething = true;
+  }
+  if (entry.page === undefined) {
+    entry.page = '';
+    backfilledSomething = true;
+  }
+  if (entry.episode === undefined) {
+    entry.episode = '';
+    backfilledSomething = true;
+  }
+
+  // NOTE: entry.updatedAt (see touchEntry() near the top of this
+  // file) is deliberately NOT backfilled here, unlike every field
+  // above. Every other field gets a default value because the rest
+  // of the code assumes it's always there. updatedAt is different:
+  // renderList()'s sort further down this file treats "no
+  // updatedAt at all" as its own special case meaning "put this at
+  // the bottom, below anything with a real timestamp" - which is
+  // exactly what we want for comics that existed before this
+  // feature shipped. Giving them a fake timestamp here would
+  // defeat that entirely, so we just leave the field missing and
+  // let the sort handle it.
+
+  return backfilledSomething;
+}
+
 // The reverse of saveToStorage(): reads that saved text string back
 // out of localStorage and uses JSON.parse() to turn it back into a
 // real JavaScript array of objects again, so it can be used like any
@@ -1104,67 +1176,11 @@ function loadFromStorage() {
     // a time, same as if we'd typed them out individually.
     manhwaEntries.push(...savedEntries);
 
-    // Comics saved before the cover-image feature existed have no
-    // "id" or "hasImage" field yet (those didn't exist when they were
-    // written to localStorage). Give every entry that's missing one a
-    // fresh id and hasImage: false, so the code below can always rely
-    // on both fields being there no matter how old the saved data is.
     let backfilledSomething = false;
     manhwaEntries.forEach(function (entry) {
-      if (!entry.id) {
-        entry.id = generateComicId();
+      if (backfillEntryDefaults(entry)) {
         backfilledSomething = true;
       }
-      if (entry.hasImage === undefined) {
-        entry.hasImage = false;
-        backfilledSomething = true;
-      }
-
-      // Comics saved before the Type feature existed have no "type"
-      // field yet either - give every one of THOSE type: 'Manhwa'.
-      // This is the key piece of the migration: it's exactly what the
-      // task means by "existing comics should automatically be treated
-      // as type Manhwa" - an old entry already has its chapter number
-      // sitting in entry.chapter untouched, so once it's labeled
-      // 'Manhwa' here, formatProgressText() above reads that same
-      // entry.chapter field and displays "Ch. <whatever it already
-      // was>" exactly as before. Nothing about the comic's existing
-      // data is moved, renamed, or rewritten - it just gains one new
-      // label.
-      if (entry.type === undefined) {
-        entry.type = 'Manhwa';
-        backfilledSomething = true;
-      }
-
-      // Likewise, an entry from before Other Comics/Videos existed has
-      // no volume/page/episode fields at all yet. Give it empty ones so
-      // every entry - old or new - has the same four progress fields,
-      // which is what the rest of this file assumes (see the "Type"
-      // section further up).
-      if (entry.volume === undefined) {
-        entry.volume = '';
-        backfilledSomething = true;
-      }
-      if (entry.page === undefined) {
-        entry.page = '';
-        backfilledSomething = true;
-      }
-      if (entry.episode === undefined) {
-        entry.episode = '';
-        backfilledSomething = true;
-      }
-
-      // NOTE: entry.updatedAt (see touchEntry() near the top of this
-      // file) is deliberately NOT backfilled here, unlike every field
-      // above. Every other field gets a default value because the rest
-      // of the code assumes it's always there. updatedAt is different:
-      // renderList()'s sort further down this file treats "no
-      // updatedAt at all" as its own special case meaning "put this at
-      // the bottom, below anything with a real timestamp" - which is
-      // exactly what we want for comics that existed before this
-      // feature shipped. Giving them a fake timestamp here would
-      // defeat that entirely, so we just leave the field missing and
-      // let the sort handle it.
     });
 
     // Write the backfilled ids/hasImage back to localStorage right
@@ -1180,6 +1196,47 @@ function loadFromStorage() {
       saveToStorage();
     }
   }
+}
+
+// The Supabase equivalent of loadFromStorage(): reads this user's rows
+// out of the "Entries" table instead of localStorage. Each row's
+// "data" column holds the full entry object (the same shape that used
+// to be saved to localStorage), so once we have the rows this works
+// just like loadFromStorage() from that point on - same backfill,
+// same renderList() call at the end.
+async function loadFromSupabase() {
+  const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+  if (userError || !user) {
+    console.error('Could not get current user for loadFromSupabase:', userError && userError.message);
+    return;
+  }
+
+  const { data: rows, error: fetchError } = await supabaseClient
+    .from('Entries')
+    .select('id, updated_at, data')
+    .eq('user_id', user.id);
+
+  if (fetchError) {
+    console.error('Could not load entries from Supabase:', fetchError.message);
+    return;
+  }
+
+  // Clear manhwaEntries first so repeated calls (e.g. re-running this
+  // after login) don't duplicate everything already on the shelf.
+  manhwaEntries.length = 0;
+
+  rows.forEach(function (row) {
+    manhwaEntries.push(row.data);
+  });
+
+  // Same backfill loadFromStorage() does for old entries missing
+  // fields like hasImage/type/volume/page/episode - applied here too
+  // since entries loaded from Supabase can be just as old.
+  manhwaEntries.forEach(function (entry) {
+    backfillEntryDefaults(entry);
+  });
+
+  renderList();
 }
 
 // --- Cover images (IndexedDB) ---
@@ -4349,11 +4406,12 @@ async function checkSession() {
   showAuthOrApp(data.session);
 }
 
-function showAuthOrApp(session) {
+async function showAuthOrApp(session) {
   if (session) {
     authScreen.style.display = 'none';
     appScreen.style.display = '';
-    migrateLocalDataToSupabase();
+    await migrateLocalDataToSupabase();
+    await loadFromSupabase();
   } else {
     authScreen.style.display = '';
     appScreen.style.display = 'none';
