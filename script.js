@@ -4353,10 +4353,65 @@ function showAuthOrApp(session) {
   if (session) {
     authScreen.style.display = 'none';
     appScreen.style.display = '';
+    migrateLocalDataToSupabase();
   } else {
     authScreen.style.display = '';
     appScreen.style.display = 'none';
   }
+}
+
+// One-time migration: copies any comics that were saved to
+// localStorage (back before Supabase existed) into this user's
+// "Entries" table. Runs every time showAuthOrApp() sees a logged-in
+// session, but it checks Supabase first and bails out if this user
+// already has rows there, so it only ever actually migrates once.
+async function migrateLocalDataToSupabase() {
+  const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+  if (userError || !user) {
+    console.error('Could not get current user for migration:', userError && userError.message);
+    return;
+  }
+
+  const { data: existingRows, error: fetchError } = await supabaseClient
+    .from('Entries')
+    .select('id')
+    .eq('user_id', user.id);
+
+  if (fetchError) {
+    console.error('Could not check existing Supabase entries:', fetchError.message);
+    return;
+  }
+
+  if (existingRows.length > 0) {
+    return;
+  }
+
+  // manhwaEntries was already filled in from localStorage by
+  // loadFromStorage() at page load (see near the bottom of the
+  // "Page load" section above) - no need to load it again here.
+  if (manhwaEntries.length === 0) {
+    console.log('No local data to migrate');
+    return;
+  }
+
+  const rowsToInsert = manhwaEntries.map(function (entry) {
+    return {
+      user_id: user.id,
+      updated_at: new Date(entry.updatedAt || Date.now()).toISOString(),
+      data: entry
+    };
+  });
+
+  const { error: insertError } = await supabaseClient
+    .from('Entries')
+    .insert(rowsToInsert);
+
+  if (insertError) {
+    console.error('Migration to Supabase failed:', insertError.message);
+    return;
+  }
+
+  console.log(`Migrated ${rowsToInsert.length} entries to Supabase`);
 }
 
 supabaseClient.auth.onAuthStateChange((_event, session) => {
