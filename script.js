@@ -457,7 +457,9 @@ function renderSceneEntries(entry) {
       // array) and shifts the rest down, then saves the shorter list
       // and redraws so the deleted row disappears.
       entry.scenes.splice(index, 1);
+      touchEntry(entry);
       saveToStorage();
+      syncEntryToSupabase(entry);
       renderSceneEntries(entry);
     });
     row.appendChild(deleteButton);
@@ -1131,6 +1133,37 @@ async function syncEntryToSupabase(entry) {
   }
 }
 
+// The delete counterpart to syncEntryToSupabase() above: removes ONE
+// entry's row from this user's "Entries" table, matched on the same
+// (user_id, entry_id) pair the upsert uses. Only for deleting a whole
+// entry (a comic or a quick note) - scenes and characters live inside
+// an entry's data blob, not their own rows, so deleting one of those
+// is just a normal syncEntryToSupabase() of the parent entry instead.
+//
+// Same fire-and-forget rules as syncEntryToSupabase(): runs after
+// saveToStorage(), callers don't await it, and failures are only logged.
+async function deleteEntryFromSupabase(entryId) {
+  try {
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      console.error('Could not get current user for deleteEntryFromSupabase:', userError && userError.message);
+      return;
+    }
+
+    const { error: deleteError } = await supabaseClient
+      .from('Entries')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('entry_id', entryId);
+
+    if (deleteError) {
+      console.error('Could not delete entry from Supabase:', deleteError.message);
+    }
+  } catch (err) {
+    console.error('Could not delete entry from Supabase:', err);
+  }
+}
+
 // Comics saved before the cover-image feature existed have no
 // "id" or "hasImage" field yet (those didn't exist when they were
 // first written out). Gives one entry every field the rest of this
@@ -1789,6 +1822,7 @@ function buildEntryActions(entry, onEditClick) {
     // Save the shorter list to localStorage so the deleted entry
     // doesn't come back after a page refresh.
     saveToStorage();
+    deleteEntryFromSupabase(entry.id);
 
     // Redraw the shelf so the deleted card disappears immediately
     renderList();
@@ -2540,7 +2574,9 @@ function deleteCharacter(entry, character) {
   });
   forgetCachedCharacterImageUrl(character.id);
 
+  touchEntry(entry);
   saveToStorage();
+  syncEntryToSupabase(entry);
   renderCharacterEntries(entry);
 
   // If the character just deleted is the one currently open in the
@@ -3397,7 +3433,7 @@ addButton.addEventListener('click', function () {
   // holding the exact same array (instead of a copy), emptying
   // newComicTags would also empty the tags we just saved on this
   // entry, since both names would be pointing at the one array.
-  manhwaEntries.push({
+  const newEntry = {
     id: generateComicId(),
     title: title,
     type: type,
@@ -3417,11 +3453,13 @@ addButton.addEventListener('click', function () {
     // Stamped as "now" so this brand new entry sorts to the very top
     // of the shelf - see touchEntry() and renderList()'s sort step.
     updatedAt: Date.now()
-  });
+  };
+  manhwaEntries.push(newEntry);
 
   // Save the new full list to localStorage so the new entry survives
   // a page refresh.
   saveToStorage();
+  syncEntryToSupabase(newEntry);
 
   // Redraw the list so the new entry shows up
   renderList();
@@ -3574,6 +3612,9 @@ bulkAddSubmitButton.addEventListener('click', function () {
 
   const addedTitles = [];
   const skippedTitles = [];
+  // The actual entry objects added this batch, so each one can be
+  // pushed up to Supabase once the whole batch has been saved locally.
+  const addedEntries = [];
 
   titles.forEach(function (title) {
     const titleLower = title.toLowerCase();
@@ -3590,7 +3631,7 @@ bulkAddSubmitButton.addEventListener('click', function () {
     // There's no Type dropdown in the Bulk Add panel, so every comic
     // added this way starts as type 'Manhwa' (its type can always be
     // changed afterward via Edit, same as any other entry).
-    manhwaEntries.push({
+    const newEntry = {
       id: generateComicId(),
       title: title,
       type: 'Manhwa',
@@ -3613,7 +3654,9 @@ bulkAddSubmitButton.addEventListener('click', function () {
       // typed in (see the sort step in renderList()) - either way,
       // the whole freshly-added batch lands above older entries.
       updatedAt: Date.now()
-    });
+    };
+    manhwaEntries.push(newEntry);
+    addedEntries.push(newEntry);
 
     addedTitles.push(title);
 
@@ -3627,6 +3670,7 @@ bulkAddSubmitButton.addEventListener('click', function () {
     // Save and redraw once, after the whole batch is processed -
     // there's no need to save/redraw after every single title.
     saveToStorage();
+    addedEntries.forEach(syncEntryToSupabase);
     renderList();
   }
 
@@ -3911,8 +3955,9 @@ quickNoteModalSaveButton.addEventListener('click', function () {
     return;
   }
 
+  let savedNote;
   if (editingQuickNoteEntry === null) {
-    manhwaEntries.push({
+    savedNote = {
       id: generateComicId(),
       title: title,
       type: 'Note',
@@ -3920,17 +3965,17 @@ quickNoteModalSaveButton.addEventListener('click', function () {
       // Stamped as "now" so this note sorts to the top of "All" -
       // see touchEntry() and renderList()'s sort step.
       updatedAt: Date.now()
-    });
+    };
+    manhwaEntries.push(savedNote);
   } else {
-    editingQuickNoteEntry.title = title;
-    editingQuickNoteEntry.noteText = quickNoteModalTextInput.value;
-    touchEntry(editingQuickNoteEntry);
+    savedNote = editingQuickNoteEntry;
+    savedNote.title = title;
+    savedNote.noteText = quickNoteModalTextInput.value;
+    touchEntry(savedNote);
   }
 
   saveToStorage();
-  if (editingQuickNoteEntry !== null) {
-    syncEntryToSupabase(editingQuickNoteEntry);
-  }
+  syncEntryToSupabase(savedNote);
   renderList();
   closeQuickNoteModal();
 });
@@ -3953,6 +3998,7 @@ quickNoteModalDeleteButton.addEventListener('click', function () {
   const indexToRemove = manhwaEntries.indexOf(editingQuickNoteEntry);
   manhwaEntries.splice(indexToRemove, 1);
   saveToStorage();
+  deleteEntryFromSupabase(editingQuickNoteEntry.id);
   renderList();
   closeQuickNoteModal();
 });
