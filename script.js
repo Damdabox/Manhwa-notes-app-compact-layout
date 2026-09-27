@@ -302,6 +302,7 @@ function renderDetailRatingStars(entry) {
       // a rating through the old number input used to.
       touchEntry(entry);
       saveToStorage();
+      syncEntryToSupabase(entry);
 
       // Redraw immediately so the newly tapped star (and every star
       // before it) fills in right away - this is the whole point of
@@ -1084,6 +1085,50 @@ const STORAGE_KEY = 'manhwaEntries';
 // what's saved always matches what's on screen.
 function saveToStorage() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(manhwaEntries));
+}
+
+// Pushes ONE entry up to this user's "Entries" table in Supabase. Runs
+// in addition to saveToStorage(), never instead of it - localStorage
+// is still saved first, so the edit is kept on this device even if
+// Supabase can't be reached right now.
+//
+// upsert() means "update if it exists, insert if it doesn't". The
+// onConflict option tells Supabase which columns decide "exists": the
+// (user_id, entry_id) unique constraint on the table. So editing a
+// comic updates its existing row, and a brand-new comic gets a new one.
+//
+// Callers don't await this - it's fire-and-forget. Any failure is only
+// logged to the console so it can never break the save the user just
+// made.
+async function syncEntryToSupabase(entry) {
+  try {
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      console.error('Could not get current user for syncEntryToSupabase:', userError && userError.message);
+      return;
+    }
+
+    const { error: upsertError } = await supabaseClient
+      .from('Entries')
+      .upsert(
+        {
+          user_id: user.id,
+          entry_id: entry.id,
+          // entry.updatedAt is a Date.now() number (milliseconds), but
+          // the updated_at column is a timestamptz, so convert it to an
+          // ISO date string - same as migrateLocalDataToSupabase() does.
+          updated_at: new Date(entry.updatedAt || Date.now()).toISOString(),
+          data: entry
+        },
+        { onConflict: 'user_id,entry_id' }
+      );
+
+    if (upsertError) {
+      console.error('Could not sync entry to Supabase:', upsertError.message);
+    }
+  } catch (err) {
+    console.error('Could not sync entry to Supabase:', err);
+  }
 }
 
 // Comics saved before the cover-image feature existed have no
@@ -2063,6 +2108,7 @@ saveNotesButton.addEventListener('click', function () {
   currentDetailEntry.notes = detailNotesTextarea.value;
   touchEntry(currentDetailEntry);
   saveToStorage();
+  syncEntryToSupabase(currentDetailEntry);
 
   // Quick "Saved!" confirmation on the button itself, then switch the
   // label back after a second - just enough feedback to confirm the
@@ -2216,6 +2262,7 @@ saveEntryEditButton.addEventListener('click', function () {
   touchEntry(entry);
 
   saveToStorage();
+  syncEntryToSupabase(entry);
 
   showDetailView(entry);
   renderList();
@@ -2263,6 +2310,7 @@ saveSceneButton.addEventListener('click', function () {
 
   touchEntry(currentDetailEntry);
   saveToStorage();
+  syncEntryToSupabase(currentDetailEntry);
   renderSceneEntries(currentDetailEntry);
 
   addSceneForm.style.display = 'none';
@@ -2392,6 +2440,7 @@ removeCharacterImageButton.addEventListener('click', function () {
 function finishSavingCharacter(entry) {
   touchEntry(entry);
   saveToStorage();
+  syncEntryToSupabase(entry);
   renderCharacterEntries(entry);
 
   addCharacterForm.style.display = 'none';
@@ -3143,6 +3192,7 @@ function renderList() {
         // Save the updated entry to localStorage so the edit survives
         // a page refresh.
         saveToStorage();
+        syncEntryToSupabase(entry);
 
         // Redraw the shelf. This re-runs the type-based folder filter
         // at the top of renderList() using the entry's new type, so if
@@ -3878,6 +3928,9 @@ quickNoteModalSaveButton.addEventListener('click', function () {
   }
 
   saveToStorage();
+  if (editingQuickNoteEntry !== null) {
+    syncEntryToSupabase(editingQuickNoteEntry);
+  }
   renderList();
   closeQuickNoteModal();
 });
