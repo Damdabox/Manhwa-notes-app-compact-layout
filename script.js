@@ -1295,25 +1295,12 @@ function loadFromStorage() {
     // a time, same as if we'd typed them out individually.
     manhwaEntries.push(...savedEntries);
 
-    let backfilledSomething = false;
+    // Backfill missing fields in memory only. Nothing is written back
+    // to localStorage - Supabase is the source of truth now, and
+    // loadFromSupabase() replaces this list once the user logs in.
     manhwaEntries.forEach(function (entry) {
-      if (backfillEntryDefaults(entry)) {
-        backfilledSomething = true;
-      }
+      backfillEntryDefaults(entry);
     });
-
-    // Write the backfilled ids/hasImage back to localStorage right
-    // away (instead of waiting for some other change to trigger a
-    // save). This matters specifically for "id": once a comic gets an
-    // id, that id needs to stay the SAME forever, because it's also
-    // used as the lookup key for that comic's cover image in
-    // IndexedDB (see the "Cover images" section below). If we let a
-    // fresh random id get generated again on every page load instead
-    // of saving it, any image saved under yesterday's id would become
-    // unreachable under today's new one.
-    if (backfilledSomething) {
-      saveToStorage();
-    }
   }
 }
 
@@ -4550,7 +4537,6 @@ async function showAuthOrApp(session) {
   if (session) {
     authScreen.style.display = 'none';
     appScreen.style.display = '';
-    await migrateLocalDataToSupabase();
     await loadFromSupabase();
   } else {
     authScreen.style.display = '';
@@ -4560,9 +4546,11 @@ async function showAuthOrApp(session) {
 
 // One-time migration: copies any comics that were saved to
 // localStorage (back before Supabase existed) into this user's
-// "Entries" table. Runs every time showAuthOrApp() sees a logged-in
-// session, but it checks Supabase first and bails out if this user
-// already has rows there, so it only ever actually migrates once.
+// "Entries" table. No longer called automatically - the original
+// migration is done, and running it on every login copied this
+// browser's leftover localStorage data into brand-new accounts. Kept
+// so it can be triggered manually (e.g. from the console) if needed.
+// It checks Supabase first and bails out if this user already has rows.
 async function migrateLocalDataToSupabase() {
   const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
   if (userError || !user) {
