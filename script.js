@@ -1121,6 +1121,97 @@ function hideSyncErrorBanner() {
 
 document.getElementById('syncErrorBannerClose').addEventListener('click', hideSyncErrorBanner);
 
+// --- Offline pending-writes queue ---
+// When syncEntryToSupabase() below fails, the entry is saved here so the
+// edit isn't lost. This is its own IndexedDB database, separate from the
+// image database further down, so changing one never needs a version
+// bump (and upgrade) of the other.
+//
+// The "pendingWrites" store uses entry_id as its keyPath, so if the same
+// entry fails to sync twice, the second record just overwrites the first
+// - there's only ever one pending record per entry, holding its latest
+// version. Each record looks like:
+//   { entry_id, entry, queuedAt }
+// where queuedAt is a Date.now() number (milliseconds).
+//
+// Nothing retries these yet - that's the next step. For now they just
+// sit in the queue so they survive a reload.
+const PENDING_WRITES_DB_NAME = 'manhwa-offline-queue';
+const PENDING_WRITES_DB_VERSION = 1;
+const PENDING_WRITES_STORE_NAME = 'pendingWrites';
+
+// Same open-once-and-cache pattern as openImageDatabase() below.
+let pendingWritesDatabasePromise = null;
+function openPendingWritesDatabase() {
+  if (pendingWritesDatabasePromise) {
+    return pendingWritesDatabasePromise;
+  }
+
+  pendingWritesDatabasePromise = new Promise(function (resolve, reject) {
+    const openRequest = indexedDB.open(PENDING_WRITES_DB_NAME, PENDING_WRITES_DB_VERSION);
+
+    openRequest.onupgradeneeded = function () {
+      const db = openRequest.result;
+      if (!db.objectStoreNames.contains(PENDING_WRITES_STORE_NAME)) {
+        db.createObjectStore(PENDING_WRITES_STORE_NAME, { keyPath: 'entry_id' });
+      }
+    };
+
+    openRequest.onsuccess = function () {
+      resolve(openRequest.result);
+    };
+
+    openRequest.onerror = function () {
+      // Clear the cache so a later call can try opening it again.
+      pendingWritesDatabasePromise = null;
+      reject(openRequest.error);
+    };
+  });
+
+  return pendingWritesDatabasePromise;
+}
+
+// Saves (or overwrites) this entry's pending record. .put() replaces
+// any existing record with the same entry_id.
+function queuePendingWrite(entry) {
+  return openPendingWritesDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
+      transaction.objectStore(PENDING_WRITES_STORE_NAME).put({
+        entry_id: entry.id,
+        entry: entry,
+        queuedAt: Date.now()
+      });
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// Returns an array of every record currently in the queue (empty array
+// if there are none).
+function getPendingWrites() {
+  return openPendingWritesDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const request = db
+        .transaction(PENDING_WRITES_STORE_NAME, 'readonly')
+        .objectStore(PENDING_WRITES_STORE_NAME)
+        .getAll();
+      request.onsuccess = function () { resolve(request.result); };
+      request.onerror = function () { reject(request.error); };
+    });
+  });
+}
+
+// Called from every failure branch of syncEntryToSupabase(). Catches its
+// own errors so a broken queue (e.g. IndexedDB unavailable in a private
+// window) only logs, and never throws out of the sync's error handling.
+function queueFailedSync(entry) {
+  queuePendingWrite(entry).catch(function (err) {
+    console.error('Could not queue pending write for entry ' + entry.id + ':', err);
+  });
+}
+
 // Pushes ONE entry up to this user's "Entries" table in Supabase.
 // Supabase is where entries are stored - saveToStorage() no longer
 // writes entry data to localStorage, so this sync is what saves the
@@ -1133,15 +1224,16 @@ document.getElementById('syncErrorBannerClose').addEventListener('click', hideSy
 //
 // Callers don't await this - it's fire-and-forget. Any failure is
 // logged to the console and shows the sync error banner (see
-// showSyncErrorBanner() above), so the app keeps running, but the edit
-// is NOT saved anywhere: it only lives in memory until the page is
-// reloaded.
+// showSyncErrorBanner() above), so the app keeps running, and the entry
+// is saved to the offline pending-writes queue (see queuePendingWrite()
+// above) so the edit survives a reload.
 async function syncEntryToSupabase(entry) {
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
       console.error('Could not get current user for syncEntryToSupabase:', userError && userError.message);
       showSyncErrorBanner();
+      queueFailedSync(entry);
       return;
     }
 
@@ -1163,10 +1255,12 @@ async function syncEntryToSupabase(entry) {
     if (upsertError) {
       console.error('Could not sync entry to Supabase:', upsertError.message);
       showSyncErrorBanner();
+      queueFailedSync(entry);
     }
   } catch (err) {
     console.error('Could not sync entry to Supabase:', err);
     showSyncErrorBanner();
+    queueFailedSync(entry);
   }
 }
 
