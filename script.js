@@ -1079,20 +1079,19 @@ function touchEntry(entry) {
 // loadFromStorage() can never accidentally use different keys.
 const STORAGE_KEY = 'manhwaEntries';
 
-// localStorage can only store text (strings) - it can't store a real
-// JavaScript array of objects. JSON.stringify() converts our
-// manhwaEntries array into one long text string that looks like
-// '[{"title":"Solo Leveling","chapter":"180",...}]' so it's safe to
-// hand to localStorage. We call this any time the data changes so
-// what's saved always matches what's on screen.
+// Intentionally a no-op now. Supabase is the source of truth for
+// entries, and localStorage is shared per-browser rather than
+// per-account - writing entries here could leak one user's data into
+// the next account that logs in on this browser (via
+// migrateLocalDataToSupabase()). The function and its call sites are
+// kept so nothing else has to change.
 function saveToStorage() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(manhwaEntries));
 }
 
-// Pushes ONE entry up to this user's "Entries" table in Supabase. Runs
-// in addition to saveToStorage(), never instead of it - localStorage
-// is still saved first, so the edit is kept on this device even if
-// Supabase can't be reached right now.
+// Pushes ONE entry up to this user's "Entries" table in Supabase.
+// Supabase is where entries are stored - saveToStorage() no longer
+// writes entry data to localStorage, so this sync is what saves the
+// edit.
 //
 // upsert() means "update if it exists, insert if it doesn't". The
 // onConflict option tells Supabase which columns decide "exists": the
@@ -1100,8 +1099,8 @@ function saveToStorage() {
 // comic updates its existing row, and a brand-new comic gets a new one.
 //
 // Callers don't await this - it's fire-and-forget. Any failure is only
-// logged to the console so it can never break the save the user just
-// made.
+// logged to the console, so the app keeps running, but the edit is NOT
+// saved anywhere: it only lives in memory until the page is reloaded.
 async function syncEntryToSupabase(entry) {
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
