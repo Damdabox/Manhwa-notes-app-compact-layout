@@ -1131,11 +1131,13 @@ document.getElementById('syncErrorBannerClose').addEventListener('click', hideSy
 // entry fails to sync twice, the second record just overwrites the first
 // - there's only ever one pending record per entry, holding its latest
 // version. Each record looks like:
-//   { entry_id, entry, queuedAt }
-// where queuedAt is a Date.now() number (milliseconds).
+//   { entry_id, user_id, entry, queuedAt }
+// where queuedAt is a Date.now() number (milliseconds), and user_id is
+// whoever was logged in when it was queued (so retryPendingWrites() never
+// pushes one account's edit into a different account on a shared browser).
 //
-// Nothing retries these yet - that's the next step. For now they just
-// sit in the queue so they survive a reload.
+// retryPendingWrites() further down re-sends these when the browser comes
+// back online, and after login.
 const PENDING_WRITES_DB_NAME = 'manhwa-offline-queue';
 const PENDING_WRITES_DB_VERSION = 1;
 const PENDING_WRITES_STORE_NAME = 'pendingWrites';
@@ -1172,16 +1174,56 @@ function openPendingWritesDatabase() {
 }
 
 // Saves (or overwrites) this entry's pending record. .put() replaces
-// any existing record with the same entry_id.
-function queuePendingWrite(entry) {
-  return openPendingWritesDatabase().then(function (db) {
-    return new Promise(function (resolve, reject) {
-      const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
-      transaction.objectStore(PENDING_WRITES_STORE_NAME).put({
+// any existing record with the same entry_id - UNLESS the record already
+// there holds a newer version of the entry (bigger updatedAt). That can
+// happen when a retry of an old version fails after the user has already
+// made a newer edit that also failed; without this check the old version
+// would overwrite the newer one in the queue.
+//
+// The user id comes from getSession(), which reads the saved login
+// locally, with no network request, so it still works while offline.
+async function queuePendingWrite(entry) {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const userId = session ? session.user.id : null;
+  const db = await openPendingWritesDatabase();
+
+  return new Promise(function (resolve, reject) {
+    const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(PENDING_WRITES_STORE_NAME);
+    const getRequest = store.get(entry.id);
+    getRequest.onsuccess = function () {
+      const existing = getRequest.result;
+      if (existing && (existing.entry.updatedAt || 0) > (entry.updatedAt || 0)) {
+        return;
+      }
+      store.put({
         entry_id: entry.id,
+        user_id: userId,
         entry: entry,
         queuedAt: Date.now()
       });
+    };
+    transaction.oncomplete = function () { resolve(); };
+    transaction.onerror = function () { reject(transaction.error); };
+  });
+}
+
+// Removes this entry's pending record once a sync of it has succeeded -
+// but only if the queued version isn't newer than what was just synced.
+// If the user made another edit (which failed and got queued) while this
+// sync was in flight, that newer record has to stay for the next retry.
+function removePendingWriteIfSynced(entry) {
+  return openPendingWritesDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(PENDING_WRITES_STORE_NAME);
+      const getRequest = store.get(entry.id);
+      getRequest.onsuccess = function () {
+        const existing = getRequest.result;
+        if (existing && (existing.entry.updatedAt || 0) <= (entry.updatedAt || 0)) {
+          store.delete(entry.id);
+        }
+      };
       transaction.oncomplete = function () { resolve(); };
       transaction.onerror = function () { reject(transaction.error); };
     });
@@ -1212,6 +1254,53 @@ function queueFailedSync(entry) {
   });
 }
 
+// Tries to re-send every queued entry that belongs to the logged-in user.
+// Records are removed by syncEntryToSupabase() itself when a sync
+// succeeds (see removePendingWriteIfSynced() above); a record whose retry
+// fails just gets re-queued by that same function, so it's still there
+// for the next attempt.
+//
+// Entries are sent one at a time rather than all at once, so a big queue
+// doesn't fire dozens of requests the moment the connection comes back.
+//
+// Both the 'online' listener and login call this, and they can overlap
+// (e.g. reconnecting also restores the session). If a retry is already
+// running, callers get that same run's promise instead of starting a
+// second one that would send every entry twice.
+let retryPendingWritesPromise = null;
+function retryPendingWrites() {
+  if (retryPendingWritesPromise) {
+    return retryPendingWritesPromise;
+  }
+
+  retryPendingWritesPromise = (async function () {
+    try {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (!session) {
+        return;
+      }
+
+      const records = await getPendingWrites();
+      for (const record of records) {
+        if (record.user_id !== session.user.id) {
+          continue;
+        }
+        await syncEntryToSupabase(record.entry);
+      }
+    } catch (err) {
+      console.error('Could not retry pending writes:', err);
+    } finally {
+      retryPendingWritesPromise = null;
+    }
+  })();
+
+  return retryPendingWritesPromise;
+}
+
+window.addEventListener('online', function () {
+  retryPendingWrites();
+});
+
 // Pushes ONE entry up to this user's "Entries" table in Supabase.
 // Supabase is where entries are stored - saveToStorage() no longer
 // writes entry data to localStorage, so this sync is what saves the
@@ -1226,7 +1315,9 @@ function queueFailedSync(entry) {
 // logged to the console and shows the sync error banner (see
 // showSyncErrorBanner() above), so the app keeps running, and the entry
 // is saved to the offline pending-writes queue (see queuePendingWrite()
-// above) so the edit survives a reload.
+// above) so the edit survives a reload. On success, any queued copy of
+// the entry is removed. retryPendingWrites() awaits this so the next
+// entry isn't sent until this one finishes.
 async function syncEntryToSupabase(entry) {
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
@@ -1256,7 +1347,15 @@ async function syncEntryToSupabase(entry) {
       console.error('Could not sync entry to Supabase:', upsertError.message);
       showSyncErrorBanner();
       queueFailedSync(entry);
+      return;
     }
+
+    // Synced - drop any queued copy of this entry, whether this was a
+    // retry or just a normal edit. Otherwise an older queued version
+    // could get retried later and overwrite this newer one in Supabase.
+    await removePendingWriteIfSynced(entry).catch(function (err) {
+      console.error('Could not remove pending write for entry ' + entry.id + ':', err);
+    });
   } catch (err) {
     console.error('Could not sync entry to Supabase:', err);
     showSyncErrorBanner();
@@ -4631,6 +4730,11 @@ async function showAuthOrApp(session) {
   if (session) {
     authScreen.style.display = 'none';
     appScreen.style.display = '';
+    // Push any edits queued while offline BEFORE loading, so the shelf
+    // loads the synced versions instead of the older ones still in
+    // Supabase. If we're still offline this fails quickly and the
+    // records stay queued.
+    await retryPendingWrites();
     await loadFromSupabase();
   } else {
     authScreen.style.display = '';
