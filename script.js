@@ -1088,6 +1088,39 @@ const STORAGE_KEY = 'manhwaEntries';
 function saveToStorage() {
 }
 
+// --- Sync error banner ---
+// Shows the #syncErrorBanner warning (see index.html) whenever a save
+// or delete to Supabase fails. syncEntryToSupabase() and
+// deleteEntryFromSupabase() below call this from every one of their
+// failure branches, so every add/edit/delete anywhere in the app gets
+// the same visible warning without each caller having to handle it.
+//
+// It auto-hides after SYNC_ERROR_BANNER_MS. If another failure happens
+// while it's already showing (e.g. Bulk Add syncing lots of entries at
+// once), the timer just restarts instead of stacking up banners.
+const SYNC_ERROR_BANNER_MS = 6000;
+let syncErrorBannerTimer = null;
+
+function showSyncErrorBanner() {
+  const banner = document.getElementById('syncErrorBanner');
+  if (!banner) {
+    return;
+  }
+  banner.hidden = false;
+  clearTimeout(syncErrorBannerTimer);
+  syncErrorBannerTimer = setTimeout(hideSyncErrorBanner, SYNC_ERROR_BANNER_MS);
+}
+
+function hideSyncErrorBanner() {
+  clearTimeout(syncErrorBannerTimer);
+  const banner = document.getElementById('syncErrorBanner');
+  if (banner) {
+    banner.hidden = true;
+  }
+}
+
+document.getElementById('syncErrorBannerClose').addEventListener('click', hideSyncErrorBanner);
+
 // Pushes ONE entry up to this user's "Entries" table in Supabase.
 // Supabase is where entries are stored - saveToStorage() no longer
 // writes entry data to localStorage, so this sync is what saves the
@@ -1098,14 +1131,17 @@ function saveToStorage() {
 // (user_id, entry_id) unique constraint on the table. So editing a
 // comic updates its existing row, and a brand-new comic gets a new one.
 //
-// Callers don't await this - it's fire-and-forget. Any failure is only
-// logged to the console, so the app keeps running, but the edit is NOT
-// saved anywhere: it only lives in memory until the page is reloaded.
+// Callers don't await this - it's fire-and-forget. Any failure is
+// logged to the console and shows the sync error banner (see
+// showSyncErrorBanner() above), so the app keeps running, but the edit
+// is NOT saved anywhere: it only lives in memory until the page is
+// reloaded.
 async function syncEntryToSupabase(entry) {
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
       console.error('Could not get current user for syncEntryToSupabase:', userError && userError.message);
+      showSyncErrorBanner();
       return;
     }
 
@@ -1126,9 +1162,11 @@ async function syncEntryToSupabase(entry) {
 
     if (upsertError) {
       console.error('Could not sync entry to Supabase:', upsertError.message);
+      showSyncErrorBanner();
     }
   } catch (err) {
     console.error('Could not sync entry to Supabase:', err);
+    showSyncErrorBanner();
   }
 }
 
@@ -1140,12 +1178,14 @@ async function syncEntryToSupabase(entry) {
 // is just a normal syncEntryToSupabase() of the parent entry instead.
 //
 // Same fire-and-forget rules as syncEntryToSupabase(): runs after
-// saveToStorage(), callers don't await it, and failures are only logged.
+// saveToStorage(), callers don't await it, and failures are logged and
+// show the sync error banner.
 async function deleteEntryFromSupabase(entryId) {
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
       console.error('Could not get current user for deleteEntryFromSupabase:', userError && userError.message);
+      showSyncErrorBanner();
       return;
     }
 
@@ -1157,9 +1197,11 @@ async function deleteEntryFromSupabase(entryId) {
 
     if (deleteError) {
       console.error('Could not delete entry from Supabase:', deleteError.message);
+      showSyncErrorBanner();
     }
   } catch (err) {
     console.error('Could not delete entry from Supabase:', err);
+    showSyncErrorBanner();
   }
 }
 

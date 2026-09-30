@@ -2453,3 +2453,50 @@ body.private-mode #manhwaList {
   }
 
 }
+
+/* Sync error banner: the warning shown by showSyncErrorBanner() in
+   script.js when a save/delete to Supabase fails. position: fixed pins
+   it to the top of the screen no matter where you've scrolled, and the
+   high z-index keeps it above the modals/sheets. Dark red so it reads
+   as a problem at a glance against the charcoal page, without being a
+   full-screen popup like alert(). The [hidden] rule makes sure the
+   display: flex below doesn't override the hidden attribute. */
+.sync-error-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  box-sizing: border-box;
+  padding: 10px 12px 10px 16px;
+  background: #8b1e1e;
+  color: #fff;
+  border: 1px solid #5e1414;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  font-size: 14px;
+}
+
+.sync-error-banner[hidden] {
+  display: none;
+}
+
+.sync-error-banner-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.sync-error-banner-close:hover {
+  color: #ffcccc;
+}
