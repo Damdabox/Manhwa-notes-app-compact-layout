@@ -44,6 +44,10 @@
 
   <h1>Manhwa Notes App</h1>
   <button id="logoutBtn" type="button">Log Out</button>
+  <!-- pendingSyncBadge: small "N changes waiting to sync" pill next to
+       Log Out. Filled in and shown/hidden by updatePendingIndicator() in
+       script.js; hidden whenever this user's offline queue is empty. -->
+  <span id="pendingSyncBadge" class="pending-sync-badge" role="status" hidden></span>
 
   <!-- libraryView wraps EVERYTHING that makes up the normal shelf page
        (the add form, bulk add, search, tabs, zoom controls, and the

@@ -2513,3 +2513,25 @@ body.private-mode #manhwaList {
 .sync-error-banner-close:hover {
   color: #ffcccc;
 }
+
+/* Pending-sync badge: the small "N changes waiting to sync" pill next
+   to Log Out, shown by updatePendingIndicator() in script.js. Same muted
+   amber as the "queued" sync banner, so it reads as "saved here, not
+   uploaded yet" rather than an error. The [hidden] rule keeps the
+   display: inline-block below from overriding the hidden attribute. */
+.pending-sync-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  background: #6b4e12;
+  color: #fff;
+  border: 1px solid #4a360c;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+
+.pending-sync-badge[hidden] {
+  display: none;
+}

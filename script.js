@@ -1274,6 +1274,7 @@ function getPendingWrites() {
 function queueFailedSync(entry) {
   queuePendingWrite(entry).then(function () {
     showSyncBanner('queued');
+    updatePendingIndicator();
   }).catch(function (err) {
     console.error('Could not queue pending write for entry ' + entry.id + ':', err);
     showSyncBanner('error');
@@ -1330,6 +1331,7 @@ function retryPendingWrites() {
       console.error('Could not retry pending writes:', err);
     } finally {
       retryPendingWritesPromise = null;
+      updatePendingIndicator();
     }
   })();
 
@@ -1337,8 +1339,52 @@ function retryPendingWrites() {
 }
 
 window.addEventListener('online', function () {
+  updatePendingIndicator();
   retryPendingWrites();
 });
+
+window.addEventListener('offline', function () {
+  updatePendingIndicator();
+});
+
+// --- Pending-sync badge ---
+// Shows #pendingSyncBadge (see index.html) with how many queued records
+// belong to the logged-in user, or hides it if there are none (or no one
+// is logged in). Filters by user_id the same way retryPendingWrites()
+// does, so another account's leftover queue on a shared browser isn't
+// counted. Read-only: never changes the queue.
+//
+// Several calls can overlap (e.g. a retry finishing while an entry is
+// being queued). Each call takes a number, and only the latest one is
+// allowed to touch the badge, so an older, slower read can't overwrite
+// a newer count.
+let pendingIndicatorRequestId = 0;
+async function updatePendingIndicator() {
+  const requestId = ++pendingIndicatorRequestId;
+  const badge = document.getElementById('pendingSyncBadge');
+  if (!badge) {
+    return;
+  }
+
+  let count = 0;
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) {
+      const records = await getPendingWrites();
+      count = records.filter(function (record) {
+        return record.user_id === session.user.id;
+      }).length;
+    }
+  } catch (err) {
+    console.error('Could not read pending writes for the sync badge:', err);
+  }
+
+  if (requestId !== pendingIndicatorRequestId) {
+    return;
+  }
+  badge.textContent = count + (count === 1 ? ' change' : ' changes') + ' waiting to sync';
+  badge.hidden = count === 0;
+}
 
 // Pushes ONE entry up to this user's "Entries" table in Supabase.
 // Supabase is where entries are stored - saveToStorage() no longer
@@ -4770,6 +4816,9 @@ async function showAuthOrApp(session) {
   if (session) {
     authScreen.style.display = 'none';
     appScreen.style.display = '';
+    // Show the queued-changes count right away; retryPendingWrites()
+    // below refreshes it again once it finishes.
+    updatePendingIndicator();
     // Push any edits queued while offline BEFORE loading, so the shelf
     // loads the synced versions instead of the older ones still in
     // Supabase. If we're still offline this fails quickly and the
