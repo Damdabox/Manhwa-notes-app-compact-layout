@@ -1088,27 +1088,47 @@ const STORAGE_KEY = 'manhwaEntries';
 function saveToStorage() {
 }
 
-// --- Sync error banner ---
-// Shows the #syncErrorBanner warning (see index.html) whenever a save
-// or delete to Supabase fails. syncEntryToSupabase() and
-// deleteEntryFromSupabase() below call this from every one of their
-// failure branches, so every add/edit/delete anywhere in the app gets
-// the same visible warning without each caller having to handle it.
+// --- Sync banner ---
+// Shows the #syncErrorBanner (see index.html) with one of three messages:
 //
-// It auto-hides after SYNC_ERROR_BANNER_MS. If another failure happens
-// while it's already showing (e.g. Bulk Add syncing lots of entries at
-// once), the timer just restarts instead of stacking up banners.
+//   'queued'  - a sync failed, but the entry was saved to the offline
+//               pending-writes queue, so it will sync on its own later.
+//               Shown by queueFailedSync() once the queue write succeeds.
+//   'error'   - the change isn't safe anywhere: the sync failed AND the
+//               queue write failed, or a delete failed (deletes aren't
+//               queued). Red error styling.
+//   'synced'  - retryPendingWrites() just synced queued entries.
+//               Shorter auto-hide.
+//
+// It auto-hides after a few seconds. If another one comes in while it's
+// already showing (e.g. Bulk Add syncing lots of entries at once), it
+// just swaps the message and restarts the timer instead of stacking up.
+const SYNC_BANNER_MESSAGES = {
+  queued: "Saved on this device. It will sync automatically when you're back online.",
+  error: "Couldn't save this change. Please try again.",
+  synced: 'Back online. Your changes have synced.'
+};
 const SYNC_ERROR_BANNER_MS = 6000;
+const SYNC_SUCCESS_BANNER_MS = 3500;
 let syncErrorBannerTimer = null;
 
-function showSyncErrorBanner() {
+function showSyncBanner(kind) {
   const banner = document.getElementById('syncErrorBanner');
-  if (!banner) {
+  const message = document.getElementById('syncErrorBannerMessage');
+  if (!banner || !message) {
     return;
   }
+  message.textContent = SYNC_BANNER_MESSAGES[kind];
+  banner.classList.toggle('sync-banner-queued', kind === 'queued');
+  banner.classList.toggle('sync-banner-synced', kind === 'synced');
+  // Only real errors interrupt a screen reader; the others are polite.
+  banner.setAttribute('role', kind === 'error' ? 'alert' : 'status');
   banner.hidden = false;
   clearTimeout(syncErrorBannerTimer);
-  syncErrorBannerTimer = setTimeout(hideSyncErrorBanner, SYNC_ERROR_BANNER_MS);
+  syncErrorBannerTimer = setTimeout(
+    hideSyncErrorBanner,
+    kind === 'synced' ? SYNC_SUCCESS_BANNER_MS : SYNC_ERROR_BANNER_MS
+  );
 }
 
 function hideSyncErrorBanner() {
@@ -1248,9 +1268,15 @@ function getPendingWrites() {
 // Called from every failure branch of syncEntryToSupabase(). Catches its
 // own errors so a broken queue (e.g. IndexedDB unavailable in a private
 // window) only logs, and never throws out of the sync's error handling.
+// Shows the sync banner once the queue write finishes: 'queued' if the
+// entry is safely saved on this device, 'error' if it isn't saved
+// anywhere.
 function queueFailedSync(entry) {
-  queuePendingWrite(entry).catch(function (err) {
+  queuePendingWrite(entry).then(function () {
+    showSyncBanner('queued');
+  }).catch(function (err) {
     console.error('Could not queue pending write for entry ' + entry.id + ':', err);
+    showSyncBanner('error');
   });
 }
 
@@ -1281,11 +1307,24 @@ function retryPendingWrites() {
       }
 
       const records = await getPendingWrites();
+      let syncedCount = 0;
+      let failedCount = 0;
       for (const record of records) {
         if (record.user_id !== session.user.id) {
           continue;
         }
-        await syncEntryToSupabase(record.entry);
+        if (await syncEntryToSupabase(record.entry)) {
+          syncedCount++;
+        } else {
+          failedCount++;
+        }
+      }
+
+      // Only confirm when queued entries actually went up. If some are
+      // still failing, leave the "Saved on this device" banner showing
+      // instead, since not everything has synced yet.
+      if (syncedCount > 0 && failedCount === 0) {
+        showSyncBanner('synced');
       }
     } catch (err) {
       console.error('Could not retry pending writes:', err);
@@ -1312,20 +1351,20 @@ window.addEventListener('online', function () {
 // comic updates its existing row, and a brand-new comic gets a new one.
 //
 // Callers don't await this - it's fire-and-forget. Any failure is
-// logged to the console and shows the sync error banner (see
-// showSyncErrorBanner() above), so the app keeps running, and the entry
-// is saved to the offline pending-writes queue (see queuePendingWrite()
-// above) so the edit survives a reload. On success, any queued copy of
-// the entry is removed. retryPendingWrites() awaits this so the next
-// entry isn't sent until this one finishes.
+// logged to the console, so the app keeps running, and the entry is
+// saved to the offline pending-writes queue (see queueFailedSync()
+// above, which also shows the sync banner) so the edit survives a
+// reload. On success, any queued copy of the entry is removed.
+// retryPendingWrites() awaits this so the next entry isn't sent until
+// this one finishes, and uses the returned true (synced) / false
+// (failed) to decide whether to show the "synced" banner.
 async function syncEntryToSupabase(entry) {
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
       console.error('Could not get current user for syncEntryToSupabase:', userError && userError.message);
-      showSyncErrorBanner();
       queueFailedSync(entry);
-      return;
+      return false;
     }
 
     const { error: upsertError } = await supabaseClient
@@ -1345,9 +1384,8 @@ async function syncEntryToSupabase(entry) {
 
     if (upsertError) {
       console.error('Could not sync entry to Supabase:', upsertError.message);
-      showSyncErrorBanner();
       queueFailedSync(entry);
-      return;
+      return false;
     }
 
     // Synced - drop any queued copy of this entry, whether this was a
@@ -1356,10 +1394,11 @@ async function syncEntryToSupabase(entry) {
     await removePendingWriteIfSynced(entry).catch(function (err) {
       console.error('Could not remove pending write for entry ' + entry.id + ':', err);
     });
+    return true;
   } catch (err) {
     console.error('Could not sync entry to Supabase:', err);
-    showSyncErrorBanner();
     queueFailedSync(entry);
+    return false;
   }
 }
 
@@ -1372,13 +1411,14 @@ async function syncEntryToSupabase(entry) {
 //
 // Same fire-and-forget rules as syncEntryToSupabase(): runs after
 // saveToStorage(), callers don't await it, and failures are logged and
-// show the sync error banner.
+// show the 'error' sync banner (deletes aren't queued offline, so the
+// delete really didn't happen).
 async function deleteEntryFromSupabase(entryId) {
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
       console.error('Could not get current user for deleteEntryFromSupabase:', userError && userError.message);
-      showSyncErrorBanner();
+      showSyncBanner('error');
       return;
     }
 
@@ -1390,11 +1430,11 @@ async function deleteEntryFromSupabase(entryId) {
 
     if (deleteError) {
       console.error('Could not delete entry from Supabase:', deleteError.message);
-      showSyncErrorBanner();
+      showSyncBanner('error');
     }
   } catch (err) {
     console.error('Could not delete entry from Supabase:', err);
-    showSyncErrorBanner();
+    showSyncBanner('error');
   }
 }
 

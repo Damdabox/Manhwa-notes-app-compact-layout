@@ -2486,6 +2486,19 @@ body.private-mode #manhwaList {
   display: none;
 }
 
+/* Non-error variants set by showSyncBanner(). "queued" = saved on this
+   device, waiting to sync (muted amber: worth noticing, not alarming).
+   "synced" = queued changes went up (green). */
+.sync-error-banner.sync-banner-queued {
+  background: #6b4e12;
+  border-color: #4a360c;
+}
+
+.sync-error-banner.sync-banner-synced {
+  background: #1f6b3a;
+  border-color: #144a27;
+}
+
 .sync-error-banner-close {
   flex-shrink: 0;
   background: none;

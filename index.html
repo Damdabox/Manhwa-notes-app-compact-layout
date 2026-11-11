@@ -817,14 +817,15 @@ The End"></textarea>
 
   </div><!-- /#appScreen -->
 
-  <!-- syncErrorBanner: small warning pinned to the top of the screen,
-       hidden by default. showSyncErrorBanner() in script.js shows it
-       whenever a save/delete to Supabase fails, so a failed cloud save
-       doesn't look identical to a successful one. Closes with the X
-       button, or on its own after a few seconds. role="alert" makes
-       screen readers announce it as soon as it appears. -->
+  <!-- syncErrorBanner: small banner pinned to the top of the screen,
+       hidden by default. showSyncBanner() in script.js fills in the
+       message and shows it when a sync fails (saved on this device, or
+       not saved at all) and when queued changes finish syncing. Closes
+       with the X button, or on its own after a few seconds. The role is
+       set by showSyncBanner(): "alert" for real errors, "status" for
+       the rest. -->
   <div id="syncErrorBanner" class="sync-error-banner" role="alert" hidden>
-    <span id="syncErrorBannerMessage">Couldn't save to the cloud — check your connection and try again.</span>
+    <span id="syncErrorBannerMessage">Couldn't save this change. Please try again.</span>
     <button type="button" id="syncErrorBannerClose" class="sync-error-banner-close" aria-label="Dismiss">&times;</button>
   </div>
 
