@@ -155,6 +155,35 @@ const ICON_PENCIL = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none"
 
 const ICON_TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-svg"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>';
 
+// Cleans up a link the user typed (or one loaded from storage/Supabase)
+// before it's saved or put into an href / window.open(). Only http://
+// and https:// links are allowed through:
+//   - "" (or only spaces)            -> ""
+//   - "https://site.com/x"           -> unchanged
+//   - "www.site.com/x", "site.com/x" -> "https://www.site.com/x" etc.
+//   - "javascript:...", "data:...", "file:..." or any other scheme -> ""
+// A "scheme" is letters/digits/+/./- before a colon at the very start
+// (e.g. "javascript:"). Anything with no scheme just gets "https://"
+// stuck on the front, which is always safe - at worst it makes a
+// broken https link, never a script.
+function safeUrl(value) {
+  const trimmed = String(value || '').trim();
+
+  if (trimmed === '') {
+    return '';
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+    return '';
+  }
+
+  return 'https://' + trimmed;
+}
+
 // --- Star rating ---
 // All three star states (full, half, empty) are drawn from the exact
 // same star-shaped outline below - only the *fill* changes between
@@ -433,8 +462,9 @@ function renderSceneEntries(entry) {
 
     const link = document.createElement('a');
     link.className = 'scene-link';
-    if (scene.link) {
-      link.href = scene.link;
+    const sceneUrl = safeUrl(scene.link);
+    if (sceneUrl) {
+      link.href = sceneUrl;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       link.textContent = 'Open Scene';
@@ -2174,7 +2204,12 @@ function buildPrivateRow(listItem, entry) {
   // of this file for wireLinkPopup().
   const linkElement = document.createElement('a');
   linkElement.className = 'entry-link';
-  linkElement.href = entry.link;
+  // No href at all when the link is empty or unsafe, so it isn't
+  // clickable (wireLinkPopup() ignores links with no href).
+  const privateRowUrl = safeUrl(entry.link);
+  if (privateRowUrl) {
+    linkElement.href = privateRowUrl;
+  }
   // "Link" here is a fixed word we typed ourselves (not user input),
   // so it's fine to include directly in the same HTML string as the icon.
   linkElement.innerHTML = ICON_LINK + ' Link';
@@ -2308,7 +2343,7 @@ function showDetailView(entry) {
   // "status-reading"), which is how style.css knows which color to
   // give this badge.
   detailStatusBadge.textContent = entry.status;
-  detailStatusBadge.className = 'detail-status-badge status-' + entry.status.toLowerCase();
+  detailStatusBadge.className = 'detail-status-badge status-' + String(entry.status || '').toLowerCase();
 
   // A comic added without a link has entry.link === ''. An <a> with no
   // href isn't clickable, so we leave href unset in that case and show
@@ -2320,9 +2355,10 @@ function showDetailView(entry) {
   // purpose: entry.link is text the user typed in, and textContent
   // always shows it as plain text no matter what's in it, instead of
   // risking it being read as HTML/code the way innerHTML could.
-  if (entry.link) {
-    detailLink.href = entry.link;
-    detailLink.textContent = entry.link;
+  const detailUrl = safeUrl(entry.link);
+  if (detailUrl) {
+    detailLink.href = detailUrl;
+    detailLink.textContent = detailUrl;
     detailLink.classList.remove('detail-link-empty');
   } else {
     detailLink.removeAttribute('href');
@@ -2577,7 +2613,7 @@ saveEntryEditButton.addEventListener('click', function () {
   entry.volume = editEntryVolume.value;
   entry.page = editEntryPage.value;
   entry.episode = editEntryEpisode.value;
-  entry.link = editEntryLink.value;
+  entry.link = safeUrl(editEntryLink.value);
   entry.status = editEntryStatus.value;
 
   // detailEditTags already holds exactly the tags built up via the
@@ -2637,7 +2673,7 @@ cancelSceneButton.addEventListener('click', function () {
 // show up as a blank row, which would look broken.
 saveSceneButton.addEventListener('click', function () {
   const description = sceneDescriptionInput.value.trim();
-  const link = sceneLinkInput.value.trim();
+  const link = safeUrl(sceneLinkInput.value);
 
   if (description === '') {
     alert('Please enter a description before saving this scene.');
@@ -3506,7 +3542,7 @@ function renderList() {
         entry.page = pageField.value;
         entry.episode = episodeField.value;
         entry.status = statusField.value;
-        entry.link = linkField.value;
+        entry.link = safeUrl(linkField.value);
 
         // editingTags already holds exactly the tags the user built up
         // via the chips above (adds/removes edited this array directly -
@@ -3558,7 +3594,7 @@ function renderList() {
       // class name, e.g. "status-reading", which is how style.css
       // knows which color to give each ribbon.
       const statusRibbon = document.createElement('div');
-      statusRibbon.className = 'status-ribbon status-' + entry.status.toLowerCase();
+      statusRibbon.className = 'status-ribbon status-' + String(entry.status || '').toLowerCase();
       statusRibbon.textContent = entry.status;
       coverPlaceholder.appendChild(statusRibbon);
 
@@ -3615,7 +3651,12 @@ function renderList() {
 
       const linkElement = document.createElement('a');
       linkElement.className = 'entry-link';
-      linkElement.href = entry.link;
+      // No href at all when the link is empty or unsafe, so it isn't
+      // clickable (wireLinkPopup() ignores links with no href).
+      const cardUrl = safeUrl(entry.link);
+      if (cardUrl) {
+        linkElement.href = cardUrl;
+      }
       // "Link" here is a fixed word we typed ourselves (not user input),
       // so it's fine to include directly in the same HTML string as the icon.
       linkElement.innerHTML = ICON_LINK + ' Link';
@@ -3712,7 +3753,7 @@ addButton.addEventListener('click', function () {
   const volume = volumeInput.value;
   const page = pageInput.value;
   const episode = episodeInput.value;
-  const link = linkInput.value;
+  const link = safeUrl(linkInput.value);
   const status = statusInput.value;
 
   // Don't add empty entries
@@ -4696,8 +4737,9 @@ function wireLinkPopup(linkElement) {
 // rel="noopener noreferrer" attribute: it stops that new tab from
 // getting a JavaScript handle back to this page.
 linkPopupOpenButton.addEventListener('click', function () {
-  if (linkPopupUrl) {
-    window.open(linkPopupUrl, '_blank', 'noopener,noreferrer');
+  const urlToOpen = safeUrl(linkPopupUrl);
+  if (urlToOpen) {
+    window.open(urlToOpen, '_blank', 'noopener,noreferrer');
   }
   closeLinkPopup();
 });
