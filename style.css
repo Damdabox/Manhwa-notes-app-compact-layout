@@ -1721,66 +1721,155 @@ body.private-mode #manhwaList {
   background: #444;
 }
 
-.list-row-delete {
-  border-color: #a33;
-  color: #f88;
-}
-
 .lists-empty-state {
   color: #bbb;
   font-size: 15px;
 }
 
-/* One row per list in the overview. */
+/* The overview: a grid of square list tiles, same column sizing as the
+   comic shelf (#manhwaList at --card-scale 1), so a tile is the width
+   of a comic card - two columns on a phone. */
 .lists-overview {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 16px;
 }
 
-.list-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.list-tile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  overflow: hidden;
   background: #2b2b2b;
-  padding: 10px 14px;
-  border-radius: 6px;
 }
 
-/* The clickable name + count. Fills the row so most of it is a target. */
-.list-row-open {
-  flex: 1;
-  min-width: 0;
-  text-align: left;
+/* 2x2 collage of the list's first four comics. The 2px gap shows the
+   tile's background as thin dividers between covers. */
+.list-tile-collage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+}
+
+/* A slot with no cover is a plain neutral square. */
+.list-tile-slot {
+  background-color: #3a3a3a;
+  background-size: cover;
+  background-position: center;
+}
+
+/* Fills the tile, so clicking anywhere opens the list. */
+.list-tile-open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  padding: 0;
   background: none;
   border: none;
   color: #fff;
-  font-size: 16px;
-  padding: 4px 0;
   cursor: pointer;
-  overflow-wrap: anywhere;
+  text-align: left;
 }
 
-.list-row-name {
+.list-tile-open:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -4px;
+  border-radius: 8px;
+}
+
+/* Dark gradient along the bottom, with the name + count on top. */
+.list-tile-label {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 28px 10px 10px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.6) 60%, transparent);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.list-tile-name {
+  font-size: 16px;
   font-weight: bold;
+  overflow-wrap: anywhere;
+  /* At most two lines, then an ellipsis. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
-.list-row-open:hover .list-row-name {
+.list-tile-open:hover .list-tile-name {
   text-decoration: underline;
 }
 
-.list-row-count {
-  color: #bbb;
-  font-size: 14px;
+.list-tile-count {
+  font-size: 13px;
+  color: #ddd;
 }
 
-.list-row-actions {
+/* Rename / Delete, top-right corner, above the open button. */
+.list-tile-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+}
+
+.list-tile-icon-button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.list-tile-icon-button:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.list-tile-delete {
+  color: #f88;
+}
+
+/* Inline rename, along the bottom of the tile. */
+.list-tile-rename {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.list-tile-rename-actions {
   display: flex;
   gap: 6px;
-  flex-shrink: 0;
+}
+
+.list-tile-rename-actions .list-row-button {
+  flex: 1;
+  padding: 6px 8px;
 }
 
 /* One open list. */

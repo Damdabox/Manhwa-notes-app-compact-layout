@@ -3405,7 +3405,8 @@ removeCoverImageButton.addEventListener('click', function () {
 // The "Lists" folder tab swaps the shelf for #listsView, the same way
 // the Characters tab swaps it for #charactersList (see renderList()).
 // #listsView shows one of two things:
-//   - the overview: a "New list" box plus one row per list, or
+//   - the overview: a "New list" box plus a grid of square list tiles
+//     (see buildListTile()), or
 //   - one open list's comics, when currentOpenListId is set.
 // Every change goes through the data-layer functions in the
 // "--- Lists ---" section (createList, renameList, ...), so the sync
@@ -3448,6 +3449,8 @@ function formatListItemCount(list) {
 }
 
 function renderListsView() {
+  // The old tiles are about to be thrown away - free their covers.
+  revokeListCollageUrls();
   listsView.innerHTML = '';
 
   const openList = currentOpenListId ? findList(currentOpenListId) : null;
@@ -3457,6 +3460,7 @@ function renderListsView() {
     // The open list may have been deleted (or the user logged out).
     currentOpenListId = null;
     renderListsOverview();
+    refreshListCovers();
   }
 }
 
@@ -3522,20 +3526,138 @@ function renderListsOverview() {
   listOfLists.className = 'lists-overview';
 
   sortedLists.forEach(function (list) {
-    listOfLists.appendChild(buildListRow(list));
+    listOfLists.appendChild(buildListTile(list));
   });
 
   listsView.appendChild(listOfLists);
 }
 
-// One row in the overview: name + count (click to open), then Rename
-// and Delete. While being renamed, the name becomes a text box with
-// Save/Cancel instead.
-function buildListRow(list) {
-  const row = document.createElement('li');
-  row.className = 'list-row';
+// --- List tile collage covers ---
+// Each overview tile's background is a 2x2 collage of the FIRST FOUR
+// comics added to that list (smallest added_at first), in reading
+// order: top-left, top-right, bottom-left, bottom-right. Every slot
+// keeps its position - a missing cover or a deleted comic is a
+// placeholder in that slot, never skipped - so a tile looks the same
+// on every device.
+
+// The ONE place the collage gets a cover from. Returns a Promise that
+// resolves to a usable image URL, or null if this comic has no cover
+// available. A returned blob: URL is a fresh object URL owned by the
+// caller, who must revoke it (refreshListCovers() does).
+// Cloud image sync will later extend this to fall back to a remote copy
+// when the local IndexedDB one is missing.
+function getCoverUrl(entryId) {
+  if (!entryId) {
+    return Promise.resolve(null);
+  }
+  return loadImageForComic(entryId).then(function (imageBlob) {
+    return imageBlob ? URL.createObjectURL(imageBlob) : null;
+  }).catch(function (error) {
+    console.error('Could not load cover for list collage:', error);
+    return null;
+  });
+}
+
+// Object URLs the collage currently holds, revoked on every re-render.
+let listCollageObjectUrls = [];
+// Bumped on every refresh, so a cover lookup that finishes after a
+// newer render knows it's stale and throws its URL away.
+let listCollageRenderToken = 0;
+
+function revokeListCollageUrls() {
+  listCollageObjectUrls.forEach(function (url) {
+    // Harmless for a non-blob URL (e.g. a future remote copy).
+    URL.revokeObjectURL(url);
+  });
+  listCollageObjectUrls = [];
+}
+
+// The entry_ids for a list's four collage slots, oldest-added first.
+// Shorter lists are padded with null (a placeholder slot).
+function getListCollageEntryIds(list) {
+  const oldestFirst = list.items.slice().sort(function (a, b) {
+    return (a.added_at || 0) - (b.added_at || 0);
+  });
+  const entryIds = [];
+  for (let i = 0; i < 4; i++) {
+    entryIds.push(oldestFirst[i] ? oldestFirst[i].entry_id : null);
+  }
+  return entryIds;
+}
+
+// Re-fills just the collage slots of whatever tiles are on the page,
+// without rebuilding the tiles. Called after the Lists tab renders, and
+// exposed on window so cloud image sync can call it later once remote
+// covers finish loading.
+function refreshListCovers() {
+  revokeListCollageUrls();
+  listCollageRenderToken++;
+  const token = listCollageRenderToken;
+
+  listsView.querySelectorAll('.list-tile-slot').forEach(function (slot) {
+    slot.style.backgroundImage = '';
+    slot.classList.remove('has-image');
+
+    const entryId = slot.dataset.entryId || '';
+    // Deleted comics and Quick Notes stay placeholders, and so does
+    // everything in Private mode (the shelf hides covers there too).
+    const entry = entryId ? findEntryById(entryId) : null;
+    if (!entry || entry.type === 'Note' || displayMode === 'private') {
+      return;
+    }
+
+    // Promise.resolve() so this works whether getCoverUrl() returns a
+    // URL straight away or a Promise for one.
+    Promise.resolve(getCoverUrl(entryId)).then(function (url) {
+      if (!url) {
+        return;
+      }
+      if (token !== listCollageRenderToken || !document.body.contains(slot)) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      listCollageObjectUrls.push(url);
+      slot.style.backgroundImage = 'url("' + url + '")';
+      slot.classList.add('has-image');
+    }).catch(function (error) {
+      console.error('Could not show list collage cover:', error);
+    });
+  });
+}
+window.refreshListCovers = refreshListCovers;
+
+// Small icons for a tile's corner buttons. Fixed markup, no user text.
+const LIST_TILE_RENAME_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zm17.7-10.2a1 1 0 0 0 0-1.42l-2.33-2.33a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+const LIST_TILE_DELETE_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+
+// The 2x2 collage. Slots start as placeholders; refreshListCovers()
+// fills in whichever covers it can find.
+function buildListCollage(list) {
+  const collage = document.createElement('div');
+  collage.className = 'list-tile-collage';
+  collage.setAttribute('aria-hidden', 'true');
+  getListCollageEntryIds(list).forEach(function (entryId) {
+    const slot = document.createElement('div');
+    slot.className = 'list-tile-slot';
+    slot.dataset.entryId = entryId || '';
+    collage.appendChild(slot);
+  });
+  return collage;
+}
+
+// One square tile in the overview: collage background, name + count
+// on a dark gradient at the bottom (click anywhere to open), and small
+// Rename / Delete icon buttons in the top-right corner. While being
+// renamed, the bottom becomes a text box with Save/Cancel instead.
+function buildListTile(list) {
+  const tile = document.createElement('li');
+  tile.className = 'list-tile';
+  tile.appendChild(buildListCollage(list));
 
   if (list.listId === listBeingRenamedId) {
+    const renameBox = document.createElement('div');
+    renameBox.className = 'list-tile-rename';
+
     const renameInput = document.createElement('input');
     renameInput.type = 'text';
     renameInput.className = 'list-rename-input';
@@ -3580,51 +3702,61 @@ function buildListRow(list) {
       }
     });
 
-    row.appendChild(renameInput);
-    const actions = document.createElement('div');
-    actions.className = 'list-row-actions';
-    actions.appendChild(saveButton);
-    actions.appendChild(cancelButton);
-    row.appendChild(actions);
+    renameBox.appendChild(renameInput);
+    const renameActions = document.createElement('div');
+    renameActions.className = 'list-tile-rename-actions';
+    renameActions.appendChild(saveButton);
+    renameActions.appendChild(cancelButton);
+    renameBox.appendChild(renameActions);
+    tile.appendChild(renameBox);
 
-    // Focus once the row is actually on the page.
+    // Focus once the tile is actually on the page.
     setTimeout(function () {
       renameInput.focus();
       renameInput.select();
     }, 0);
-    return row;
+    return tile;
   }
 
-  // Name + count. A real <button> so it's reachable by keyboard.
+  // Covers the whole tile, so clicking anywhere opens the list. A real
+  // <button> so it's reachable by keyboard.
   const openButton = document.createElement('button');
   openButton.type = 'button';
-  openButton.className = 'list-row-open';
+  openButton.className = 'list-tile-open';
+
+  const label = document.createElement('span');
+  label.className = 'list-tile-label';
 
   const nameElement = document.createElement('span');
-  nameElement.className = 'list-row-name';
+  nameElement.className = 'list-tile-name';
   nameElement.textContent = list.name;
-  openButton.appendChild(nameElement);
+  label.appendChild(nameElement);
 
   const countElement = document.createElement('span');
-  countElement.className = 'list-row-count';
-  countElement.textContent = ' · ' + formatListItemCount(list);
-  openButton.appendChild(countElement);
+  countElement.className = 'list-tile-count';
+  countElement.textContent = formatListItemCount(list);
+  label.appendChild(countElement);
 
+  openButton.appendChild(label);
   openButton.addEventListener('click', function () {
     currentOpenListId = list.listId;
     listBeingRenamedId = null;
     renderListsView();
     window.scrollTo(0, 0);
   });
-  row.appendChild(openButton);
+  tile.appendChild(openButton);
 
+  // Sits above openButton (later in the DOM + z-index), so these
+  // clicks never also open the list.
   const actions = document.createElement('div');
-  actions.className = 'list-row-actions';
+  actions.className = 'list-tile-actions';
 
   const renameButton = document.createElement('button');
   renameButton.type = 'button';
-  renameButton.className = 'list-row-button';
-  renameButton.textContent = 'Rename';
+  renameButton.className = 'list-tile-icon-button';
+  renameButton.innerHTML = LIST_TILE_RENAME_ICON;
+  renameButton.setAttribute('aria-label', 'Rename list');
+  renameButton.title = 'Rename';
   renameButton.addEventListener('click', function () {
     listBeingRenamedId = list.listId;
     renderListsView();
@@ -3633,8 +3765,10 @@ function buildListRow(list) {
 
   const deleteButton = document.createElement('button');
   deleteButton.type = 'button';
-  deleteButton.className = 'list-row-button list-row-delete';
-  deleteButton.textContent = 'Delete';
+  deleteButton.className = 'list-tile-icon-button list-tile-delete';
+  deleteButton.innerHTML = LIST_TILE_DELETE_ICON;
+  deleteButton.setAttribute('aria-label', 'Delete list');
+  deleteButton.title = 'Delete';
   deleteButton.addEventListener('click', function () {
     // confirm() shows its message as plain text, so the user-typed
     // name is safe here.
@@ -3646,8 +3780,8 @@ function buildListRow(list) {
   });
   actions.appendChild(deleteButton);
 
-  row.appendChild(actions);
-  return row;
+  tile.appendChild(actions);
+  return tile;
 }
 
 // One open list: Back button, the list's name (and description, if it
@@ -3815,6 +3949,8 @@ function renderList() {
     return;
   }
   listsView.style.display = 'none';
+  // Leaving the Lists tab: its collage covers aren't on screen anymore.
+  revokeListCollageUrls();
 
   if (currentFilter === 'Characters') {
     manhwaList.style.display = 'none';
