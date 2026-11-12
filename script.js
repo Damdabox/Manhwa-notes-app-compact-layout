@@ -4825,7 +4825,10 @@ async function signUp() {
   authError.textContent = '';
   const { error } = await supabaseClient.auth.signUp({
     email: authEmail.value,
-    password: authPassword.value
+    password: authPassword.value,
+    options: {
+      emailRedirectTo: window.location.origin + window.location.pathname
+    }
   });
   if (error) {
     authError.textContent = error.message;
