@@ -571,6 +571,10 @@ The End"></textarea>
                write onto the exact same entry object, so either one
                keeps the other in sync automatically. -->
           <button id="editEntryButton" type="button">Edit</button>
+
+          <!-- Opens the "Add to list" picker for this comic - see the
+               "--- Add to list picker ---" section in script.js. -->
+          <button id="detailAddToListButton" type="button" class="detail-add-to-list-button">Add to list</button>
         </div>
 
         <!-- detailEditForm: hidden until "Edit" above is clicked.
@@ -813,6 +817,30 @@ The End"></textarea>
              where this gets shown/hidden. -->
         <button id="quickNoteModalDeleteButton" type="button" class="remove-cover-button">Delete Note</button>
       </div>
+    </div>
+  </div>
+
+  <!-- "Add to list" picker: one checkbox per list for a single comic.
+       A centered popup on desktop, a bottom sheet on phones (see
+       ".list-picker-overlay" in style.css). Everything inside
+       #listPickerRows is built by script.js - see the
+       "--- Add to list picker ---" section there. -->
+  <div id="listPickerOverlay" class="modal-overlay list-picker-overlay" style="display: none;">
+    <div id="listPicker" class="modal-box list-picker" role="dialog" aria-modal="true" aria-labelledby="listPickerHeading">
+      <div class="modal-header">
+        <h3 id="listPickerHeading" class="list-picker-heading"></h3>
+        <button id="listPickerCloseButton" type="button" class="modal-close-button list-picker-close" aria-label="Close">&times;</button>
+      </div>
+      <p class="list-picker-subheading">Add to list</p>
+
+      <div id="listPickerRows" class="list-picker-rows"></div>
+
+      <div class="list-picker-create-row">
+        <input type="text" id="listPickerNewInput" class="list-picker-new-input" placeholder="New list name" maxlength="100" aria-label="New list name">
+        <button id="listPickerNewButton" type="button" class="list-picker-new-button">New list</button>
+      </div>
+
+      <button id="listPickerDoneButton" type="button" class="list-picker-done-button">Done</button>
     </div>
   </div>
 

@@ -3933,6 +3933,208 @@ function buildListComicCard(list, entry) {
   return card;
 }
 
+// --- Add to list picker ---
+// A small popup (a bottom sheet on phones - see ".list-picker-overlay"
+// in style.css) for putting ONE comic into any of the user's lists.
+// Opened from the "Add to list" button on each shelf comic card and on
+// the comic's detail page.
+//
+// Every change goes straight through the data-layer functions in the
+// "--- Lists ---" section (createList, addEntryToList,
+// removeEntryFromList), so it works offline the same way the Lists tab
+// does: a failed sync is queued and the sync banner reports it. There's
+// no Save button - each checkbox applies the moment it's toggled.
+//
+// List names are typed by the user, so they're written with
+// textContent, never innerHTML.
+
+const listPickerOverlay = document.getElementById('listPickerOverlay');
+const listPickerHeading = document.getElementById('listPickerHeading');
+const listPickerRows = document.getElementById('listPickerRows');
+const listPickerNewInput = document.getElementById('listPickerNewInput');
+const listPickerNewButton = document.getElementById('listPickerNewButton');
+const listPickerCloseButton = document.getElementById('listPickerCloseButton');
+const listPickerDoneButton = document.getElementById('listPickerDoneButton');
+const detailAddToListButton = document.getElementById('detailAddToListButton');
+
+// Bookmark icon. Fixed markup, no user text.
+const ICON_BOOKMARK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-svg" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>';
+
+// The comic the picker is open for, or null while it's closed.
+let listPickerEntry = null;
+// Whatever had focus before the picker opened, so closing it can put
+// focus back there.
+let listPickerReturnFocus = null;
+
+// The small bookmark button for a shelf comic card. Sits in the same
+// row as the card's edit/delete icons.
+function buildAddToListButton(entry) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'icon-button add-to-list-button';
+  button.innerHTML = ICON_BOOKMARK;
+  button.title = 'Add to list';
+  button.setAttribute('aria-label', 'Add to list');
+  button.addEventListener('click', function () {
+    openListPicker(entry);
+  });
+  return button;
+}
+
+function listContainsEntry(list, entryId) {
+  return list.items.some(function (item) {
+    return item.entry_id === entryId;
+  });
+}
+
+// After any change: the Lists tab is always rebuilt from userLists when
+// it's shown (renderList() / showLibraryView() call renderListsView()),
+// so its tiles, collages and counts pick the change up on their own the
+// next time it's opened. Only if it's on screen RIGHT NOW does it need
+// redrawing here.
+function refreshListsTabAfterPickerChange() {
+  if (currentFilter === 'Lists' && libraryView.style.display !== 'none') {
+    renderListsView();
+  }
+}
+
+// Rebuilds the checkbox rows from userLists, newest-created list first
+// (the same order as the Lists tab).
+function renderListPickerRows() {
+  listPickerRows.innerHTML = '';
+  const entry = listPickerEntry;
+  if (!entry) {
+    return;
+  }
+
+  if (userLists.length === 0) {
+    const emptyState = document.createElement('p');
+    emptyState.className = 'list-picker-empty';
+    emptyState.textContent = 'No lists yet. Create your first one below.';
+    listPickerRows.appendChild(emptyState);
+    return;
+  }
+
+  const sortedLists = userLists.slice().sort(function (a, b) {
+    return getListCreatedAt(b) - getListCreatedAt(a);
+  });
+
+  sortedLists.forEach(function (list) {
+    // The whole row is a <label>, so tapping anywhere on it toggles
+    // the checkbox - a much bigger target than the box itself.
+    const row = document.createElement('label');
+    row.className = 'list-picker-row';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'list-picker-checkbox';
+    checkbox.checked = listContainsEntry(list, entry.id);
+    checkbox.addEventListener('change', function () {
+      if (checkbox.checked) {
+        addEntryToList(list.listId, entry.id);
+      } else {
+        removeEntryFromList(list.listId, entry.id);
+      }
+      // Match the box to what the list really holds now (e.g. if the
+      // list was deleted elsewhere while the picker was open).
+      const liveList = findList(list.listId);
+      checkbox.checked = !!liveList && listContainsEntry(liveList, entry.id);
+      refreshListsTabAfterPickerChange();
+    });
+
+    const nameElement = document.createElement('span');
+    nameElement.className = 'list-picker-row-name';
+    nameElement.textContent = list.name;
+
+    row.appendChild(checkbox);
+    row.appendChild(nameElement);
+    listPickerRows.appendChild(row);
+  });
+}
+
+function openListPicker(entry) {
+  if (!entry || entry.type === 'Note') {
+    return;
+  }
+  listPickerEntry = entry;
+  listPickerReturnFocus = document.activeElement;
+
+  listPickerHeading.textContent = entry.title;
+  listPickerNewInput.value = '';
+  renderListPickerRows();
+
+  listPickerOverlay.style.display = 'flex';
+  listPickerDoneButton.focus();
+}
+
+function closeListPicker() {
+  if (listPickerOverlay.style.display === 'none') {
+    return;
+  }
+  listPickerOverlay.style.display = 'none';
+  listPickerEntry = null;
+  listPickerRows.innerHTML = '';
+
+  // Put focus back on the button that opened the picker, if it's still
+  // on the page (a re-render may have replaced it).
+  if (listPickerReturnFocus && document.body.contains(listPickerReturnFocus)) {
+    listPickerReturnFocus.focus();
+  }
+  listPickerReturnFocus = null;
+}
+
+// "New list": creates the list, puts this comic in it, and shows it in
+// the picker already checked (it's newest, so it lands at the top).
+function submitListPickerNewList() {
+  const entry = listPickerEntry;
+  const name = listPickerNewInput.value.trim();
+  if (!entry || !name) {
+    listPickerNewInput.focus();
+    return;
+  }
+
+  const newList = createList(name);
+  if (!newList) {
+    listPickerNewInput.focus();
+    return;
+  }
+  addEntryToList(newList.listId, entry.id);
+
+  listPickerNewInput.value = '';
+  renderListPickerRows();
+  refreshListsTabAfterPickerChange();
+  listPickerNewInput.focus();
+}
+
+listPickerNewButton.addEventListener('click', submitListPickerNewList);
+listPickerNewInput.addEventListener('keydown', function (event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    submitListPickerNewList();
+  }
+});
+
+listPickerCloseButton.addEventListener('click', closeListPicker);
+listPickerDoneButton.addEventListener('click', closeListPicker);
+
+// Tapping the dimmed backdrop (not the box itself) closes it - same
+// check as the Quick Note popup.
+listPickerOverlay.addEventListener('click', function (event) {
+  if (event.target === listPickerOverlay) {
+    closeListPicker();
+  }
+});
+
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape' && listPickerOverlay.style.display !== 'none') {
+    closeListPicker();
+  }
+});
+
+detailAddToListButton.addEventListener('click', function () {
+  openListPicker(currentDetailEntry);
+});
+
 // Rebuilds the <ul> on the page from the manhwaEntries array
 function renderList() {
   // The "Characters" tab shows something completely different from
@@ -4617,7 +4819,11 @@ function renderList() {
       // own lines. Now they're small icon buttons sharing one row at
       // the bottom of the card - built by buildEntryActions() above,
       // the same function the Private-mode row uses too.
-      listItem.appendChild(buildEntryActions(entry));
+      // Plus an "Add to list" button in the same row (comic cards only -
+      // Quick Notes and Characters cards don't get one).
+      const cardActions = buildEntryActions(entry);
+      cardActions.appendChild(buildAddToListButton(entry));
+      listItem.appendChild(cardActions);
     }
 
     manhwaList.appendChild(listItem);

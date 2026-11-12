@@ -2754,3 +2754,181 @@ body.private-mode #manhwaList {
 .pending-sync-badge[hidden] {
   display: none;
 }
+
+/* ===========================================================================
+   "Add to list" picker
+   ===========================================================================
+   Opened by the bookmark button on shelf comic cards and the "Add to
+   list" button on a comic's detail page (see the "--- Add to list
+   picker ---" section in script.js). Reuses .modal-overlay/.modal-box
+   for the centered desktop popup; the phone rules at the bottom turn it
+   into a bottom sheet. */
+
+/* Same look as the edit button next to it on the card. */
+.add-to-list-button {
+  color: #444;
+  background: #fff;
+  border: 1px solid #444;
+}
+
+.add-to-list-button:hover {
+  background: #444;
+  color: #fff;
+}
+
+.detail-add-to-list-button {
+  width: fit-content;
+  min-height: 44px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.list-picker {
+  max-width: 420px;
+}
+
+/* A long comic title wraps instead of pushing the X off the box. */
+.list-picker-heading {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding-right: 8px;
+}
+
+/* 44px square so the X is easy to hit on a phone. */
+.list-picker-close {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+.list-picker-subheading {
+  margin: -6px 0 0;
+  color: #bbb;
+  font-size: 13px;
+}
+
+.list-picker-rows {
+  display: flex;
+  flex-direction: column;
+  max-height: 50vh;
+  overflow-y: auto;
+  border-top: 1px solid #444;
+  border-bottom: 1px solid #444;
+}
+
+/* The whole row is the tap target (it's a <label>), at least 48px tall. */
+.list-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-bottom: 1px solid #333;
+}
+
+.list-picker-row:last-child {
+  border-bottom: none;
+}
+
+.list-picker-row:hover {
+  background: #2f2f2f;
+}
+
+.list-picker-checkbox {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.list-picker-row-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.list-picker-empty {
+  margin: 12px 0;
+  color: #bbb;
+  font-size: 15px;
+}
+
+.list-picker-create-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* 16px text so iOS doesn't zoom in when the box is focused. */
+.list-picker-new-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 16px;
+  background: #3a3a3a;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+.list-picker-new-input::placeholder {
+  color: #aaa;
+}
+
+.list-picker-new-button,
+.list-picker-done-button {
+  min-height: 44px;
+  padding: 8px 16px;
+  font-size: 15px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.list-picker-new-button:hover,
+.list-picker-done-button:hover {
+  background: #444;
+}
+
+.list-picker-done-button {
+  align-self: flex-end;
+}
+
+@media (max-width: 600px) {
+  /* Bottom sheet: pinned to the bottom edge, full width, rounded top
+     corners - same shape as the Add Entry sheet. */
+  .list-picker-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .list-picker {
+    max-width: none;
+    max-height: 85vh;
+    border-radius: 12px 12px 0 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .list-picker-done-button {
+    align-self: stretch;
+  }
+
+  /* The card's bookmark button gets a phone-sized tap area without
+     changing how big the icon looks. */
+  #manhwaList li:not(.private-row) .add-to-list-button {
+    min-width: 40px;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
