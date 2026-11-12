@@ -2202,21 +2202,22 @@ function buildPrivateRow(listItem, entry) {
   // Open/Copy popup instead of opening in a new tab right away, same
   // as everywhere else - see the "Link popup" section near the bottom
   // of this file for wireLinkPopup().
-  const linkElement = document.createElement('a');
-  linkElement.className = 'entry-link';
-  // No href at all when the link is empty or unsafe, so it isn't
-  // clickable (wireLinkPopup() ignores links with no href).
+  // When the link is empty or unsafe, safeUrl() returns '' and we skip
+  // the Link button entirely - same as the detail page, which shows
+  // "No link added" instead of a link that does nothing.
   const privateRowUrl = safeUrl(entry.link);
   if (privateRowUrl) {
+    const linkElement = document.createElement('a');
+    linkElement.className = 'entry-link';
     linkElement.href = privateRowUrl;
+    // "Link" here is a fixed word we typed ourselves (not user input),
+    // so it's fine to include directly in the same HTML string as the icon.
+    linkElement.innerHTML = ICON_LINK + ' Link';
+    linkElement.target = '_blank';
+    linkElement.rel = 'noopener noreferrer';
+    wireLinkPopup(linkElement);
+    listItem.appendChild(linkElement);
   }
-  // "Link" here is a fixed word we typed ourselves (not user input),
-  // so it's fine to include directly in the same HTML string as the icon.
-  linkElement.innerHTML = ICON_LINK + ' Link';
-  linkElement.target = '_blank';
-  linkElement.rel = 'noopener noreferrer';
-  wireLinkPopup(linkElement);
-  listItem.appendChild(linkElement);
 }
 
 // Fills in one Private-mode row for a Quick Note. Same idea as
@@ -3649,24 +3650,25 @@ function renderList() {
         infoRow.appendChild(chapterElement);
       }
 
-      const linkElement = document.createElement('a');
-      linkElement.className = 'entry-link';
-      // No href at all when the link is empty or unsafe, so it isn't
-      // clickable (wireLinkPopup() ignores links with no href).
+      // When the link is empty or unsafe, safeUrl() returns '' and we
+      // skip the Link button entirely - same as the detail page, which
+      // shows "No link added" instead of a link that does nothing.
       const cardUrl = safeUrl(entry.link);
       if (cardUrl) {
+        const linkElement = document.createElement('a');
+        linkElement.className = 'entry-link';
         linkElement.href = cardUrl;
+        // "Link" here is a fixed word we typed ourselves (not user input),
+        // so it's fine to include directly in the same HTML string as the icon.
+        linkElement.innerHTML = ICON_LINK + ' Link';
+        linkElement.target = '_blank';
+        linkElement.rel = 'noopener noreferrer';
+        // Clicking it pops open the Open/Copy popup instead of opening
+        // in a new tab right away - see "Link popup" near the bottom of
+        // this file for wireLinkPopup().
+        wireLinkPopup(linkElement);
+        infoRow.appendChild(linkElement);
       }
-      // "Link" here is a fixed word we typed ourselves (not user input),
-      // so it's fine to include directly in the same HTML string as the icon.
-      linkElement.innerHTML = ICON_LINK + ' Link';
-      linkElement.target = '_blank';
-      linkElement.rel = 'noopener noreferrer';
-      // Clicking it pops open the Open/Copy popup instead of opening
-      // in a new tab right away - see "Link popup" near the bottom of
-      // this file for wireLinkPopup().
-      wireLinkPopup(linkElement);
-      infoRow.appendChild(linkElement);
 
       listItem.appendChild(infoRow);
 
