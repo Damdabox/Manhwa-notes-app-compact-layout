@@ -748,6 +748,16 @@ function addTagFromInput(inputElement, tagsArray, container) {
 // redraw the whole list whenever something changes.
 const manhwaEntries = [];
 
+// The logged-in user's Lists (see the "--- Lists ---" section further
+// down). One object per list, shaped like:
+//   { listId, name, description, visibility, items, updatedAt }
+// where items is an array of { entry_id, added_at }, newest-added first.
+// Like manhwaEntries this is a const, so it's emptied with .length = 0
+// rather than reassigned. userListsOwnerId remembers whose lists these
+// are, so showAuthOrApp() can clear them on a logout or user switch.
+const userLists = [];
+let userListsOwnerId = null;
+
 // The tags being built up for a new comic in the Add-comic form,
 // before "Add Entry" is clicked. Starts empty, grows/shrinks as tags
 // are added/removed via tagInput + addTagButton, and gets copied onto
@@ -1311,7 +1321,99 @@ function queueFailedSync(entry) {
   });
 }
 
+// --- List records in the same queue ---
+// Lists share the "pendingWrites" store with entries. Their key is
+// "list:" + listId (stored in the entry_id keyPath field), which can
+// never collide with a comic's "comic-..." id. A list record looks like:
+//   { entry_id: 'list:<listId>', kind: 'list', user_id, list_id,
+//     list, deleted, updatedAt, queuedAt }
+// "list" is a snapshot of the list to upsert, or null when deleted is
+// true (the deletion marker for a list deleted while offline). Entry
+// records have no "kind" field, which is how retryPendingWrites() tells
+// the two apart. updatedAt is stored on the record itself so the
+// newer-wins checks below work for deletion markers too.
+function getListQueueKey(listId) {
+  return 'list:' + listId;
+}
+
+// Same newer-wins rule as queuePendingWrite(): an older version never
+// overwrites a newer record already in the queue. A deletion marker is
+// stamped with the delete time, so it beats any earlier queued upsert.
+async function queueListPendingWrite(listId, listSnapshot, deleted, updatedAt) {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const userId = session ? session.user.id : null;
+  const db = await openPendingWritesDatabase();
+  const key = getListQueueKey(listId);
+
+  return new Promise(function (resolve, reject) {
+    const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(PENDING_WRITES_STORE_NAME);
+    const getRequest = store.get(key);
+    getRequest.onsuccess = function () {
+      const existing = getRequest.result;
+      if (existing && (existing.updatedAt || 0) > (updatedAt || 0)) {
+        return;
+      }
+      store.put({
+        entry_id: key,
+        kind: 'list',
+        user_id: userId,
+        list_id: listId,
+        list: deleted ? null : listSnapshot,
+        deleted: deleted,
+        updatedAt: updatedAt,
+        queuedAt: Date.now()
+      });
+    };
+    transaction.oncomplete = function () { resolve(); };
+    transaction.onerror = function () { reject(transaction.error); };
+  });
+}
+
+// List version of removePendingWriteIfSynced(): drops the queued record
+// for this list unless it's newer than what was just synced/deleted.
+function removeListPendingWriteIfSynced(listId, updatedAt) {
+  const key = getListQueueKey(listId);
+  return openPendingWritesDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(PENDING_WRITES_STORE_NAME);
+      const getRequest = store.get(key);
+      getRequest.onsuccess = function () {
+        const existing = getRequest.result;
+        if (existing && (existing.updatedAt || 0) <= (updatedAt || 0)) {
+          store.delete(key);
+        }
+      };
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// List version of queueFailedSync(). Unlike entry deletes, list deletes
+// ARE queued (as a deletion marker), so both cases show 'queued'.
+function queueFailedListSync(listId, listSnapshot, deleted, updatedAt) {
+  queueListPendingWrite(listId, listSnapshot, deleted, updatedAt).then(function () {
+    showSyncBanner('queued');
+    updatePendingIndicator();
+  }).catch(function (err) {
+    console.error('Could not queue pending write for list ' + listId + ':', err);
+    showSyncBanner('error');
+  });
+}
+
+// Re-sends one queued list record. Returns true/false like
+// syncEntryToSupabase() so retryPendingWrites() can count it.
+function retryPendingListWrite(record) {
+  if (record.deleted) {
+    return deleteListFromSupabase(record.list_id, record.updatedAt);
+  }
+  return syncListToSupabase(record.list);
+}
+
 // Tries to re-send every queued entry that belongs to the logged-in user.
+// List records (kind: 'list', see above) are re-sent here too.
 // Records are removed by syncEntryToSupabase() itself when a sync
 // succeeds (see removePendingWriteIfSynced() above); a record whose retry
 // fails just gets re-queued by that same function, so it's still there
@@ -1344,7 +1446,10 @@ function retryPendingWrites() {
         if (record.user_id !== session.user.id) {
           continue;
         }
-        if (await syncEntryToSupabase(record.entry)) {
+        const synced = record.kind === 'list'
+          ? await retryPendingListWrite(record)
+          : await syncEntryToSupabase(record.entry);
+        if (synced) {
           syncedCount++;
         } else {
           failedCount++;
@@ -1382,7 +1487,9 @@ window.addEventListener('offline', function () {
 // belong to the logged-in user, or hides it if there are none (or no one
 // is logged in). Filters by user_id the same way retryPendingWrites()
 // does, so another account's leftover queue on a shared browser isn't
-// counted. Read-only: never changes the queue.
+// counted. Entry records and list records (including list deletion
+// markers) live in the same store, so both are counted here.
+// Read-only: never changes the queue.
 //
 // Several calls can overlap (e.g. a retry finishing while an entry is
 // being queued). Each call takes a number, and only the latest one is
@@ -1512,6 +1619,283 @@ async function deleteEntryFromSupabase(entryId) {
     console.error('Could not delete entry from Supabase:', err);
     showSyncBanner('error');
   }
+}
+
+// --- Lists ---
+// Named lists of comics, stored one row per list in the "lists" table
+// (unique on user_id + list_id). Each list's items column is a jsonb
+// array of { entry_id, added_at }, where entry_id is a comic's id (see
+// generateComicId()) and added_at is a Date.now() number. A comic can
+// be in any number of lists. Items are kept newest-added first.
+//
+// Same pattern as entries: userLists (declared next to manhwaEntries)
+// is the in-memory copy, loadListsFromSupabase() fills it after login,
+// every change upserts the whole list, and failed syncs go to the
+// offline pending-writes queue under the key "list:" + listId.
+// No UI uses these yet.
+
+// Copies a list so a sync (or the queue) holds a fixed version, even if
+// the live list in userLists is edited again while the request is in
+// flight.
+function snapshotList(list) {
+  return {
+    listId: list.listId,
+    name: list.name,
+    description: list.description,
+    visibility: list.visibility,
+    items: list.items.map(function (item) {
+      return { entry_id: item.entry_id, added_at: item.added_at };
+    }),
+    updatedAt: list.updatedAt
+  };
+}
+
+function findList(listId) {
+  return userLists.find(function (list) {
+    return list.listId === listId;
+  }) || null;
+}
+
+// Pushes ONE list up to the "lists" table. Same rules as
+// syncEntryToSupabase(): fire-and-forget for callers, failures are
+// logged and queued offline, success drops any older queued copy, and
+// it returns true (synced) / false (failed) for retryPendingWrites().
+async function syncListToSupabase(list) {
+  const snapshot = snapshotList(list);
+  try {
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      console.error('Could not get current user for syncListToSupabase:', userError && userError.message);
+      queueFailedListSync(snapshot.listId, snapshot, false, snapshot.updatedAt);
+      return false;
+    }
+
+    const { error: upsertError } = await supabaseClient
+      .from('lists')
+      .upsert(
+        {
+          user_id: user.id,
+          list_id: snapshot.listId,
+          name: snapshot.name,
+          description: snapshot.description,
+          visibility: snapshot.visibility,
+          items: snapshot.items,
+          // updatedAt is a Date.now() number; the column is timestamptz.
+          updated_at: new Date(snapshot.updatedAt || Date.now()).toISOString()
+        },
+        { onConflict: 'user_id,list_id' }
+      );
+
+    if (upsertError) {
+      console.error('Could not sync list to Supabase:', upsertError.message);
+      queueFailedListSync(snapshot.listId, snapshot, false, snapshot.updatedAt);
+      return false;
+    }
+
+    await removeListPendingWriteIfSynced(snapshot.listId, snapshot.updatedAt).catch(function (err) {
+      console.error('Could not remove pending write for list ' + snapshot.listId + ':', err);
+    });
+    return true;
+  } catch (err) {
+    console.error('Could not sync list to Supabase:', err);
+    queueFailedListSync(snapshot.listId, snapshot, false, snapshot.updatedAt);
+    return false;
+  }
+}
+
+// Deletes ONE list's row, matched on user_id + list_id. Unlike
+// deleteEntryFromSupabase(), a failure is queued as a deletion marker
+// so the delete still happens once the connection is back. deletedAt
+// (a Date.now() number) is the marker's updatedAt, so it outranks any
+// older upsert of this list still sitting in the queue - and a
+// successful delete removes that older upsert so it can't bring the
+// list back on the next retry.
+async function deleteListFromSupabase(listId, deletedAt) {
+  try {
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      console.error('Could not get current user for deleteListFromSupabase:', userError && userError.message);
+      queueFailedListSync(listId, null, true, deletedAt);
+      return false;
+    }
+
+    const { error: deleteError } = await supabaseClient
+      .from('lists')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('list_id', listId);
+
+    if (deleteError) {
+      console.error('Could not delete list from Supabase:', deleteError.message);
+      queueFailedListSync(listId, null, true, deletedAt);
+      return false;
+    }
+
+    await removeListPendingWriteIfSynced(listId, deletedAt).catch(function (err) {
+      console.error('Could not remove pending write for list ' + listId + ':', err);
+    });
+    return true;
+  } catch (err) {
+    console.error('Could not delete list from Supabase:', err);
+    queueFailedListSync(listId, null, true, deletedAt);
+    return false;
+  }
+}
+
+// Reads this user's rows from "lists" into userLists. Called right
+// after loadFromSupabase() in showAuthOrApp(). Clears userLists first so
+// repeated calls don't duplicate. If the fetch fails, the current
+// userLists is left as-is (same as loadFromSupabase()).
+async function loadListsFromSupabase() {
+  const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+  if (userError || !user) {
+    console.error('Could not get current user for loadListsFromSupabase:', userError && userError.message);
+    return;
+  }
+
+  const { data: rows, error: fetchError } = await supabaseClient
+    .from('lists')
+    .select('list_id, name, description, visibility, items, updated_at')
+    .eq('user_id', user.id);
+
+  if (fetchError) {
+    console.error('Could not load lists from Supabase:', fetchError.message);
+    return;
+  }
+
+  // If someone else logged in while this was loading, these rows are
+  // stale - don't put them in front of the new user.
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session || session.user.id !== user.id) {
+    return;
+  }
+
+  userLists.length = 0;
+  userListsOwnerId = user.id;
+
+  rows.forEach(function (row) {
+    const items = Array.isArray(row.items)
+      ? row.items.filter(function (item) {
+          return item && typeof item.entry_id === 'string';
+        })
+      : [];
+    items.sort(function (a, b) {
+      return (b.added_at || 0) - (a.added_at || 0);
+    });
+
+    userLists.push({
+      listId: row.list_id,
+      name: row.name || '',
+      description: row.description || '',
+      visibility: row.visibility || 'private',
+      items: items,
+      updatedAt: row.updated_at ? Date.parse(row.updated_at) : 0
+    });
+  });
+}
+
+// Empties userLists. Called by showAuthOrApp() on logout and when a
+// different user logs in, so one account's lists never show for another.
+function clearUserLists() {
+  userLists.length = 0;
+  userListsOwnerId = null;
+}
+
+// Creates a new, empty, private list. Returns the new list, or null if
+// the name is empty after trimming.
+function createList(name) {
+  const trimmedName = typeof name === 'string' ? name.trim() : '';
+  if (!trimmedName) {
+    return null;
+  }
+
+  const list = {
+    listId: generateListId(),
+    name: trimmedName,
+    description: '',
+    visibility: 'private',
+    items: [],
+    updatedAt: Date.now()
+  };
+  userLists.push(list);
+  syncListToSupabase(list);
+  return list;
+}
+
+// Returns true if renamed, false if the list doesn't exist or the name
+// is empty after trimming.
+function renameList(listId, name) {
+  const list = findList(listId);
+  const trimmedName = typeof name === 'string' ? name.trim() : '';
+  if (!list || !trimmedName) {
+    return false;
+  }
+
+  list.name = trimmedName;
+  list.updatedAt = Date.now();
+  syncListToSupabase(list);
+  return true;
+}
+
+// Removes the list locally and deletes its row. Returns false if no such
+// list exists.
+function deleteList(listId) {
+  const list = findList(listId);
+  if (!list) {
+    return false;
+  }
+
+  userLists.splice(userLists.indexOf(list), 1);
+  deleteListFromSupabase(listId, Date.now());
+  return true;
+}
+
+// Adds a comic to the front of a list (newest-added first). Does
+// nothing and returns false if the list doesn't exist or the comic is
+// already in it.
+function addEntryToList(listId, entryId) {
+  const list = findList(listId);
+  if (!list || !entryId) {
+    return false;
+  }
+  const alreadyInList = list.items.some(function (item) {
+    return item.entry_id === entryId;
+  });
+  if (alreadyInList) {
+    return false;
+  }
+
+  list.items.unshift({ entry_id: entryId, added_at: Date.now() });
+  list.updatedAt = Date.now();
+  syncListToSupabase(list);
+  return true;
+}
+
+// Returns false if the list doesn't exist or the comic wasn't in it.
+function removeEntryFromList(listId, entryId) {
+  const list = findList(listId);
+  if (!list) {
+    return false;
+  }
+  const remainingItems = list.items.filter(function (item) {
+    return item.entry_id !== entryId;
+  });
+  if (remainingItems.length === list.items.length) {
+    return false;
+  }
+
+  list.items = remainingItems;
+  list.updatedAt = Date.now();
+  syncListToSupabase(list);
+  return true;
+}
+
+// Called when a comic (or quick note) is deleted: takes its id out of
+// every list that has it, and syncs only the lists that changed.
+function removeEntryFromAllLists(entryId) {
+  userLists.forEach(function (list) {
+    removeEntryFromList(list.listId, entryId);
+  });
 }
 
 // Comics saved before the cover-image feature existed have no
@@ -1717,6 +2101,12 @@ function generateComicId() {
 // see saveImageForCharacter() etc. below.
 function generateCharacterId() {
   return 'character-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9);
+}
+
+// Same idea again, for Lists (see the "--- Lists ---" section). Becomes
+// the list_id column in the "lists" table.
+function generateListId() {
+  return 'list-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9);
 }
 
 // How wide (in pixels) a stored cover image is allowed to be. Photos
@@ -2160,6 +2550,7 @@ function buildEntryActions(entry, onEditClick) {
     // doesn't come back after a page refresh.
     saveToStorage();
     deleteEntryFromSupabase(entry.id);
+    removeEntryFromAllLists(entry.id);
 
     // Redraw the shelf so the deleted card disappears immediately
     renderList();
@@ -4349,6 +4740,7 @@ quickNoteModalDeleteButton.addEventListener('click', function () {
   manhwaEntries.splice(indexToRemove, 1);
   saveToStorage();
   deleteEntryFromSupabase(editingQuickNoteEntry.id);
+  removeEntryFromAllLists(editingQuickNoteEntry.id);
   renderList();
   closeQuickNoteModal();
 });
@@ -4861,6 +5253,11 @@ async function checkSession() {
 
 async function showAuthOrApp(session) {
   if (session) {
+    // A different account than the one these lists belong to - drop
+    // them right away instead of showing them until the reload below.
+    if (userListsOwnerId !== null && userListsOwnerId !== session.user.id) {
+      clearUserLists();
+    }
     authScreen.style.display = 'none';
     appScreen.style.display = '';
     // Show the queued-changes count right away; retryPendingWrites()
@@ -4872,7 +5269,9 @@ async function showAuthOrApp(session) {
     // records stay queued.
     await retryPendingWrites();
     await loadFromSupabase();
+    await loadListsFromSupabase();
   } else {
+    clearUserLists();
     authScreen.style.display = '';
     appScreen.style.display = 'none';
   }
