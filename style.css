@@ -635,6 +635,13 @@ body.characters-tab-active .search-bar {
   display: none;
 }
 
+/* Same for the Lists tab: neither Card Size nor search applies to it.
+   body.lists-tab-active is toggled by selectTypeFilter() in script.js. */
+body.lists-tab-active .zoom-controls,
+body.lists-tab-active .search-bar {
+  display: none;
+}
+
 /* Row of zoom controls (label, -, slider, +, percentage) that sits
    above the shelf. Just a plain flex row - the actual zooming logic
    lives in the --card-scale variable set on #manhwaList below. */
@@ -1676,6 +1683,128 @@ body.private-mode #manhwaList {
   overflow-wrap: break-word;
 }
 
+/* --- Lists tab --- */
+/* "New list" input + button at the top of the overview. */
+.lists-create-row {
+  display: flex;
+  gap: 8px;
+  max-width: 480px;
+  margin-bottom: 16px;
+}
+
+.lists-create-input,
+.list-rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 16px;
+  background: #fff;
+  color: navy;
+  border: 1px solid #666;
+  border-radius: 4px;
+}
+
+.lists-create-button,
+.list-row-button {
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.lists-create-button:hover,
+.list-row-button:hover {
+  background: #444;
+}
+
+.list-row-delete {
+  border-color: #a33;
+  color: #f88;
+}
+
+.lists-empty-state {
+  color: #bbb;
+  font-size: 15px;
+}
+
+/* One row per list in the overview. */
+.lists-overview {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #2b2b2b;
+  padding: 10px 14px;
+  border-radius: 6px;
+}
+
+/* The clickable name + count. Fills the row so most of it is a target. */
+.list-row-open {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 16px;
+  padding: 4px 0;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.list-row-name {
+  font-weight: bold;
+}
+
+.list-row-open:hover .list-row-name {
+  text-decoration: underline;
+}
+
+.list-row-count {
+  color: #bbb;
+  font-size: 14px;
+}
+
+.list-row-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* One open list. */
+.list-detail-title {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.list-detail-description {
+  margin: 0 0 12px;
+  color: #bbb;
+  white-space: pre-wrap;
+}
+
+.list-detail-items {
+  margin-top: 12px;
+}
+
+.list-remove-button {
+  margin-top: auto;
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
 .character-actions {
   display: flex;
   gap: 6px;
@@ -2388,7 +2517,7 @@ body.private-mode #manhwaList {
   /* The four Type tabs are fully replaced by #typeFilterDropdown below -
      hide them on phone. The Characters tab is handled separately below
      instead, since it stays visible (just shrunk to an icon). */
-  .filter-tab:not([data-filter="Characters"]) {
+  .filter-tab:not([data-filter="Characters"]):not([data-filter="Lists"]) {
     display: none;
   }
 
@@ -2426,6 +2555,7 @@ body.private-mode #manhwaList {
   #typeFilterDropdown  { order: 1; }
   #phoneStatusDropdown { order: 2; }
   .filter-tab[data-filter="Characters"] { order: 3; }
+  .filter-tab[data-filter="Lists"] { order: 3; padding: 8px 10px; }
 
   .privacy-toggle {
     order: 4;

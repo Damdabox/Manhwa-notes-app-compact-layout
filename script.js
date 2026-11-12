@@ -38,6 +38,7 @@ const quickNoteModalDeleteButton = document.getElementById('quickNoteModalDelete
 const quickNoteModalCloseButton = document.getElementById('quickNoteModalCloseButton');
 const manhwaList = document.getElementById('manhwaList');
 const charactersList = document.getElementById('charactersList');
+const listsView = document.getElementById('listsView');
 const filterTabs = document.querySelectorAll('.filter-tab');
 const statusFilterRow = document.getElementById('statusFilterRow');
 const statusAllButton = document.getElementById('statusAllButton');
@@ -1632,7 +1633,7 @@ async function deleteEntryFromSupabase(entryId) {
 // is the in-memory copy, loadListsFromSupabase() fills it after login,
 // every change upserts the whole list, and failed syncs go to the
 // offline pending-writes queue under the key "list:" + listId.
-// No UI uses these yet.
+// The Lists tab UI is in the "--- Lists tab ---" section.
 
 // Copies a list so a sync (or the queue) holds a fixed version, even if
 // the live list in userLists is edited again while the request is in
@@ -2863,6 +2864,12 @@ function showLibraryView() {
   if (currentFilter === 'Characters') {
     renderCharactersList();
   }
+
+  // Same for the Lists tab: a comic opened from a list may have been
+  // edited or deleted on its detail page.
+  if (currentFilter === 'Lists') {
+    renderListsView();
+  }
 }
 
 backButton.addEventListener('click', showLibraryView);
@@ -3394,6 +3401,404 @@ removeCoverImageButton.addEventListener('click', function () {
     });
 });
 
+// --- Lists tab ---
+// The "Lists" folder tab swaps the shelf for #listsView, the same way
+// the Characters tab swaps it for #charactersList (see renderList()).
+// #listsView shows one of two things:
+//   - the overview: a "New list" box plus one row per list, or
+//   - one open list's comics, when currentOpenListId is set.
+// Every change goes through the data-layer functions in the
+// "--- Lists ---" section (createList, renameList, ...), so the sync
+// and offline queue behave exactly as they already do.
+//
+// List names are typed by the user, so they're always written with
+// textContent, never innerHTML.
+
+// listId of the list being viewed, or null for the overview. Reset to
+// null whenever a tab is clicked (see selectTypeFilter()), so clicking
+// "Lists" always lands on the overview.
+let currentOpenListId = null;
+
+// listId of the list whose name is currently an inline rename box, or
+// null when none is.
+let listBeingRenamedId = null;
+
+// When a list was created. listIds look like "list-<Date.now()>-xxxx"
+// (see generateListId()), so the creation time is read from there;
+// falls back to updatedAt if the id doesn't have that shape.
+function getListCreatedAt(list) {
+  const match = /^list-(\d+)-/.exec(list.listId || '');
+  return match ? Number(match[1]) : (list.updatedAt || 0);
+}
+
+// The comic an item points at, or null if that comic no longer exists.
+function findEntryById(entryId) {
+  return manhwaEntries.find(function (entry) {
+    return entry.id === entryId;
+  }) || null;
+}
+
+// "1 comic" / "4 comics". Only counts items whose comic still exists,
+// so the number matches what opening the list shows.
+function formatListItemCount(list) {
+  const count = list.items.filter(function (item) {
+    return findEntryById(item.entry_id) !== null;
+  }).length;
+  return count + (count === 1 ? ' comic' : ' comics');
+}
+
+function renderListsView() {
+  listsView.innerHTML = '';
+
+  const openList = currentOpenListId ? findList(currentOpenListId) : null;
+  if (openList) {
+    renderListDetail(openList);
+  } else {
+    // The open list may have been deleted (or the user logged out).
+    currentOpenListId = null;
+    renderListsOverview();
+  }
+}
+
+function renderListsOverview() {
+  // "New list" input + button.
+  const createRow = document.createElement('div');
+  createRow.className = 'lists-create-row';
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'lists-create-input';
+  nameInput.placeholder = 'New list name';
+  nameInput.maxLength = 100;
+  nameInput.setAttribute('aria-label', 'New list name');
+
+  const createButton = document.createElement('button');
+  createButton.type = 'button';
+  createButton.className = 'lists-create-button';
+  createButton.textContent = 'New list';
+
+  function submitNewList() {
+    const name = nameInput.value.trim();
+    if (!name) {
+      nameInput.focus();
+      return;
+    }
+    createList(name);
+    renderListsView();
+    // The re-render built a fresh input - put the cursor back in it
+    // so several lists can be created in a row.
+    const freshInput = listsView.querySelector('.lists-create-input');
+    if (freshInput) {
+      freshInput.focus();
+    }
+  }
+
+  createButton.addEventListener('click', submitNewList);
+  nameInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      submitNewList();
+    }
+  });
+
+  createRow.appendChild(nameInput);
+  createRow.appendChild(createButton);
+  listsView.appendChild(createRow);
+
+  if (userLists.length === 0) {
+    const emptyState = document.createElement('p');
+    emptyState.className = 'lists-empty-state';
+    emptyState.textContent = 'No lists yet. Create one above to start organizing your comics.';
+    listsView.appendChild(emptyState);
+    return;
+  }
+
+  // Newest-created first. .slice() so userLists itself isn't reordered.
+  const sortedLists = userLists.slice().sort(function (a, b) {
+    return getListCreatedAt(b) - getListCreatedAt(a);
+  });
+
+  const listOfLists = document.createElement('ul');
+  listOfLists.className = 'lists-overview';
+
+  sortedLists.forEach(function (list) {
+    listOfLists.appendChild(buildListRow(list));
+  });
+
+  listsView.appendChild(listOfLists);
+}
+
+// One row in the overview: name + count (click to open), then Rename
+// and Delete. While being renamed, the name becomes a text box with
+// Save/Cancel instead.
+function buildListRow(list) {
+  const row = document.createElement('li');
+  row.className = 'list-row';
+
+  if (list.listId === listBeingRenamedId) {
+    const renameInput = document.createElement('input');
+    renameInput.type = 'text';
+    renameInput.className = 'list-rename-input';
+    renameInput.value = list.name;
+    renameInput.maxLength = 100;
+    renameInput.setAttribute('aria-label', 'List name');
+
+    const saveButton = document.createElement('button');
+    saveButton.type = 'button';
+    saveButton.className = 'list-row-button';
+    saveButton.textContent = 'Save';
+
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.className = 'list-row-button';
+    cancelButton.textContent = 'Cancel';
+
+    function saveRename() {
+      // renameList() trims and refuses an empty name; in that case
+      // keep the box open so the user can fix it.
+      if (!renameList(list.listId, renameInput.value)) {
+        renameInput.focus();
+        return;
+      }
+      listBeingRenamedId = null;
+      renderListsView();
+    }
+
+    function cancelRename() {
+      listBeingRenamedId = null;
+      renderListsView();
+    }
+
+    saveButton.addEventListener('click', saveRename);
+    cancelButton.addEventListener('click', cancelRename);
+    renameInput.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        saveRename();
+      } else if (event.key === 'Escape') {
+        cancelRename();
+      }
+    });
+
+    row.appendChild(renameInput);
+    const actions = document.createElement('div');
+    actions.className = 'list-row-actions';
+    actions.appendChild(saveButton);
+    actions.appendChild(cancelButton);
+    row.appendChild(actions);
+
+    // Focus once the row is actually on the page.
+    setTimeout(function () {
+      renameInput.focus();
+      renameInput.select();
+    }, 0);
+    return row;
+  }
+
+  // Name + count. A real <button> so it's reachable by keyboard.
+  const openButton = document.createElement('button');
+  openButton.type = 'button';
+  openButton.className = 'list-row-open';
+
+  const nameElement = document.createElement('span');
+  nameElement.className = 'list-row-name';
+  nameElement.textContent = list.name;
+  openButton.appendChild(nameElement);
+
+  const countElement = document.createElement('span');
+  countElement.className = 'list-row-count';
+  countElement.textContent = ' · ' + formatListItemCount(list);
+  openButton.appendChild(countElement);
+
+  openButton.addEventListener('click', function () {
+    currentOpenListId = list.listId;
+    listBeingRenamedId = null;
+    renderListsView();
+    window.scrollTo(0, 0);
+  });
+  row.appendChild(openButton);
+
+  const actions = document.createElement('div');
+  actions.className = 'list-row-actions';
+
+  const renameButton = document.createElement('button');
+  renameButton.type = 'button';
+  renameButton.className = 'list-row-button';
+  renameButton.textContent = 'Rename';
+  renameButton.addEventListener('click', function () {
+    listBeingRenamedId = list.listId;
+    renderListsView();
+  });
+  actions.appendChild(renameButton);
+
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'list-row-button list-row-delete';
+  deleteButton.textContent = 'Delete';
+  deleteButton.addEventListener('click', function () {
+    // confirm() shows its message as plain text, so the user-typed
+    // name is safe here.
+    if (!window.confirm('Delete the list "' + list.name + '"? The comics in it will not be deleted.')) {
+      return;
+    }
+    deleteList(list.listId);
+    renderListsView();
+  });
+  actions.appendChild(deleteButton);
+
+  row.appendChild(actions);
+  return row;
+}
+
+// One open list: Back button, the list's name (and description, if it
+// has one), then its comics newest-added first.
+function renderListDetail(list) {
+  const backToListsButton = document.createElement('button');
+  backToListsButton.type = 'button';
+  backToListsButton.className = 'back-button';
+  backToListsButton.textContent = '← Back';
+  backToListsButton.addEventListener('click', function () {
+    currentOpenListId = null;
+    renderListsView();
+  });
+  listsView.appendChild(backToListsButton);
+
+  const heading = document.createElement('h2');
+  heading.className = 'list-detail-title';
+  heading.textContent = list.name;
+  listsView.appendChild(heading);
+
+  if (list.description) {
+    const description = document.createElement('p');
+    description.className = 'list-detail-description';
+    description.textContent = list.description;
+    listsView.appendChild(description);
+  }
+
+  // Newest-added first. Items whose comic no longer exists are skipped.
+  const itemsToShow = list.items
+    .slice()
+    .sort(function (a, b) {
+      return (b.added_at || 0) - (a.added_at || 0);
+    })
+    .map(function (item) {
+      return findEntryById(item.entry_id);
+    })
+    .filter(function (entry) {
+      return entry !== null;
+    });
+
+  if (itemsToShow.length === 0) {
+    const emptyState = document.createElement('p');
+    emptyState.className = 'lists-empty-state';
+    emptyState.textContent = 'This list is empty. Add comics from their card or detail page.';
+    listsView.appendChild(emptyState);
+    return;
+  }
+
+  // Same fixed-size card grid the Characters tab uses (".characters-list"
+  // in style.css), so these cards match the shelf without the zoom slider.
+  const grid = document.createElement('ul');
+  grid.className = 'characters-list list-detail-items';
+
+  itemsToShow.forEach(function (entry) {
+    grid.appendChild(buildListComicCard(list, entry));
+  });
+
+  listsView.appendChild(grid);
+}
+
+// A comic card for an open list. renderList()'s shelf card is built
+// inline (with edit mode, private rows, etc.), so it can't be called
+// on its own - this builds a read-only card from the same classes
+// (.cover-placeholder, .status-ribbon, .entry-title, .entry-info-row)
+// so it looks the same, plus a "Remove from list" button.
+// In Private mode the cover is left out, same as the shelf hides covers.
+function buildListComicCard(list, entry) {
+  const card = document.createElement('li');
+  card.className = 'character-card list-comic-card';
+
+  const isNote = entry.type === 'Note';
+  function openEntry() {
+    if (isNote) {
+      openQuickNoteModal(entry);
+    } else {
+      showDetailView(entry);
+    }
+  }
+
+  if (displayMode !== 'private') {
+    if (isNote) {
+      const notePreview = document.createElement('div');
+      notePreview.className = 'note-preview detail-link-target';
+      const noteRibbon = document.createElement('div');
+      noteRibbon.className = 'status-ribbon status-note';
+      noteRibbon.textContent = 'Note';
+      notePreview.appendChild(noteRibbon);
+      const notePreviewText = document.createElement('span');
+      notePreviewText.className = 'note-preview-text';
+      notePreviewText.textContent = buildNoteSnippet(entry.noteText);
+      notePreview.appendChild(notePreviewText);
+      notePreview.addEventListener('click', openEntry);
+      card.appendChild(notePreview);
+    } else {
+      const cover = document.createElement('div');
+      cover.className = 'cover-placeholder detail-link-target';
+      if (entry.type === 'Videos') {
+        cover.classList.add('video-cover');
+      }
+      const coverText = document.createElement('span');
+      coverText.className = 'cover-placeholder-text';
+      coverText.textContent = 'No Cover';
+      cover.appendChild(coverText);
+      const coverTitle = document.createElement('span');
+      coverTitle.className = 'cover-placeholder-title';
+      coverTitle.textContent = entry.title;
+      cover.appendChild(coverTitle);
+      const statusRibbon = document.createElement('div');
+      statusRibbon.className = 'status-ribbon status-' + String(entry.status || '').toLowerCase();
+      statusRibbon.textContent = entry.status;
+      cover.appendChild(statusRibbon);
+      if (entry.hasImage) {
+        applyCoverImageToElement(cover, entry.id);
+      }
+      cover.addEventListener('click', openEntry);
+      card.appendChild(cover);
+    }
+  }
+
+  const titleElement = document.createElement('div');
+  titleElement.className = 'entry-title detail-link-target';
+  titleElement.textContent = entry.title;
+  titleElement.addEventListener('click', openEntry);
+  card.appendChild(titleElement);
+
+  if (!isNote) {
+    const progressText = formatProgressText(entry);
+    if (progressText) {
+      const infoRow = document.createElement('div');
+      infoRow.className = 'entry-info-row';
+      const chapterElement = document.createElement('span');
+      chapterElement.className = 'entry-chapter';
+      chapterElement.textContent = progressText;
+      infoRow.appendChild(chapterElement);
+      card.appendChild(infoRow);
+    }
+  }
+
+  const removeButton = document.createElement('button');
+  removeButton.type = 'button';
+  removeButton.className = 'list-row-button list-remove-button';
+  removeButton.textContent = 'Remove from list';
+  removeButton.addEventListener('click', function () {
+    removeEntryFromList(list.listId, entry.id);
+    renderListsView();
+  });
+  card.appendChild(removeButton);
+
+  return card;
+}
+
 // Rebuilds the <ul> on the page from the manhwaEntries array
 function renderList() {
   // The "Characters" tab shows something completely different from
@@ -3402,6 +3807,15 @@ function renderList() {
   // gets its own early branch here, before any of the normal
   // comic-card building below even starts. "return" at the end of this
   // branch means none of the shelf-building code further down runs.
+  if (currentFilter === 'Lists') {
+    manhwaList.style.display = 'none';
+    charactersList.style.display = 'none';
+    listsView.style.display = '';
+    renderListsView();
+    return;
+  }
+  listsView.style.display = 'none';
+
   if (currentFilter === 'Characters') {
     manhwaList.style.display = 'none';
     // '' (not 'grid') so this falls back to whatever style.css already
@@ -4771,6 +5185,12 @@ function selectTypeFilter(filterValue) {
   // further down this file hiding the zoom slider for Private mode.
   document.body.classList.toggle('characters-tab-active', currentFilter === 'Characters');
 
+  // Same idea for the Lists tab (see "body.lists-tab-active" in
+  // style.css). Also always start the Lists tab on its overview.
+  document.body.classList.toggle('lists-tab-active', currentFilter === 'Lists');
+  currentOpenListId = null;
+  listBeingRenamedId = null;
+
   // Close both status dropdowns (if either happened to be open) and
   // redraw #statusFilterRow/#phoneStatusDropdown so they show/hide
   // themselves correctly and reflect THIS newly-active tab's own
@@ -5270,6 +5690,10 @@ async function showAuthOrApp(session) {
     await retryPendingWrites();
     await loadFromSupabase();
     await loadListsFromSupabase();
+    // Lists arrive after the first render; redraw if they're on screen.
+    if (currentFilter === 'Lists') {
+      renderList();
+    }
   } else {
     clearUserLists();
     authScreen.style.display = '';
