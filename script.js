@@ -2468,8 +2468,12 @@ function deleteImageForCharacter(characterId) {
 // top-level functions, so they're global and can be tried from the
 // browser Console.
 //
-// Every image lives at "<userId>/<kind>/<id>", e.g.
-// "1234-abcd/covers/1699999999999".
+// Character images live at "<userId>/characters/<id>". Covers live at
+// "<userId>/covers/<entryId>/<coverVersion>", e.g.
+// "1234-abcd/covers/1699999999999/1700000000123" - one file per uploaded
+// version. Older covers may still sit at the legacy single-file path
+// "<userId>/covers/<entryId>"; downloads fall back to it and cleanup
+// removes it.
 
 // Shrinks an image File/Blob for upload and returns a Promise for a
 // JPEG Blob. Wider than IMAGE_MAX_WIDTH -> scaled down proportionally;
@@ -2527,38 +2531,90 @@ async function resizeImageForUpload(fileOrBlob) {
   }
 }
 
-// Builds "<userId>/<kind>/<id>" for the cloud helpers below, or returns
-// null (after logging why) if anything is wrong. kind must be exactly
-// 'covers' or 'characters', and id must be a non-empty string with no
-// slashes, so a bad value can never point at some other path.
+// Builds the cloud path for one image, or returns null (after logging
+// why) if anything is wrong. kind must be exactly 'covers' or
+// 'characters', and id must be a non-empty string with no slashes, so a
+// bad value can never point at some other path.
+//   characters: "<userId>/characters/<id>"            (unchanged)
+//   covers:     "<userId>/covers/<entryId>/<version>" - version must be
+//               a positive integer (the entry's coverVersion). Every
+//               uploaded cover gets its own path, so a browser/CDN can
+//               never serve a stale cached copy of an older cover.
 // The user id comes from getSession(), which reads the saved login
 // locally with no network request, so this works while offline.
-async function buildCloudImagePath(kind, id) {
+async function buildCloudImagePath(kind, id, version) {
   if (kind !== 'covers' && kind !== 'characters') {
     console.error('Cloud image: kind must be "covers" or "characters", got:', kind);
     return null;
   }
-  if (typeof id !== 'string' || id.trim() === '' || id.includes('/') || id.includes('\\')) {
+  if (!isValidCloudImageId(id)) {
     console.error('Cloud image: id must be a non-empty string with no slashes, got:', id);
     return null;
   }
+  if (kind === 'covers' && !isValidCoverVersion(version)) {
+    console.error('Cloud image: cover version must be a positive integer, got:', version);
+    return null;
+  }
+  const userId = await getCloudImageUserId();
+  if (!userId) return null;
+  if (kind === 'covers') {
+    return userId + '/covers/' + id + '/' + version;
+  }
+  return userId + '/' + kind + '/' + id;
+}
+
+function isValidCloudImageId(id) {
+  return typeof id === 'string' && id.trim() !== '' && !id.includes('/') && !id.includes('\\');
+}
+
+function isValidCoverVersion(version) {
+  return Number.isSafeInteger(version) && version > 0;
+}
+
+async function getCloudImageUserId() {
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session) {
     console.error('Cloud image: not signed in.');
     return null;
   }
-  return session.user.id + '/' + kind + '/' + id;
+  return session.user.id;
 }
 
-// Uploads (or replaces) one image. Returns true on success, false on
-// any failure. Never throws.
-async function uploadImageToCloud(kind, id, blob) {
+// For one comic's covers: "folder" is "<userId>/covers/<entryId>" (the
+// versioned files live inside it) and "legacy" is the old single-file
+// path from before versioning - the same string, but as a file rather
+// than a folder. Null (after logging) if the id is bad or logged out.
+async function buildCoverCloudPaths(entryId) {
+  if (!isValidCloudImageId(entryId)) {
+    console.error('Cloud cover: id must be a non-empty string with no slashes, got:', entryId);
+    return null;
+  }
+  const userId = await getCloudImageUserId();
+  if (!userId) return null;
+  const base = userId + '/covers/' + entryId;
+  return { folder: base, legacy: base };
+}
+
+// True if a Supabase Storage error means "that file doesn't exist".
+function isStorageNotFoundError(error) {
+  if (!error) return false;
+  const status = String(error.statusCode || error.status || '');
+  const message = String(error.message || '').toLowerCase();
+  const original = error.originalError;
+  return status === '404' || message.includes('not found') ||
+    !!(original && original.status === 404);
+}
+
+// Uploads (or replaces) one image. version is required for 'covers'
+// (see buildCloudImagePath()) and ignored for 'characters'. Returns
+// true on success, false on any failure. Never throws.
+async function uploadImageToCloud(kind, id, blob, version) {
   try {
     if (!(blob instanceof Blob)) {
       console.error('uploadImageToCloud: expected a Blob, got:', blob);
       return false;
     }
-    const path = await buildCloudImagePath(kind, id);
+    const path = await buildCloudImagePath(kind, id, version);
     if (!path) return false;
 
     const { error } = await supabaseClient.storage
@@ -2576,18 +2632,22 @@ async function uploadImageToCloud(kind, id, blob) {
 }
 
 // Downloads one image using the signed-in user's credentials (the
-// bucket is private - no public URL). Returns a Blob, or null if it
-// doesn't exist or anything fails. Never throws.
-async function downloadImageFromCloud(kind, id) {
+// bucket is private - no public URL). version is required for 'covers'
+// and ignored for 'characters'. Returns a Blob, or null if it doesn't
+// exist or anything fails. Never throws. (A missing cover is not
+// logged as an error; the cover download sync handles that case.)
+async function downloadImageFromCloud(kind, id, version) {
   try {
-    const path = await buildCloudImagePath(kind, id);
+    const path = await buildCloudImagePath(kind, id, version);
     if (!path) return null;
 
     const { data, error } = await supabaseClient.storage
       .from('images')
       .download(path);
     if (error) {
-      console.error('downloadImageFromCloud failed for', path, error);
+      if (!(kind === 'covers' && isStorageNotFoundError(error))) {
+        console.error('downloadImageFromCloud failed for', path, error);
+      }
       return null;
     }
     return data || null;
@@ -2597,22 +2657,21 @@ async function downloadImageFromCloud(kind, id) {
   }
 }
 
-// Deletes one image. Returns true on success - including when it was
-// already gone (Supabase's remove() doesn't error on a missing file,
-// and a "not found" error is treated as success too). False on any
-// other failure. Never throws.
-async function deleteImageFromCloud(kind, id) {
+// Deletes one image. version is required for 'covers' and ignored for
+// 'characters'. Returns true on success - including when it was already
+// gone (Supabase's remove() doesn't error on a missing file, and a "not
+// found" error is treated as success too). False on any other failure.
+// Never throws.
+async function deleteImageFromCloud(kind, id, version) {
   try {
-    const path = await buildCloudImagePath(kind, id);
+    const path = await buildCloudImagePath(kind, id, version);
     if (!path) return false;
 
     const { error } = await supabaseClient.storage
       .from('images')
       .remove([path]);
     if (error) {
-      const status = String(error.statusCode || error.status || '');
-      const message = String(error.message || '').toLowerCase();
-      if (status === '404' || message.includes('not found')) {
+      if (isStorageNotFoundError(error)) {
         return true;
       }
       console.error('deleteImageFromCloud failed for', path, error);
@@ -2621,6 +2680,89 @@ async function deleteImageFromCloud(kind, id) {
     return true;
   } catch (error) {
     console.error('deleteImageFromCloud failed:', error);
+    return false;
+  }
+}
+
+// Downloads one comic's cover for the given coverVersion. If that
+// versioned file doesn't exist, tries the legacy single-file path once.
+// Resolves { blob } on success, { blob: null, missing: true } when
+// neither file exists, or { blob: null, missing: false } on any other
+// failure (logged). Never throws, never uploads.
+async function downloadCoverFromCloud(entryId, version) {
+  try {
+    const versionedPath = await buildCloudImagePath('covers', entryId, version);
+    const paths = await buildCoverCloudPaths(entryId);
+    if (!versionedPath || !paths) {
+      return { blob: null, missing: false };
+    }
+
+    const candidates = [versionedPath, paths.legacy];
+    for (let i = 0; i < candidates.length; i++) {
+      const { data, error } = await supabaseClient.storage
+        .from('images')
+        .download(candidates[i]);
+      if (!error && data instanceof Blob) {
+        return { blob: data, missing: false };
+      }
+      if (error && !isStorageNotFoundError(error)) {
+        console.error('Cover download failed for', candidates[i], error);
+        return { blob: null, missing: false };
+      }
+      // Not found - fall through to the legacy path (once).
+    }
+    return { blob: null, missing: true };
+  } catch (error) {
+    console.error('Cover download failed for entry ' + entryId + ':', error);
+    return { blob: null, missing: false };
+  }
+}
+
+// Removes one comic's cloud cover files: every file under
+// "<userId>/covers/<entryId>/" except keepVersion (pass null to remove
+// them all), plus the legacy "<userId>/covers/<entryId>" file if it
+// exists. Returns true on success, false on any failure (logged).
+// Never throws. Callers run it in the background via the entry's queue.
+async function removeCloudCoverFiles(entryId, keepVersion) {
+  try {
+    const paths = await buildCoverCloudPaths(entryId);
+    if (!paths) return false;
+
+    const keepName = keepVersion == null ? null : String(keepVersion);
+    const toRemove = [];
+    const pageSize = 100;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await supabaseClient.storage
+        .from('images')
+        .list(paths.folder, { limit: pageSize, offset: offset });
+      if (error) {
+        console.error('Could not list cloud covers for entry ' + entryId + ':', error);
+        return false;
+      }
+      const page = data || [];
+      page.forEach(function (item) {
+        // item.id is null for sub-folders; only real files are removed.
+        if (item && item.name && item.id !== null && item.name !== keepName) {
+          toRemove.push(paths.folder + '/' + item.name);
+        }
+      });
+      if (page.length < pageSize) break;
+      offset += pageSize;
+    }
+    // Legacy single-file cover; remove() is a no-op if it's not there.
+    toRemove.push(paths.legacy);
+
+    const { error } = await supabaseClient.storage
+      .from('images')
+      .remove(toRemove);
+    if (error && !isStorageNotFoundError(error)) {
+      console.error('Could not remove cloud covers for entry ' + entryId + ':', error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('Could not remove cloud covers for entry ' + entryId + ':', error);
     return false;
   }
 }
@@ -2692,7 +2834,17 @@ function uploadCoverInBackground(entry, pickedFile) {
       return;
     }
 
-    const uploaded = await uploadImageToCloud('covers', entry.id, resized);
+    // Decide the new version BEFORE uploading, and upload to its own
+    // path. entry.coverVersion is NOT touched until the upload has
+    // succeeded, so on failure the entry still points at a file that
+    // exists. (Bumped past the current version on the off chance the
+    // clock is behind it.)
+    let newVersion = Date.now();
+    if (isValidCoverVersion(entry.coverVersion) && newVersion <= entry.coverVersion) {
+      newVersion = entry.coverVersion + 1;
+    }
+
+    const uploaded = await uploadImageToCloud('covers', entry.id, resized, newVersion);
     if (!uploaded) {
       console.error('Cover upload failed for entry ' + entry.id + '; coverVersion left unchanged.');
       if (myTurn === state.latest) {
@@ -2702,31 +2854,56 @@ function uploadCoverInBackground(entry, pickedFile) {
     }
 
     // Uploaded, but something newer was requested while we were
-    // uploading. The newer task runs next and decides coverVersion.
+    // uploading. The newer task runs next and decides coverVersion (and
+    // its cleanup removes the file we just uploaded).
     if (myTurn !== state.latest) {
       return;
     }
 
-    entry.coverVersion = Date.now();
+    entry.coverVersion = newVersion;
     // The local cover IS this version, so the download sync must never
     // fetch it back. Written right away, before anything else can run.
-    setLocalCoverVersion(entry.id, entry.coverVersion).catch(function (error) {
+    setLocalCoverVersion(entry.id, newVersion).catch(function (error) {
       console.error('Could not record local cover version for entry ' + entry.id + ':', error);
     });
     touchEntry(entry);
     saveToStorage();
-    syncEntryToSupabase(entry);
+
+    // Not awaited, so the queue isn't held up by the entry sync. Only
+    // once the entry (pointing at the new version) has synced are the
+    // older cloud files removed - until then other devices may still
+    // need them. If the sync fails, the old files simply stay for now.
+    syncEntryToSupabase(entry).then(function (synced) {
+      if (!synced) {
+        console.warn('Entry ' + entry.id + ' not synced yet; older cloud covers kept for now.');
+        return;
+      }
+      // Queued on the entry's chain so it can never run alongside
+      // another upload/delete for this comic.
+      queueCoverCloudTask(entry.id, async function () {
+        // A newer pick/remove/delete came along: its own task handles
+        // cleanup, and our keep-version may no longer be the right one.
+        if (myTurn !== state.latest) {
+          return;
+        }
+        const cleaned = await removeCloudCoverFiles(entry.id, newVersion);
+        if (!cleaned) {
+          console.error('Could not clean up older cloud covers for entry ' + entry.id + '.');
+        }
+      });
+    });
   });
 }
 
 // Called (not awaited) when a cover is removed or its comic is
-// deleted. Cancels any pending upload, then deletes the cloud copy once
-// any upload already in flight has finished, so that upload can't put
-// the file back afterwards.
+// deleted. Cancels any pending upload, then - once any upload already
+// in flight has finished, so it can't put a file back afterwards -
+// removes every cloud file under "<userId>/covers/<entryId>/" plus the
+// legacy "<userId>/covers/<entryId>" file. Failures are only logged.
 function deleteCoverFromCloudInBackground(entryId) {
   cancelPendingCoverUploads(entryId);
   queueCoverCloudTask(entryId, async function () {
-    const deleted = await deleteImageFromCloud('covers', entryId);
+    const deleted = await removeCloudCoverFiles(entryId, null);
     if (!deleted) {
       console.error('Could not delete cover from cloud for entry ' + entryId + '.');
     }
@@ -2906,19 +3083,29 @@ function downloadCoverIfNeeded(entryId) {
       return false; // already up to date
     }
 
-    let blob = null;
+    // Requests the file for entry.coverVersion, falling back once to
+    // the legacy single-file path (see downloadCoverFromCloud()).
+    let result = { blob: null, missing: false };
     await acquireCoverDownloadSlot();
     try {
       if (generation !== coverSyncGeneration) {
         return false;
       }
-      blob = await downloadImageFromCloud('covers', entryId);
+      result = await downloadCoverFromCloud(entryId, version);
     } finally {
       releaseCoverDownloadSlot();
     }
 
     if (generation !== coverSyncGeneration) {
       return false; // logged out / switched user meanwhile
+    }
+    const blob = result.blob;
+    if (result.missing) {
+      // Neither the versioned nor the legacy file exists: keep the
+      // placeholder, no error. Remembered like a failure so it isn't
+      // asked for again on every render this session.
+      coverDownloadFailures.add(failureKey);
+      return false;
     }
     if (!(blob instanceof Blob)) {
       console.warn('Cover download unavailable for entry ' + entryId + ' (version ' + version + '); will retry on next load or when back online.');
