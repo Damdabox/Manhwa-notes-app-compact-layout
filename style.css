@@ -1726,6 +1726,68 @@ body.private-mode #manhwaList {
   font-size: 15px;
 }
 
+/* First-run card shown in place of the shelf when a signed-in user's
+   library loaded and has zero entries (see #libraryEmptyState in
+   index.html and updateEmptyStates() in script.js). Same dark card look
+   as the phone Add Entry sheet. The [hidden] rule is needed because
+   display: flex would otherwise override the hidden attribute. */
+.library-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 700px;
+  margin: 10px 0 20px;
+  padding: 20px;
+  box-sizing: border-box;
+  background: #262626;
+  border: 1px solid #444;
+  border-radius: 12px;
+}
+
+.library-empty-state[hidden] {
+  display: none;
+}
+
+.library-empty-state-heading {
+  margin: 0;
+  font-size: 20px;
+}
+
+.library-empty-state-text {
+  margin: 0;
+  color: #bbb;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.library-empty-state-button {
+  padding: 8px 16px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  background: #fff;
+  color: navy;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.library-empty-state-button:hover {
+  background: #e6e6e6;
+}
+
+/* One-line message when the active type tab has no entries of that
+   type (see #tabEmptyState in index.html). */
+.tab-empty-state {
+  color: #bbb;
+  font-size: 15px;
+  margin: 10px 0 20px;
+}
+
+.tab-empty-state[hidden] {
+  display: none;
+}
+
 /* The overview: a grid of square list tiles, same column sizing as the
    comic shelf (#manhwaList at --card-scale 1), so a tile is the width
    of a comic card - two columns on a phone. */

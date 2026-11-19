@@ -29,8 +29,8 @@
        the email/password fields, Sign Up / Log In buttons, and a spot to
        show auth errors. -->
   <div id="authScreen">
-    <input type="email" id="authEmail" placeholder="Email">
-    <input type="password" id="authPassword" placeholder="Password">
+    <input type="email" id="authEmail" placeholder="Email" aria-label="Email">
+    <input type="password" id="authPassword" placeholder="Password" aria-label="Password">
     <button id="signUpBtn" type="button">Sign Up</button>
     <button id="signInBtn" type="button">Log In</button>
     <div id="authError"></div>
@@ -104,7 +104,7 @@
          and firing a "change" event on it, so from script.js's point
          of view a pill tap looks identical to picking an option from a
          normal dropdown - see the "Type pills" section in script.js. -->
-    <select id="typeInput">
+    <select id="typeInput" aria-label="Type" title="What kind of title this is">
       <option value="Manhwa">Manhwa</option>
       <option value="Other Comics">Other Comics</option>
       <option value="Videos">Videos</option>
@@ -122,7 +122,7 @@
       <button type="button" class="type-pill" data-type="Videos">Videos</button>
     </div>
 
-    <input type="text" id="titleInput" placeholder="Enter title">
+    <input type="text" id="titleInput" placeholder="Enter title" aria-label="Title">
 
     <!-- Author + progress row: on phone widths these sit side by side in
          one row (see .author-progress-row in style.css) - on
@@ -151,8 +151,8 @@
       <input type="text" id="episodeInput" placeholder="Episode # (optional)" style="display: none;">
     </div>
 
-    <input type="text" id="linkInput" placeholder="Link (URL)">
-    <select id="statusInput">
+    <input type="text" id="linkInput" placeholder="Link (URL)" aria-label="Link" title="Where you read or watch it (optional)">
+    <select id="statusInput" aria-label="Status">
       <option value="Reading">Reading</option>
       <option value="Ongoing">Ongoing</option>
       <option value="Completed">Completed</option>
@@ -169,13 +169,13 @@
          strictly required, but it's the correct/expected type for a
          button that isn't meant to submit anything). -->
     <div class="tag-input-row">
-      <input type="text" id="tagInput" placeholder="Add a tag (e.g. isekai)">
+      <input type="text" id="tagInput" placeholder="Add a tag (e.g. isekai)" aria-label="Tag">
       <button id="addTagButton" type="button">Add Tag</button>
     </div>
     <div id="tagsPreview" class="tags-preview"></div>
 
     <button id="addButton" type="button">Add Entry</button>
-    <button id="bulkAddButton" type="button">Bulk Add</button>
+    <button id="bulkAddButton" type="button" title="Add many titles at once">Bulk Add</button>
 
     <!-- Quick Notes: a completely separate feature from the Manhwa/Other
          Comics/Videos entries above - just a title + a block of
@@ -192,7 +192,7 @@
          the big comment down there for how a "popup" is actually built
          out of plain HTML/CSS, and the "Quick Notes" section in
          script.js for how Save/Delete work inside it). -->
-    <button id="quickNotesButton" type="button" class="quick-notes-button">Quick Notes</button>
+    <button id="quickNotesButton" type="button" class="quick-notes-button" title="Save a quick note or link without a full entry">Quick Notes</button>
 
     <!-- Phone-only secondary links: hidden by default (see
          .add-entry-sheet-secondary-row in style.css) so laptop/tablet
@@ -209,8 +209,8 @@
          "Add Entry sheet" section in script.js for both click
          handlers. -->
     <div class="add-entry-sheet-secondary-row">
-      <button type="button" id="sheetBulkAddLink" class="add-entry-sheet-secondary-link">Bulk add</button>
-      <button type="button" id="sheetQuickNoteLink" class="add-entry-sheet-secondary-link">Quick note</button>
+      <button type="button" id="sheetBulkAddLink" class="add-entry-sheet-secondary-link" title="Add many titles at once">Bulk add</button>
+      <button type="button" id="sheetQuickNoteLink" class="add-entry-sheet-secondary-link" title="Save a quick note or link without a full entry">Quick note</button>
     </div>
   </div>
   </div><!-- /#addEntrySheetOverlay -->
@@ -223,7 +223,7 @@
        while scrolling, instead of scrolling away with the page.
        Clicking it adds the "sheet-open" class to #addEntrySheetOverlay
        above - see the "Add Entry sheet" section in script.js. -->
-  <button id="openAddEntrySheetButton" type="button" class="open-add-entry-sheet-button" aria-label="Add entry">+</button>
+  <button id="openAddEntrySheetButton" type="button" class="open-add-entry-sheet-button" aria-label="Add entry" title="Add entry">+</button>
 
   <!-- Bulk Add panel: hidden until "Bulk Add" above is clicked. Paste a
        whole list of titles into the textarea, pick ONE status that will
@@ -261,7 +261,7 @@ The Beginning After
 The End"></textarea>
 
     <div class="bulk-add-controls">
-      <select id="bulkAddStatusInput">
+      <select id="bulkAddStatusInput" aria-label="Status for all pasted titles" title="Status given to every pasted title">
         <option value="Reading">Reading</option>
         <option value="Ongoing">Ongoing</option>
         <option value="Completed">Completed</option>
@@ -281,7 +281,7 @@ The End"></textarea>
        back to showing everything; see the "Search bar" section in
        script.js for how both pieces work. -->
   <div class="search-bar">
-    <input type="text" id="searchInput" placeholder="Search by title or tag...">
+    <input type="text" id="searchInput" placeholder="Search by title or tag..." aria-label="Search by title or tag">
     <button id="clearSearchButton" class="clear-search-button" type="button" aria-label="Clear search">&times;</button>
   </div>
 
@@ -318,7 +318,7 @@ The End"></textarea>
            with buildStarSVG() like a rating star, since this one icon
            is always the same full/solid star and never needs to
            switch between full/half/empty. -->
-      <button class="filter-tab" data-filter="Characters">
+      <button class="filter-tab" data-filter="Characters" title="Favorite characters from all your titles" aria-label="Characters">
         <svg viewBox="0 0 24 24" width="14" height="14" class="star-svg tab-star-icon"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="#ffd700" stroke="#c9a400" stroke-width="1"></path></svg>
         <!-- Wrapped in its own span (instead of being bare text like the
              other tabs) purely so the phone media query below can hide
@@ -331,7 +331,7 @@ The End"></textarea>
       <!-- Lists tab: like Characters, this swaps the shelf out for
            #listsView below instead of filtering it. See the "Lists tab"
            section in script.js. -->
-      <button class="filter-tab" data-filter="Lists">Lists</button>
+      <button class="filter-tab" data-filter="Lists" title="Your own collections of titles">Lists</button>
     </div>
 
     <!-- Phone-only compact filter pills: on phone widths, these two
@@ -353,7 +353,7 @@ The End"></textarea>
          Hidden by default (like .type-pill-row above) so laptop/tablet
          never renders them at all. -->
     <div id="phoneStatusDropdown" class="status-dropdown phone-filter-pill">
-      <button id="phoneStatusDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false">
+      <button id="phoneStatusDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" title="Filter by status">
         <span id="phoneStatusDropdownLabel">All</span>
         <span class="status-dropdown-arrow">&#9662;</span>
       </button>
@@ -366,7 +366,7 @@ The End"></textarea>
     </div>
 
     <div id="typeFilterDropdown" class="status-dropdown phone-filter-pill">
-      <button id="typeFilterDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false">
+      <button id="typeFilterDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" title="Filter by type">
         <span id="typeFilterDropdownLabel">All</span>
         <span class="status-dropdown-arrow">&#9662;</span>
       </button>
@@ -385,13 +385,13 @@ The End"></textarea>
          common CSS trick, not a special HTML element). Unchecked =
          "Cover" mode (blue, shelf looks normal). Checked = "Private"
          mode (red, every comic becomes a plain text row). -->
-    <div class="privacy-toggle">
-      <span class="privacy-toggle-label privacy-toggle-label-cover">Cover</span>
+    <div class="privacy-toggle" title="Cover: show titles as cards with cover images. Private: show plain text rows with no covers.">
+      <span class="privacy-toggle-label privacy-toggle-label-cover" title="Cover: show titles as cards with cover images">Cover</span>
       <label class="switch">
-        <input type="checkbox" id="privacyToggleInput" aria-label="Toggle private display mode">
+        <input type="checkbox" id="privacyToggleInput" aria-label="Private view: show plain text rows with no covers">
         <span class="switch-slider"></span>
       </label>
-      <span class="privacy-toggle-label privacy-toggle-label-private">Private</span>
+      <span class="privacy-toggle-label privacy-toggle-label-private" title="Private: show plain text rows with no covers">Private</span>
     </div>
   </div>
 
@@ -414,10 +414,10 @@ The End"></textarea>
            choices; picking one filters the shelf to just that status
            and becomes the new label. -->
   <div id="statusFilterRow" class="status-filter-row" style="display: none;">
-    <button id="statusAllButton" class="status-all-button" type="button">All</button>
+    <button id="statusAllButton" class="status-all-button" type="button" title="Show every status">All</button>
 
     <div id="statusDropdown" class="status-dropdown">
-      <button id="statusDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false">
+      <button id="statusDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" title="Filter by status">
         <span id="statusDropdownLabel">Reading</span>
         <span class="status-dropdown-arrow">&#9662;</span>
       </button>
@@ -438,11 +438,25 @@ The End"></textarea>
        turns into an actual size change. -->
   <div class="zoom-controls">
     <label for="zoomSlider">Card Size:</label>
-    <button id="zoomOutButton" class="zoom-button" type="button" aria-label="Zoom out">&minus;</button>
-    <input type="range" id="zoomSlider" min="0.6" max="1.8" step="0.1" value="1">
-    <button id="zoomInButton" class="zoom-button" type="button" aria-label="Zoom in">+</button>
+    <button id="zoomOutButton" class="zoom-button" type="button" aria-label="Smaller cards" title="Smaller cards">&minus;</button>
+    <input type="range" id="zoomSlider" aria-label="Card size" min="0.6" max="1.8" step="0.1" value="1">
+    <button id="zoomInButton" class="zoom-button" type="button" aria-label="Larger cards" title="Larger cards">+</button>
     <span id="zoomValueLabel">100%</span>
   </div>
+
+  <!-- libraryEmptyState: first-run card for a signed-in user whose
+       library loaded successfully and has zero entries. Shown/hidden by
+       updateEmptyStates() in script.js - never while loading, after a
+       failed load, or once any entry exists. -->
+  <div id="libraryEmptyState" class="library-empty-state" hidden>
+    <h2 class="library-empty-state-heading">Your library is empty</h2>
+    <p class="library-empty-state-text">Add your first title with the form above. Pick a type, enter a title, and tap Add Entry. You can add a link to wherever you read or watch it.</p>
+    <button id="libraryEmptyStateAddButton" type="button" class="library-empty-state-button">Add my first title</button>
+  </div>
+
+  <!-- tabEmptyState: shown when the library has entries but the active
+       type tab (Manhwa / Other Comics / Videos) has none of that type. -->
+  <p id="tabEmptyState" class="tab-empty-state" hidden>Nothing here yet. Entries of this type will show up here.</p>
 
   <ul id="manhwaList"></ul>
 

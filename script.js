@@ -39,6 +39,20 @@ const quickNoteModalCloseButton = document.getElementById('quickNoteModalCloseBu
 const manhwaList = document.getElementById('manhwaList');
 const charactersList = document.getElementById('charactersList');
 const listsView = document.getElementById('listsView');
+const libraryEmptyState = document.getElementById('libraryEmptyState');
+const libraryEmptyStateAddButton = document.getElementById('libraryEmptyStateAddButton');
+const tabEmptyState = document.getElementById('tabEmptyState');
+
+// Tracks the most recent loadFromSupabase() call, purely so the UI can
+// tell "loaded successfully and really empty" apart from "still
+// loading" or "load failed / offline". Only updateEmptyStates() reads
+// it; it never affects what data is loaded or synced.
+//   'idle'    - not signed in / no load attempted yet
+//   'loading' - a load is in progress
+//   'loaded'  - the last load succeeded
+//   'error'   - the last load failed (offline, auth error, etc.)
+let libraryLoadState = 'idle';
+
 const filterTabs = document.querySelectorAll('.filter-tab');
 const statusFilterRow = document.getElementById('statusFilterRow');
 const statusAllButton = document.getElementById('statusAllButton');
@@ -2005,9 +2019,12 @@ function loadFromStorage() {
 // just like loadFromStorage() from that point on - same backfill,
 // same renderList() call at the end.
 async function loadFromSupabase() {
+  libraryLoadState = 'loading';
   const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
   if (userError || !user) {
     console.error('Could not get current user for loadFromSupabase:', userError && userError.message);
+    libraryLoadState = 'error';
+    renderList();
     return;
   }
 
@@ -2018,6 +2035,8 @@ async function loadFromSupabase() {
 
   if (fetchError) {
     console.error('Could not load entries from Supabase:', fetchError.message);
+    libraryLoadState = 'error';
+    renderList();
     return;
   }
 
@@ -2036,6 +2055,7 @@ async function loadFromSupabase() {
     backfillEntryDefaults(entry);
   });
 
+  libraryLoadState = 'loaded';
   renderList();
 }
 
@@ -4136,6 +4156,28 @@ detailAddToListButton.addEventListener('click', function () {
 });
 
 // Rebuilds the <ul> on the page from the manhwaEntries array
+// Shows/hides the two empty-state messages above #manhwaList (see
+// #libraryEmptyState / #tabEmptyState in index.html). Pass
+// onShelf = false for tabs that don't show the shelf at all
+// (Characters, Lists) so both messages stay hidden there.
+//   - Library card: only once a load has SUCCEEDED and there are zero
+//     entries of any kind. Never while loading or after a failed load.
+//   - Tab line: the library has entries, but none of the active type
+//     tab's type (ignores status filter and search on purpose).
+function updateEmptyStates(onShelf) {
+  const libraryIsEmpty = onShelf
+    && libraryLoadState === 'loaded'
+    && manhwaEntries.length === 0;
+  libraryEmptyState.hidden = !libraryIsEmpty;
+
+  const tabIsEmpty = onShelf
+    && !libraryIsEmpty
+    && manhwaEntries.length > 0
+    && ENTRY_TYPES.includes(currentFilter)
+    && !manhwaEntries.some(function (entry) { return entry.type === currentFilter; });
+  tabEmptyState.hidden = !tabIsEmpty;
+}
+
 function renderList() {
   // The "Characters" tab shows something completely different from
   // every other tab - one combined list of characters (see
@@ -4144,6 +4186,7 @@ function renderList() {
   // comic-card building below even starts. "return" at the end of this
   // branch means none of the shelf-building code further down runs.
   if (currentFilter === 'Lists') {
+    updateEmptyStates(false);
     manhwaList.style.display = 'none';
     charactersList.style.display = 'none';
     listsView.style.display = '';
@@ -4155,6 +4198,7 @@ function renderList() {
   revokeListCollageUrls();
 
   if (currentFilter === 'Characters') {
+    updateEmptyStates(false);
     manhwaList.style.display = 'none';
     // '' (not 'grid') so this falls back to whatever style.css already
     // says #charactersList should be - which is "display: grid" (see
@@ -4179,6 +4223,7 @@ function renderList() {
 
   // Clear out whatever is currently shown
   manhwaList.innerHTML = '';
+  updateEmptyStates(true);
 
   // .filter() walks the full array and builds a new, shorter array
   // containing only the entries where the callback returns true.
@@ -5283,6 +5328,19 @@ openAddEntrySheetButton.addEventListener('click', function () {
   addEntrySheetOverlay.classList.add('sheet-open');
 });
 
+// "Add my first title" (empty-library card): brings the Add Entry form
+// into view and puts the cursor in the title box. On phone widths the
+// form lives in the bottom sheet, so open that (adding "sheet-open" has
+// no effect on wider screens - see above); on laptop/tablet the form is
+// already on the page, so just scroll up to it.
+libraryEmptyStateAddButton.addEventListener('click', function () {
+  addEntrySheetOverlay.classList.add('sheet-open');
+  if (!window.matchMedia('(max-width: 600px)').matches) {
+    titleInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  titleInput.focus({ preventScroll: true });
+});
+
 // Closes the sheet completely and, via resetBulkAddPanel() (see the
 // "Bulk Add" section above), makes sure it's showing the normal Add
 // Entry fields again next time it's opened - rather than the Bulk Add
@@ -6038,6 +6096,7 @@ async function showAuthOrApp(session) {
     }
   } else {
     clearUserLists();
+    libraryLoadState = 'idle';
     authScreen.style.display = '';
     appScreen.style.display = 'none';
   }
