@@ -65,6 +65,12 @@ const tabEmptyState = document.getElementById('tabEmptyState');
 //   'error'   - the last load failed (offline, auth error, etc.)
 let libraryLoadState = 'idle';
 
+// When entries were last successfully loaded from Supabase (Date.now()),
+// or 0 if never. Set by loadFromSupabase(); the foreground refresh (see
+// "Foreground refresh" near the bottom of this file) uses it to wait at
+// least a minute between refreshes.
+let lastDataRefreshAt = 0;
+
 const filterTabs = document.querySelectorAll('.filter-tab');
 const statusFilterRow = document.getElementById('statusFilterRow');
 const statusAllButton = document.getElementById('statusAllButton');
@@ -1778,11 +1784,15 @@ async function deleteListFromSupabase(listId, deletedAt) {
 // after loadFromSupabase() in showAuthOrApp(). Clears userLists first so
 // repeated calls don't duplicate. If the fetch fails, the current
 // userLists is left as-is (same as loadFromSupabase()).
-async function loadListsFromSupabase() {
+//
+// options.canApply (optional): same as in loadFromSupabase() - checked
+// right before userLists is replaced; false abandons the load.
+// Returns true if userLists was replaced, false otherwise.
+async function loadListsFromSupabase(options) {
   const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
   if (userError || !user) {
     console.error('Could not get current user for loadListsFromSupabase:', userError && userError.message);
-    return;
+    return false;
   }
 
   const { data: rows, error: fetchError } = await supabaseClient
@@ -1792,14 +1802,18 @@ async function loadListsFromSupabase() {
 
   if (fetchError) {
     console.error('Could not load lists from Supabase:', fetchError.message);
-    return;
+    return false;
   }
 
   // If someone else logged in while this was loading, these rows are
   // stale - don't put them in front of the new user.
   const { data: { session } } = await supabaseClient.auth.getSession();
   if (!session || session.user.id !== user.id) {
-    return;
+    return false;
+  }
+
+  if (options && options.canApply && !(await options.canApply(user.id))) {
+    return false;
   }
 
   userLists.length = 0;
@@ -1824,6 +1838,7 @@ async function loadListsFromSupabase() {
       updatedAt: row.updated_at ? Date.parse(row.updated_at) : 0
     });
   });
+  return true;
 }
 
 // Empties userLists. Called by showAuthOrApp() on logout and when a
@@ -2035,14 +2050,29 @@ function loadFromStorage() {
 // to be saved to localStorage), so once we have the rows this works
 // just like loadFromStorage() from that point on - same backfill,
 // same renderList() call at the end.
-async function loadFromSupabase() {
-  libraryLoadState = 'loading';
+//
+// options (optional, used by the foreground refresh at the bottom of
+// this file):
+//   background: true - don't change libraryLoadState until the new rows
+//     are actually applied, don't render, and fail silently (the
+//     current entries are left exactly as they are).
+//   canApply: async function returning true/false, checked right
+//     before manhwaEntries is replaced. Returning false abandons the
+//     load, e.g. because the user started editing while it was fetching.
+// Returns true if the entries were replaced, false otherwise.
+async function loadFromSupabase(options) {
+  const background = !!(options && options.background);
+  if (!background) {
+    libraryLoadState = 'loading';
+  }
   const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
   if (userError || !user) {
     console.error('Could not get current user for loadFromSupabase:', userError && userError.message);
-    libraryLoadState = 'error';
-    renderList();
-    return;
+    if (!background) {
+      libraryLoadState = 'error';
+      renderList();
+    }
+    return false;
   }
 
   const { data: rows, error: fetchError } = await supabaseClient
@@ -2052,9 +2082,15 @@ async function loadFromSupabase() {
 
   if (fetchError) {
     console.error('Could not load entries from Supabase:', fetchError.message);
-    libraryLoadState = 'error';
-    renderList();
-    return;
+    if (!background) {
+      libraryLoadState = 'error';
+      renderList();
+    }
+    return false;
+  }
+
+  if (options && options.canApply && !(await options.canApply(user.id))) {
+    return false;
   }
 
   // Clear manhwaEntries first so repeated calls (e.g. re-running this
@@ -2073,7 +2109,11 @@ async function loadFromSupabase() {
   });
 
   libraryLoadState = 'loaded';
-  renderList();
+  lastDataRefreshAt = Date.now();
+  if (!background) {
+    renderList();
+  }
+  return true;
 }
 
 // --- Cover images (IndexedDB) ---
@@ -7057,6 +7097,286 @@ privacyModalOverlay.addEventListener('click', function (event) {
 document.addEventListener('keydown', function (event) {
   if (event.key === 'Escape' && privacyModalOverlay.style.display !== 'none') {
     closePrivacyModal();
+  }
+});
+
+// --- Foreground refresh ---
+// Reloads entries and lists when the app comes back to the foreground
+// (or reconnects), so changes made on another device show up without a
+// restart. It never replaces local work:
+//   - queued writes are retried first. While any are still queued for
+//     this user, that kind of data (entries or lists) isn't reloaded.
+//   - nothing reloads while a form, picker, modal or typed-in text
+//     field is open. It tries again the next time the page is shown.
+//   - if anything changes locally while the fetch is in flight, the
+//     fetched rows are thrown away (see canApply below).
+// It's silent: no loading state, no empty-library card, no error
+// banner. On failure the current data is left as it is. It doesn't
+// touch the sync/queue/upload code, it only calls into it.
+
+const FOREGROUND_REFRESH_MIN_INTERVAL_MS = 60 * 1000;
+let foregroundRefreshRunning = false;
+// true when a refresh was wanted but couldn't run (a form was open, or
+// we came back online while hidden). The next visible event then runs
+// it even if a minute hasn't passed yet.
+let foregroundRefreshOwed = false;
+
+// Same "updatedAt + coverVersion" comparison for every entry.
+function getEntryRefreshKey(entry) {
+  return (entry.updatedAt || 0) + '|' + (entry.coverVersion || 0);
+}
+
+// One string describing every entry or list as it is right now. If it
+// changes during a fetch, the user (or this device) changed something.
+function getEntriesSignature() {
+  return manhwaEntries.map(function (entry) {
+    return entry.id + ':' + getEntryRefreshKey(entry);
+  }).join(',');
+}
+function getListsSignature() {
+  return userLists.map(function (list) {
+    return list.listId + ':' + (list.updatedAt || 0);
+  }).join(',');
+}
+
+function isElementShown(element) {
+  return !!element && element.getClientRects().length > 0;
+}
+
+// true if anything is open whose contents a re-render could wipe out or
+// whose entry object a reload would swap out from under it.
+function isForegroundRefreshBlocked() {
+  if (entryBeingEdited !== null || listBeingRenamedId !== null) {
+    return true;
+  }
+  if (detailEditForm.style.display !== 'none' ||
+      addSceneForm.style.display !== 'none' ||
+      addCharacterForm.style.display !== 'none') {
+    return true;
+  }
+  if (listPickerOverlay.style.display !== 'none' ||
+      quickNoteModalOverlay.style.display !== 'none' ||
+      privacyModalOverlay.style.display !== 'none' ||
+      addEntrySheetOverlay.classList.contains('sheet-open')) {
+    return true;
+  }
+  // Notes typed on the detail page but not saved with "Save Notes" yet.
+  if (detailView.style.display === 'block' && currentDetailEntry &&
+      detailNotesTextarea.value !== (currentDetailEntry.notes || '')) {
+    return true;
+  }
+  // Any other visible text field with something typed in it (the Add
+  // Entry form, "New list name", etc). The search box is excluded: it's
+  // kept across a refresh on purpose.
+  const fields = document.querySelectorAll(
+    'textarea, input:not([type]), input[type="text"], input[type="url"], ' +
+    'input[type="number"], input[type="search"], input[type="email"]'
+  );
+  return Array.prototype.some.call(fields, function (field) {
+    if (field === searchInput || field === detailNotesTextarea) {
+      return false;
+    }
+    return isElementShown(field) &&
+      field.value.trim() !== '' &&
+      field.value !== field.defaultValue;
+  });
+}
+
+// Which kinds of queued writes this user still has ('entry' / 'list').
+async function getPendingWriteKinds(userId) {
+  const records = await getPendingWrites();
+  const kinds = { entry: false, list: false };
+  records.forEach(function (record) {
+    if (record.user_id === userId) {
+      kinds[record.kind === 'list' ? 'list' : 'entry'] = true;
+    }
+  });
+  return kinds;
+}
+
+async function runForegroundRefresh() {
+  if (foregroundRefreshRunning) {
+    return;
+  }
+  foregroundRefreshRunning = true;
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    // Not logged in, or the login screen's own load is still running.
+    if (!session || appScreen.style.display === 'none' || libraryLoadState === 'loading') {
+      return;
+    }
+    const userId = session.user.id;
+
+    if (isForegroundRefreshBlocked()) {
+      foregroundRefreshOwed = true;
+      return;
+    }
+
+    await retryPendingWrites();
+    const pending = await getPendingWriteKinds(userId);
+    if (pending.entry && pending.list) {
+      foregroundRefreshOwed = true;
+      return;
+    }
+
+    // Snapshot what's on screen now, so we can tell what changed and
+    // keep the existing objects for anything that didn't.
+    const entriesBefore = new Map();
+    manhwaEntries.forEach(function (entry) {
+      entriesBefore.set(entry.id, entry);
+    });
+    const listsBefore = new Map();
+    userLists.forEach(function (list) {
+      listsBefore.set(list.listId, list);
+    });
+    const entriesSignatureAtStart = getEntriesSignature();
+    const listsSignatureAtStart = getListsSignature();
+    const loadStateBefore = libraryLoadState;
+    const scrollYBefore = window.scrollY;
+
+    // Re-checked right before each reload replaces local data, since
+    // the user may have started editing while it was fetching.
+    async function stillSafe(kind, signatureAtStart, loaderUserId) {
+      const { data: { session: nowSession } } = await supabaseClient.auth.getSession();
+      if (!nowSession || nowSession.user.id !== userId || loaderUserId !== userId) {
+        return false;
+      }
+      if (libraryLoadState === 'loading' || isForegroundRefreshBlocked()) {
+        return false;
+      }
+      const signatureNow = kind === 'list' ? getListsSignature() : getEntriesSignature();
+      if (signatureNow !== signatureAtStart) {
+        return false;
+      }
+      const pendingNow = await getPendingWriteKinds(userId);
+      return !pendingNow[kind];
+    }
+
+    let entriesLoaded = false;
+    if (!pending.entry) {
+      entriesLoaded = await loadFromSupabase({
+        background: true,
+        canApply: function (loaderUserId) {
+          return stillSafe('entry', entriesSignatureAtStart, loaderUserId);
+        }
+      });
+    }
+
+    let listsLoaded = false;
+    if (!pending.list) {
+      listsLoaded = await loadListsFromSupabase({
+        canApply: function (loaderUserId) {
+          return stillSafe('list', listsSignatureAtStart, loaderUserId);
+        }
+      });
+    }
+
+    // Entries: put back the existing object for every entry whose
+    // updatedAt and coverVersion didn't change, so cards, the detail
+    // page and anything else already holding them stay valid.
+    let entriesChanged = false;
+    if (entriesLoaded) {
+      const idsNow = new Set();
+      for (let i = 0; i < manhwaEntries.length; i++) {
+        const fresh = manhwaEntries[i];
+        idsNow.add(fresh.id);
+        const old = entriesBefore.get(fresh.id);
+        if (old && getEntryRefreshKey(old) === getEntryRefreshKey(fresh)) {
+          manhwaEntries[i] = old;
+        } else {
+          entriesChanged = true;
+        }
+      }
+      entriesBefore.forEach(function (_entry, id) {
+        if (!idsNow.has(id)) {
+          entriesChanged = true;
+        }
+      });
+    }
+
+    // Lists: same idea, compared by updatedAt.
+    let listsChanged = false;
+    if (listsLoaded) {
+      const idsNow = new Set();
+      for (let i = 0; i < userLists.length; i++) {
+        const fresh = userLists[i];
+        idsNow.add(fresh.listId);
+        const old = listsBefore.get(fresh.listId);
+        if (old && (old.updatedAt || 0) === (fresh.updatedAt || 0)) {
+          userLists[i] = old;
+        } else {
+          listsChanged = true;
+        }
+      }
+      listsBefore.forEach(function (_list, id) {
+        if (!idsNow.has(id)) {
+          listsChanged = true;
+        }
+      });
+    }
+
+    // Detail page: point it at the reloaded entry, redraw it only if
+    // that entry changed, and go back to the shelf if it was deleted on
+    // another device.
+    let leftDetailView = false;
+    if (entriesChanged && detailView.style.display === 'block' && currentDetailEntry) {
+      const freshDetailEntry = findEntryById(currentDetailEntry.id);
+      if (!freshDetailEntry) {
+        showLibraryView();
+        leftDetailView = true;
+      } else if (freshDetailEntry !== currentDetailEntry) {
+        showDetailView(freshDetailEntry);
+      }
+    }
+
+    // Shelf / Characters / Lists tab: renderList() keeps the current tab
+    // and search (they live in currentFilter / currentSearchTerm). Only
+    // redrawn when something it shows actually changed.
+    const shelfNeedsRedraw = entriesChanged ||
+      (listsChanged && currentFilter === 'Lists') ||
+      libraryLoadState !== loadStateBefore;
+    if (shelfNeedsRedraw && !leftDetailView) {
+      renderList();
+    }
+    if (!leftDetailView) {
+      window.scrollTo(0, scrollYBefore);
+    }
+
+    if (entriesLoaded) {
+      syncCoversFromCloud();
+    }
+    // Something was skipped (writes still queued, the user started
+    // editing mid-fetch, or a load failed): try again next time the
+    // page is shown instead of waiting a minute.
+    foregroundRefreshOwed = pending.entry || pending.list ||
+      (!pending.entry && !entriesLoaded) || (!pending.list && !listsLoaded);
+  } catch (err) {
+    // Offline or any other failure: leave everything as it is.
+    console.error('Foreground refresh failed:', err);
+  } finally {
+    foregroundRefreshRunning = false;
+  }
+}
+
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState !== 'visible') {
+    return;
+  }
+  const minuteHasPassed = Date.now() - lastDataRefreshAt >= FOREGROUND_REFRESH_MIN_INTERVAL_MS;
+  if (minuteHasPassed || foregroundRefreshOwed) {
+    runForegroundRefresh();
+  }
+});
+
+// Back online after being offline. This runs alongside the existing
+// 'online' listeners (queue retry, cover sync). runForegroundRefresh()
+// awaits the same in-flight retryPendingWrites() run, so nothing is
+// sent twice. If the page is hidden, the refresh waits until it's shown.
+window.addEventListener('online', function () {
+  if (document.visibilityState === 'visible') {
+    runForegroundRefresh();
+  } else {
+    foregroundRefreshOwed = true;
   }
 });
 
