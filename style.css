@@ -2994,3 +2994,119 @@ body.private-mode #manhwaList {
     justify-content: center;
   }
 }
+
+/* ===========================================================================
+   Footer + Privacy & Contact popup
+   ===========================================================================
+   The footer sits outside #authScreen/#appScreen in index.html, so it
+   shows on both. The popup reuses .modal-overlay/.modal-box for the
+   centered desktop look; the phone rules below turn it into a bottom
+   sheet like the "Add to list" picker. */
+.app-footer {
+  margin: 40px 0 20px;
+  padding-top: 16px;
+  border-top: 1px solid #333;
+  text-align: center;
+}
+
+.app-footer-link {
+  background: none;
+  border: none;
+  color: #bbb;
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 10px 12px;
+  min-height: 44px;
+}
+
+.app-footer-link:hover,
+.app-footer-link:focus-visible {
+  color: #fff;
+}
+
+.privacy-modal {
+  max-width: 560px;
+  color: #eee;
+}
+
+.privacy-modal-close-x {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+/* Only the text scrolls, so the title and Close button stay in view
+   however long the text is. min-height: 0 lets it shrink inside the
+   flex column of .modal-box instead of overflowing it. */
+.privacy-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  font-size: 15px;
+  line-height: 1.55;
+  color: #ddd;
+}
+
+.privacy-modal-body p {
+  margin: 0 0 12px;
+}
+
+.privacy-modal-body p:last-child {
+  margin-bottom: 0;
+}
+
+.privacy-modal-body strong {
+  color: #fff;
+}
+
+.privacy-contact-link {
+  color: #40e0d0;
+  overflow-wrap: anywhere;
+}
+
+.privacy-contact-link:hover {
+  color: #7ff0e4;
+}
+
+.privacy-modal-close-button {
+  align-self: flex-end;
+  min-height: 44px;
+  padding: 8px 20px;
+  font-size: 15px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.privacy-modal-close-button:hover {
+  background: #444;
+}
+
+@media (max-width: 600px) {
+  /* Extra bottom space so the floating "+" button never covers the
+     footer link once you've scrolled to the bottom. */
+  .app-footer {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  .privacy-modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .privacy-modal {
+    max-width: none;
+    max-height: 85vh;
+    border-radius: 12px 12px 0 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .privacy-modal-close-button {
+    align-self: stretch;
+  }
+}

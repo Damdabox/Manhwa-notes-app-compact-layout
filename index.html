@@ -874,6 +874,45 @@ The End"></textarea>
 
   </div><!-- /#appScreen -->
 
+  <!-- appFooter: sits OUTSIDE both #authScreen and #appScreen so it shows
+       on the login screen and in the app alike. The link opens
+       #privacyModalOverlay below - see the "Privacy & Contact" section at
+       the bottom of script.js. -->
+  <footer id="appFooter" class="app-footer">
+    <button type="button" id="privacyLinkButton" class="app-footer-link">Privacy &amp; Contact</button>
+  </footer>
+
+  <!-- Privacy & Contact modal: a centered popup on desktop, a bottom
+       sheet on phones (see ".privacy-modal-overlay" in style.css). Also
+       outside #appScreen so it can open from the login screen. The
+       contact link is empty here on purpose - script.js fills in its
+       href and text from CONTACT_EMAIL, so the address lives in one
+       place only. -->
+  <div id="privacyModalOverlay" class="modal-overlay privacy-modal-overlay" style="display: none;">
+    <div id="privacyModal" class="modal-box privacy-modal" role="dialog" aria-modal="true" aria-labelledby="privacyModalHeading">
+      <div class="modal-header">
+        <h3 id="privacyModalHeading">Privacy &amp; Contact</h3>
+        <button id="privacyModalCloseX" type="button" class="modal-close-button privacy-modal-close-x" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="privacy-modal-body">
+        <p>This app is a personal tool for keeping track of your own reading and watching: your titles, notes, links, tags and lists. It doesn't host, provide or recommend any content.</p>
+
+        <p><strong>What I store:</strong> your email address and password (handled by my login provider, so I never see your password), and the entries and lists you create: titles, authors, chapters, links, tags, ratings, notes, scenes and character names. Your cover images are kept on the device where you added them.</p>
+
+        <p><strong>Where it lives:</strong> your data is stored with Supabase, a hosted database service. The app itself is served from GitHub Pages. Your entries are private to your account, and other users can't see them.</p>
+
+        <p><strong>What I don't do:</strong> I don't sell your data, I don't share it with advertisers, and I don't use analytics, advertising or tracking tools. If that ever changes, I'll update this page before it does.</p>
+
+        <p><strong>Deleting your data:</strong> for now, email me and I'll delete your account and everything in it.</p>
+
+        <p><strong>Contact:</strong> questions, bugs or feedback? Email me at <a id="privacyContactEmailLink" class="privacy-contact-link"></a>.</p>
+      </div>
+
+      <button id="privacyModalCloseButton" type="button" class="privacy-modal-close-button">Close</button>
+    </div>
+  </div>
+
   <!-- syncErrorBanner: small banner pinned to the top of the screen,
        hidden by default. showSyncBanner() in script.js fills in the
        message and shows it when a sync fails (saved on this device, or

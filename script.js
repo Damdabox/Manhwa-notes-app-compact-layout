@@ -2,6 +2,10 @@ const SUPABASE_URL = 'https://frqqrpqwtuxdwizockzn.supabase.co' ;
 const SUPABASE_ANON_KEY = 'sb_publishable_w4vMi-reeCIjNY95HiWFDw_FnNdaRIc' ;
 const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Contact address shown in the Privacy & Contact popup. This is the ONLY
+// place it's written - change it here and the mailto: link updates too.
+const CONTACT_EMAIL = 'appdamda@gmail.com';
+
 // Grab the elements we need from the page
 const titleInput = document.getElementById('titleInput');
 const typeInput = document.getElementById('typeInput');
@@ -6165,5 +6169,48 @@ supabaseClient.auth.onAuthStateChange((_event, session) => {
 signUpBtn.addEventListener('click', signUp);
 signInBtn.addEventListener('click', signIn);
 logoutBtn.addEventListener('click', signOut);
+
+// --- Privacy & Contact ---
+// Opened from the footer link, which shows on both the login screen and
+// the app. Purely informational: it reads and writes no data. Closes the
+// same three ways as the other popups - Close/X, tapping the dimmed
+// backdrop, or Escape.
+const privacyLinkButton = document.getElementById('privacyLinkButton');
+const privacyModalOverlay = document.getElementById('privacyModalOverlay');
+const privacyModalCloseButton = document.getElementById('privacyModalCloseButton');
+const privacyModalCloseX = document.getElementById('privacyModalCloseX');
+const privacyContactEmailLink = document.getElementById('privacyContactEmailLink');
+
+privacyContactEmailLink.href = 'mailto:' + CONTACT_EMAIL;
+privacyContactEmailLink.textContent = CONTACT_EMAIL;
+
+function openPrivacyModal() {
+  privacyModalOverlay.style.display = 'flex';
+  privacyModalCloseButton.focus();
+}
+
+function closePrivacyModal() {
+  if (privacyModalOverlay.style.display === 'none') {
+    return;
+  }
+  privacyModalOverlay.style.display = 'none';
+  privacyLinkButton.focus();
+}
+
+privacyLinkButton.addEventListener('click', openPrivacyModal);
+privacyModalCloseButton.addEventListener('click', closePrivacyModal);
+privacyModalCloseX.addEventListener('click', closePrivacyModal);
+
+privacyModalOverlay.addEventListener('click', function (event) {
+  if (event.target === privacyModalOverlay) {
+    closePrivacyModal();
+  }
+});
+
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape' && privacyModalOverlay.style.display !== 'none') {
+    closePrivacyModal();
+  }
+});
 
 checkSession();
