@@ -1173,7 +1173,10 @@ function saveToStorage() {
 const SYNC_BANNER_MESSAGES = {
   queued: "Saved on this device. It will sync automatically when you're back online.",
   error: "Couldn't save this change. Please try again.",
-  synced: 'Back online. Your changes have synced.'
+  synced: 'Back online. Your changes have synced.',
+  // Shown by uploadCoverInBackground() when a cover's cloud upload
+  // fails. The cover itself is still saved locally and showing.
+  coverNotUploaded: "Cover saved on this device. It hasn't been uploaded yet."
 };
 const SYNC_ERROR_BANNER_MS = 6000;
 const SYNC_SUCCESS_BANNER_MS = 3500;
@@ -1186,7 +1189,9 @@ function showSyncBanner(kind) {
     return;
   }
   message.textContent = SYNC_BANNER_MESSAGES[kind];
-  banner.classList.toggle('sync-banner-queued', kind === 'queued');
+  // coverNotUploaded uses the same calm "queued" styling - nothing is
+  // lost, it's just not in the cloud yet.
+  banner.classList.toggle('sync-banner-queued', kind === 'queued' || kind === 'coverNotUploaded');
   banner.classList.toggle('sync-banner-synced', kind === 'synced');
   // Only real errors interrupt a screen reader; the others are polite.
   banner.setAttribute('role', kind === 'error' ? 'alert' : 'status');
@@ -2397,11 +2402,13 @@ function deleteImageForCharacter(characterId) {
 
 // --- Cloud image helpers (Supabase Storage) ---
 //
-// NOT CONNECTED TO ANYTHING YET. These are building blocks for syncing
-// cover and character images to the private "images" bucket. Nothing
-// in the app calls them yet; the IndexedDB functions above are still
-// the only place images are saved. They are plain top-level functions,
-// so they're global and can be tried from the browser Console.
+// Building blocks for syncing cover and character images to the
+// private "images" bucket. Comic COVERS are connected (upload on
+// Choose Image, delete on Remove Image / comic delete - see the
+// "Cover cloud sync" section below). Character images aren't yet, and
+// the IndexedDB copy is still what the app displays. They are plain
+// top-level functions, so they're global and can be tried from the
+// browser Console.
 //
 // Every image lives at "<userId>/<kind>/<id>", e.g.
 // "1234-abcd/covers/1699999999999".
@@ -2558,6 +2565,109 @@ async function deleteImageFromCloud(kind, id) {
     console.error('deleteImageFromCloud failed:', error);
     return false;
   }
+}
+
+// --- Cover cloud sync ---
+// Background upload/delete of comic covers. The local IndexedDB copy
+// is always saved first and is what the app shows; everything here is
+// fire-and-forget and never blocks or undoes that local save.
+//
+// Each entry gets one queue ("chain") so only one cloud task runs per
+// entry at a time, in the order they were requested. "latest" is a
+// counter bumped by every new pick, Remove Image, or comic delete; a
+// task remembers the number it was given and does nothing (or doesn't
+// apply its result) if a newer one has come along since. That's what
+// makes sure the LAST chosen image is the one that gets coverVersion,
+// and an older upload finishing late can't overwrite a newer one or
+// bring back a cover that was removed.
+const coverCloudStates = new Map(); // entryId -> { latest, chain }
+
+function getCoverCloudState(entryId) {
+  let state = coverCloudStates.get(entryId);
+  if (!state) {
+    state = { latest: 0, chain: Promise.resolve() };
+    coverCloudStates.set(entryId, state);
+  }
+  return state;
+}
+
+// Adds task to the end of this entry's queue. Errors are logged, and
+// never break the queue for the tasks after it.
+function queueCoverCloudTask(entryId, task) {
+  const state = getCoverCloudState(entryId);
+  state.chain = state.chain.then(task).catch(function (error) {
+    console.error('Cover cloud task failed for entry ' + entryId + ':', error);
+  });
+}
+
+// Makes any queued or in-flight upload for this entry stale, so it
+// won't set coverVersion when it finishes.
+function cancelPendingCoverUploads(entryId) {
+  getCoverCloudState(entryId).latest += 1;
+}
+
+// Called (not awaited) after a picked cover has been saved locally.
+// Resizes the original picked file for upload, uploads it, and on
+// success stamps entry.coverVersion and syncs the entry. On any
+// failure (including not being logged in) it logs, leaves coverVersion
+// as it was, and shows the small non-blocking banner.
+function uploadCoverInBackground(entry, pickedFile) {
+  const state = getCoverCloudState(entry.id);
+  state.latest += 1;
+  const myTurn = state.latest;
+
+  queueCoverCloudTask(entry.id, async function () {
+    // A newer pick (or a remove) is queued behind this one - skip.
+    if (myTurn !== state.latest) {
+      return;
+    }
+
+    let resized;
+    try {
+      resized = await resizeImageForUpload(pickedFile);
+    } catch (error) {
+      console.error('Could not prepare cover for upload (entry ' + entry.id + '):', error);
+      showSyncBanner('coverNotUploaded');
+      return;
+    }
+    if (myTurn !== state.latest) {
+      return;
+    }
+
+    const uploaded = await uploadImageToCloud('covers', entry.id, resized);
+    if (!uploaded) {
+      console.error('Cover upload failed for entry ' + entry.id + '; coverVersion left unchanged.');
+      if (myTurn === state.latest) {
+        showSyncBanner('coverNotUploaded');
+      }
+      return;
+    }
+
+    // Uploaded, but something newer was requested while we were
+    // uploading. The newer task runs next and decides coverVersion.
+    if (myTurn !== state.latest) {
+      return;
+    }
+
+    entry.coverVersion = Date.now();
+    touchEntry(entry);
+    saveToStorage();
+    syncEntryToSupabase(entry);
+  });
+}
+
+// Called (not awaited) when a cover is removed or its comic is
+// deleted. Cancels any pending upload, then deletes the cloud copy once
+// any upload already in flight has finished, so that upload can't put
+// the file back afterwards.
+function deleteCoverFromCloudInBackground(entryId) {
+  cancelPendingCoverUploads(entryId);
+  queueCoverCloudTask(entryId, async function () {
+    const deleted = await deleteImageFromCloud('covers', entryId);
+    if (!deleted) {
+      console.error('Could not delete cover from cloud for entry ' + entryId + '.');
+    }
+  });
 }
 
 // A Blob on its own can't be used as an <img>/background-image source
@@ -2749,6 +2859,14 @@ function buildEntryActions(entry, onEditClick) {
     saveToStorage();
     deleteEntryFromSupabase(entry.id);
     removeEntryFromAllLists(entry.id);
+
+    // Always stop any in-flight cover upload from setting coverVersion
+    // and re-syncing (which would recreate the deleted row). Then, if
+    // the comic had a cover, delete the cloud copy in the background.
+    cancelPendingCoverUploads(entry.id);
+    if (entry.hasImage || entry.coverVersion) {
+      deleteCoverFromCloudInBackground(entry.id);
+    }
 
     // Redraw the shelf so the deleted card disappears immediately
     renderList();
@@ -3559,6 +3677,12 @@ coverImageInput.addEventListener('change', function () {
         // above, so this redraw shows it instantly - no extra loading
         // moment on the shelf).
         renderList();
+
+        // Local copy is saved and showing - now upload to the cloud in
+        // the background. Deliberately NOT returned/awaited, so a slow
+        // or failed upload can never hit the alert() below or undo
+        // anything above.
+        uploadCoverInBackground(entry, pickedFile);
       });
     })
     .catch(function (error) {
@@ -3583,15 +3707,25 @@ removeCoverImageButton.addEventListener('click', function () {
     return;
   }
 
+  // Stop any upload still in progress from setting coverVersion after
+  // the user has already removed this cover.
+  cancelPendingCoverUploads(entry.id);
+
   deleteImageForComic(entry.id)
     .then(function () {
       forgetCachedImageUrl(entry.id);
 
       entry.hasImage = false;
+      delete entry.coverVersion;
+      touchEntry(entry);
       saveToStorage();
+      syncEntryToSupabase(entry);
 
       clearCoverElementImage(detailCoverBox);
       renderList();
+
+      // Background cloud delete - not awaited, failures only logged.
+      deleteCoverFromCloudInBackground(entry.id);
     })
     .catch(function (error) {
       console.error('Could not remove cover image:', error);
