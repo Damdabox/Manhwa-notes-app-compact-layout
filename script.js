@@ -2262,8 +2262,15 @@ const IMAGE_DB_NAME = 'manhwaNotesImagesDB';
 // the one moment IndexedDB allows creating a new object store, which is
 // how CHARACTER_STORE_NAME below gets added for everyone, without
 // touching anything already saved in IMAGE_STORE_NAME.
-const IMAGE_DB_VERSION = 2;
+// Bumped again from 2 to 3 to add COVER_VERSION_STORE_NAME (below).
+const IMAGE_DB_VERSION = 3;
 const IMAGE_STORE_NAME = 'coverImages';
+
+// Which cloud coverVersion each local cover matches, keyed by entry id
+// (value is the number from entry.coverVersion). Kept in its own small
+// store because coverImages holds bare Blobs, and changing that shape
+// would affect every reader. See "Cover cloud download" below.
+const COVER_VERSION_STORE_NAME = 'coverVersions';
 
 // A second, separate "table" inside this exact same database, used to
 // store Favorite Character pictures - see the big "How we connect an
@@ -2307,10 +2314,22 @@ function openImageDatabase() {
       if (!db.objectStoreNames.contains(CHARACTER_IMAGE_STORE_NAME)) {
         db.createObjectStore(CHARACTER_IMAGE_STORE_NAME);
       }
+      // Added in version 3, guarded the same way.
+      if (!db.objectStoreNames.contains(COVER_VERSION_STORE_NAME)) {
+        db.createObjectStore(COVER_VERSION_STORE_NAME);
+      }
     };
 
     openRequest.onsuccess = function () {
-      resolve(openRequest.result);
+      const db = openRequest.result;
+      // If a newer copy of the app (in another tab) needs to upgrade
+      // the database, close ours so we don't block it. The next image
+      // read/write here simply reopens it.
+      db.onversionchange = function () {
+        db.close();
+        imageDatabasePromise = null;
+      };
+      resolve(db);
     };
 
     openRequest.onerror = function () {
@@ -2383,6 +2402,45 @@ function loadImageForComic(comicId) {
 }
 function deleteImageForComic(comicId) {
   return deleteImageFromStore(IMAGE_STORE_NAME, comicId);
+}
+
+// Records which cloud coverVersion this device's local cover matches.
+function setLocalCoverVersion(comicId, coverVersion) {
+  return saveImageToStore(COVER_VERSION_STORE_NAME, comicId, coverVersion);
+}
+
+// Resolves to { hasLocal, version } for one comic in a single read:
+// whether a local cover Blob exists (count(), so the Blob itself isn't
+// loaded) and the recorded localCoverVersion (undefined if none).
+function getLocalCoverStatus(comicId) {
+  return openImageDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction([IMAGE_STORE_NAME, COVER_VERSION_STORE_NAME], 'readonly');
+      const countRequest = transaction.objectStore(IMAGE_STORE_NAME).count(comicId);
+      const versionRequest = transaction.objectStore(COVER_VERSION_STORE_NAME).get(comicId);
+      transaction.oncomplete = function () {
+        resolve({ hasLocal: countRequest.result > 0, version: versionRequest.result });
+      };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// Saves a cover DOWNLOADED from the cloud, together with the version it
+// came from, in one transaction (both are written or neither). This is
+// a local-only write: it never uploads and never touches
+// entry.coverVersion. Only the download path uses it; picking a cover
+// still goes through saveImageForComic() + uploadCoverInBackground().
+function saveDownloadedCoverLocally(comicId, imageBlob, coverVersion) {
+  return openImageDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction([IMAGE_STORE_NAME, COVER_VERSION_STORE_NAME], 'readwrite');
+      transaction.objectStore(IMAGE_STORE_NAME).put(imageBlob, comicId);
+      transaction.objectStore(COVER_VERSION_STORE_NAME).put(coverVersion, comicId);
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
 }
 
 // The character-picture equivalents of the three functions just above -
@@ -2650,6 +2708,11 @@ function uploadCoverInBackground(entry, pickedFile) {
     }
 
     entry.coverVersion = Date.now();
+    // The local cover IS this version, so the download sync must never
+    // fetch it back. Written right away, before anything else can run.
+    setLocalCoverVersion(entry.id, entry.coverVersion).catch(function (error) {
+      console.error('Could not record local cover version for entry ' + entry.id + ':', error);
+    });
     touchEntry(entry);
     saveToStorage();
     syncEntryToSupabase(entry);
@@ -2697,6 +2760,7 @@ function setCoverElementImage(coverElement, objectUrl) {
 function clearCoverElementImage(coverElement) {
   coverElement.style.backgroundImage = '';
   coverElement.classList.remove('has-image');
+  delete coverElement.dataset.coverEntryId;
 }
 
 // Shows a comic's saved cover image on one cover box. Only ever called
@@ -2712,6 +2776,10 @@ function clearCoverElementImage(coverElement) {
 // then the photo pops in. Every render after that first one is
 // instant, because imageObjectUrlCache already has the url saved.
 function applyCoverImageToElement(coverElement, comicId) {
+  // Tags the box with its comic, so a cover that finishes downloading
+  // from the cloud later can find and fill it in place (see
+  // refreshShownCovers()).
+  coverElement.dataset.coverEntryId = comicId;
   const cachedUrl = imageObjectUrlCache.get(comicId);
   if (cachedUrl) {
     setCoverElementImage(coverElement, cachedUrl);
@@ -2751,6 +2819,254 @@ function forgetCachedImageUrl(comicId) {
     imageObjectUrlCache.delete(comicId);
   }
 }
+
+// --- Cover cloud download ---
+// Brings covers chosen on another device onto this one. For each comic
+// with an entry.coverVersion, if this device has no local cover or its
+// recorded localCoverVersion (COVER_VERSION_STORE_NAME) is different,
+// it downloads the cloud copy with the authenticated helper and saves
+// it locally WITHOUT uploading (saveDownloadedCoverLocally()). Covers
+// only. Nothing here deletes a local cover or makes a public URL.
+
+const MAX_COVER_DOWNLOADS = 3;
+let activeCoverDownloads = 0;
+const coverDownloadWaiters = [];
+
+// Simple "at most 3 at once" gate shared by every download path.
+function acquireCoverDownloadSlot() {
+  if (activeCoverDownloads < MAX_COVER_DOWNLOADS) {
+    activeCoverDownloads++;
+    return Promise.resolve();
+  }
+  return new Promise(function (resolve) {
+    coverDownloadWaiters.push(resolve);
+  });
+}
+function releaseCoverDownloadSlot() {
+  const next = coverDownloadWaiters.shift();
+  if (next) {
+    next(); // hand the slot straight to the next waiter
+  } else {
+    activeCoverDownloads--;
+  }
+}
+
+// The logged-in user downloads run for (null when logged out), and a
+// counter bumped whenever that changes, so a download started for one
+// account is thrown away if it finishes after a logout/user switch.
+let coverSyncUserId = null;
+let coverSyncGeneration = 0;
+// "entryId|coverVersion" keys that failed to download this page
+// session; not retried until the next page load, 'online' event, or
+// logout/user switch.
+const coverDownloadFailures = new Set();
+// entryId -> Promise<boolean>, so the sync and getCoverUrl() never
+// download the same cover twice at once.
+const coverDownloadsInFlight = new Map();
+
+// Called by showAuthOrApp() with the session's user id, or null.
+function setCoverSyncUser(userId) {
+  if (userId === coverSyncUserId) {
+    return;
+  }
+  coverSyncUserId = userId;
+  coverSyncGeneration++;
+  coverDownloadFailures.clear();
+}
+
+// Downloads and saves one comic's cloud cover if this device needs it.
+// Resolves true only if a new cover was actually saved locally, false
+// otherwise (nothing needed, skipped, failed). Never rejects, never
+// uploads, never changes entry.coverVersion.
+function downloadCoverIfNeeded(entryId) {
+  const existing = coverDownloadsInFlight.get(entryId);
+  if (existing) {
+    return existing;
+  }
+
+  const attempt = (async function () {
+    const entry = findEntryById(entryId);
+    if (!entry || !entry.coverVersion || !coverSyncUserId || !navigator.onLine) {
+      return false;
+    }
+    const version = entry.coverVersion;
+    const failureKey = entryId + '|' + version;
+    if (coverDownloadFailures.has(failureKey)) {
+      return false;
+    }
+
+    // Captured BEFORE reading local state: a cover pick, Remove Image or
+    // comic delete bumps this, and then whatever we download is stale.
+    const cloudState = getCoverCloudState(entryId);
+    const turnAtStart = cloudState.latest;
+    const generation = coverSyncGeneration;
+
+    const status = await getLocalCoverStatus(entryId);
+    if (status.hasLocal && status.version === version) {
+      return false; // already up to date
+    }
+
+    let blob = null;
+    await acquireCoverDownloadSlot();
+    try {
+      if (generation !== coverSyncGeneration) {
+        return false;
+      }
+      blob = await downloadImageFromCloud('covers', entryId);
+    } finally {
+      releaseCoverDownloadSlot();
+    }
+
+    if (generation !== coverSyncGeneration) {
+      return false; // logged out / switched user meanwhile
+    }
+    if (!(blob instanceof Blob)) {
+      console.warn('Cover download unavailable for entry ' + entryId + ' (version ' + version + '); will retry on next load or when back online.');
+      coverDownloadFailures.add(failureKey);
+      return false;
+    }
+
+    // Re-check: the comic may have been deleted, its cover changed or
+    // removed, or a new cover picked here while we were downloading.
+    const current = findEntryById(entryId);
+    if (!current || current.coverVersion !== version || cloudState.latest !== turnAtStart) {
+      return false;
+    }
+
+    await saveDownloadedCoverLocally(entryId, blob, version);
+    return true;
+  })().catch(function (error) {
+    console.error('Cover download failed for entry ' + entryId + ':', error);
+    const entry = findEntryById(entryId);
+    if (entry && entry.coverVersion) {
+      coverDownloadFailures.add(entryId + '|' + entry.coverVersion);
+    }
+    return false;
+  }).finally(function () {
+    coverDownloadsInFlight.delete(entryId);
+  });
+
+  coverDownloadsInFlight.set(entryId, attempt);
+  return attempt;
+}
+
+// Updates, in place, every cover box currently showing these comics
+// (shelf cards and the detail page) after their local cover changed.
+// Done in place instead of renderList() so a background download never
+// wipes out an inline edit in progress. One object URL per comic,
+// stored in imageObjectUrlCache like every other cover URL; the old
+// one is revoked by forgetCachedImageUrl().
+function refreshShownCovers(entryIds) {
+  const detailOpen = detailView.style.display === 'block';
+  entryIds.forEach(function (entryId) {
+    forgetCachedImageUrl(entryId);
+
+    const elements = Array.prototype.filter.call(
+      document.querySelectorAll('[data-cover-entry-id]'),
+      function (element) {
+        return element !== detailCoverBox && element.dataset.coverEntryId === entryId;
+      }
+    );
+    const entry = findEntryById(entryId);
+    if (detailOpen && currentDetailEntry && currentDetailEntry.id === entryId &&
+        entry && entry.hasImage) {
+      elements.push(detailCoverBox);
+    }
+    if (elements.length === 0) {
+      return;
+    }
+
+    loadImageForComic(entryId).then(function (imageBlob) {
+      if (!imageBlob) {
+        return;
+      }
+      let url = imageObjectUrlCache.get(entryId);
+      if (!url) {
+        url = URL.createObjectURL(imageBlob);
+        imageObjectUrlCache.set(entryId, url);
+      }
+      elements.forEach(function (element) {
+        if (!document.body.contains(element)) {
+          return;
+        }
+        if (element === detailCoverBox) {
+          if (!currentDetailEntry || currentDetailEntry.id !== entryId) {
+            return;
+          }
+          element.dataset.coverEntryId = entryId;
+        } else if (element.dataset.coverEntryId !== entryId) {
+          return;
+        }
+        setCoverElementImage(element, url);
+      });
+    }).catch(function (error) {
+      console.error('Could not show downloaded cover:', error);
+    });
+  });
+}
+
+// Checks every comic with a coverVersion and downloads the covers this
+// device is missing or has an older version of (at most 3 at a time).
+// Runs in the background: nothing awaits it. If it's called while
+// already running, it runs once more afterwards (entries may have
+// changed). Re-renders only if at least one cover was actually saved.
+let coverSyncRunning = false;
+let coverSyncRerunRequested = false;
+async function syncCoversFromCloud() {
+  if (!coverSyncUserId || !navigator.onLine) {
+    return;
+  }
+  if (coverSyncRunning) {
+    coverSyncRerunRequested = true;
+    return;
+  }
+  coverSyncRunning = true;
+  const generation = coverSyncGeneration;
+  const changedIds = [];
+
+  try {
+    const entryIds = manhwaEntries
+      .filter(function (entry) { return entry && entry.id && entry.coverVersion; })
+      .map(function (entry) { return entry.id; });
+
+    let nextIndex = 0;
+    async function worker() {
+      while (nextIndex < entryIds.length && generation === coverSyncGeneration) {
+        const entryId = entryIds[nextIndex++];
+        if (await downloadCoverIfNeeded(entryId)) {
+          changedIds.push(entryId);
+        }
+      }
+    }
+    const workers = [];
+    for (let i = 0; i < MAX_COVER_DOWNLOADS; i++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
+  } catch (error) {
+    console.error('Cover sync failed:', error);
+  } finally {
+    coverSyncRunning = false;
+  }
+
+  if (changedIds.length > 0 && generation === coverSyncGeneration) {
+    refreshShownCovers(changedIds);
+    refreshListCovers();
+  }
+
+  if (coverSyncRerunRequested) {
+    coverSyncRerunRequested = false;
+    syncCoversFromCloud();
+  }
+}
+window.syncCoversFromCloud = syncCoversFromCloud;
+
+// Back online: forget this session's failures and try again. Separate
+// from the offline-queue 'online' listener, which is left unchanged.
+window.addEventListener('online', function () {
+  coverDownloadFailures.clear();
+  syncCoversFromCloud();
+});
 
 // Same idea as imageObjectUrlCache above, just its own separate Map for
 // character pictures rather than comic covers - kept separate (rather
@@ -3667,6 +3983,17 @@ coverImageInput.addEventListener('change', function () {
         const newObjectUrl = URL.createObjectURL(resizedBlob);
         imageObjectUrlCache.set(entry.id, newObjectUrl);
 
+        // This just-picked cover is newer than whatever is in the
+        // cloud. Mark it as matching the current cloud version so the
+        // download sync won't replace it with the older cloud copy
+        // while the upload is pending (or if it fails). A successful
+        // upload then records its own new version.
+        if (entry.coverVersion) {
+          setLocalCoverVersion(entry.id, entry.coverVersion).catch(function (error) {
+            console.error('Could not record local cover version for entry ' + entry.id + ':', error);
+          });
+        }
+
         entry.hasImage = true;
         saveToStorage();
 
@@ -3875,14 +4202,31 @@ function renderListsOverview() {
 // resolves to a usable image URL, or null if this comic has no cover
 // available. A returned blob: URL is a fresh object URL owned by the
 // caller, who must revoke it (refreshListCovers() does).
-// Cloud image sync will later extend this to fall back to a remote copy
-// when the local IndexedDB one is missing.
+// If there's no local cover but the comic has a coverVersion, it tries
+// the cloud download once (downloadCoverIfNeeded() - saved locally, never
+// re-uploaded; failures are remembered for the session) and then
+// returns the local URL, or null if that didn't work.
 function getCoverUrl(entryId) {
   if (!entryId) {
     return Promise.resolve(null);
   }
   return loadImageForComic(entryId).then(function (imageBlob) {
-    return imageBlob ? URL.createObjectURL(imageBlob) : null;
+    if (imageBlob) {
+      return URL.createObjectURL(imageBlob);
+    }
+    const entry = findEntryById(entryId);
+    if (!entry || !entry.coverVersion || !coverSyncUserId) {
+      return null;
+    }
+    return downloadCoverIfNeeded(entryId).then(function (downloaded) {
+      if (downloaded) {
+        // Shelf/detail boxes for this comic can show it now too.
+        refreshShownCovers([entryId]);
+      }
+      return loadImageForComic(entryId);
+    }).then(function (downloadedBlob) {
+      return downloadedBlob ? URL.createObjectURL(downloadedBlob) : null;
+    });
   }).catch(function (error) {
     console.error('Could not load cover for list collage:', error);
     return null;
@@ -6389,6 +6733,9 @@ async function showAuthOrApp(session) {
     if (userListsOwnerId !== null && userListsOwnerId !== session.user.id) {
       clearUserLists();
     }
+    // A different user (or first login) resets the cover-download
+    // failure memory and discards downloads started for anyone else.
+    setCoverSyncUser(session.user.id);
     authScreen.style.display = 'none';
     appScreen.style.display = '';
     // Show the queued-changes count right away; retryPendingWrites()
@@ -6400,6 +6747,11 @@ async function showAuthOrApp(session) {
     // records stay queued.
     await retryPendingWrites();
     await loadFromSupabase();
+    // Fetch covers chosen on other devices in the background - not
+    // awaited, so the library shows immediately.
+    if (libraryLoadState === 'loaded') {
+      syncCoversFromCloud();
+    }
     await loadListsFromSupabase();
     // Lists arrive after the first render; redraw if they're on screen.
     if (currentFilter === 'Lists') {
@@ -6407,6 +6759,7 @@ async function showAuthOrApp(session) {
     }
   } else {
     clearUserLists();
+    setCoverSyncUser(null);
     libraryLoadState = 'idle';
     authScreen.style.display = '';
     appScreen.style.display = 'none';
