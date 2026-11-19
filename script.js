@@ -2303,7 +2303,8 @@ const IMAGE_DB_NAME = 'manhwaNotesImagesDB';
 // how CHARACTER_STORE_NAME below gets added for everyone, without
 // touching anything already saved in IMAGE_STORE_NAME.
 // Bumped again from 2 to 3 to add COVER_VERSION_STORE_NAME (below).
-const IMAGE_DB_VERSION = 3;
+// Bumped from 3 to 4 to add CHARACTER_IMAGE_VERSION_STORE_NAME (below).
+const IMAGE_DB_VERSION = 4;
 const IMAGE_STORE_NAME = 'coverImages';
 
 // Which cloud coverVersion each local cover matches, keyed by entry id
@@ -2323,6 +2324,11 @@ const COVER_VERSION_STORE_NAME = 'coverVersions';
 // instead of a comic's id, so a character's picture can never
 // accidentally overwrite (or get confused with) a comic's cover image.
 const CHARACTER_IMAGE_STORE_NAME = 'characterImages';
+
+// Which cloud imageVersion each local character image matches
+// ("localImageVersion"), keyed by character id. The character
+// equivalent of COVER_VERSION_STORE_NAME above.
+const CHARACTER_IMAGE_VERSION_STORE_NAME = 'characterImageVersions';
 
 // Opening an IndexedDB database is itself an asynchronous, event-based
 // operation (same reasoning as FileReader above). This function wraps
@@ -2357,6 +2363,10 @@ function openImageDatabase() {
       // Added in version 3, guarded the same way.
       if (!db.objectStoreNames.contains(COVER_VERSION_STORE_NAME)) {
         db.createObjectStore(COVER_VERSION_STORE_NAME);
+      }
+      // Added in version 4, guarded the same way.
+      if (!db.objectStoreNames.contains(CHARACTER_IMAGE_VERSION_STORE_NAME)) {
+        db.createObjectStore(CHARACTER_IMAGE_VERSION_STORE_NAME);
       }
     };
 
@@ -2494,8 +2504,56 @@ function saveImageForCharacter(characterId, imageBlob) {
 function loadImageForCharacter(characterId) {
   return loadImageFromStore(CHARACTER_IMAGE_STORE_NAME, characterId);
 }
+// Removes the local image AND its recorded localImageVersion together,
+// so a later download check never sees a version without an image.
 function deleteImageForCharacter(characterId) {
-  return deleteImageFromStore(CHARACTER_IMAGE_STORE_NAME, characterId);
+  return openImageDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction([CHARACTER_IMAGE_STORE_NAME, CHARACTER_IMAGE_VERSION_STORE_NAME], 'readwrite');
+      transaction.objectStore(CHARACTER_IMAGE_STORE_NAME).delete(characterId);
+      transaction.objectStore(CHARACTER_IMAGE_VERSION_STORE_NAME).delete(characterId);
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// Records which cloud imageVersion this device's local character image
+// matches. Character equivalent of setLocalCoverVersion().
+function setLocalCharacterImageVersion(characterId, imageVersion) {
+  return saveImageToStore(CHARACTER_IMAGE_VERSION_STORE_NAME, characterId, imageVersion);
+}
+
+// Resolves to { hasLocal, version } for one character in one read.
+// Character equivalent of getLocalCoverStatus().
+function getLocalCharacterImageStatus(characterId) {
+  return openImageDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction([CHARACTER_IMAGE_STORE_NAME, CHARACTER_IMAGE_VERSION_STORE_NAME], 'readonly');
+      const countRequest = transaction.objectStore(CHARACTER_IMAGE_STORE_NAME).count(characterId);
+      const versionRequest = transaction.objectStore(CHARACTER_IMAGE_VERSION_STORE_NAME).get(characterId);
+      transaction.oncomplete = function () {
+        resolve({ hasLocal: countRequest.result > 0, version: versionRequest.result });
+      };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// Saves a character image DOWNLOADED from the cloud together with its
+// version, in one transaction. Local-only: never uploads and never
+// touches character.imageVersion. Character equivalent of
+// saveDownloadedCoverLocally().
+function saveDownloadedCharacterImageLocally(characterId, imageBlob, imageVersion) {
+  return openImageDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction([CHARACTER_IMAGE_STORE_NAME, CHARACTER_IMAGE_VERSION_STORE_NAME], 'readwrite');
+      transaction.objectStore(CHARACTER_IMAGE_STORE_NAME).put(imageBlob, characterId);
+      transaction.objectStore(CHARACTER_IMAGE_VERSION_STORE_NAME).put(imageVersion, characterId);
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
 }
 
 // --- Cloud image helpers (Supabase Storage) ---
@@ -2503,12 +2561,13 @@ function deleteImageForCharacter(characterId) {
 // Building blocks for syncing cover and character images to the
 // private "images" bucket. Comic COVERS are connected (upload on
 // Choose Image, delete on Remove Image / comic delete - see the
-// "Cover cloud sync" section below). Character images aren't yet, and
-// the IndexedDB copy is still what the app displays. They are plain
-// top-level functions, so they're global and can be tried from the
-// browser Console.
+// "Cover cloud sync" section below), and so are character images (see
+// "Character image cloud sync"). The IndexedDB copy is still what the
+// app displays. They are plain top-level functions, so they're global
+// and can be tried from the browser Console.
 //
-// Character images live at "<userId>/characters/<id>". Covers live at
+// Character images live at "<userId>/characters/<characterId>/<imageVersion>"
+// (legacy single file: "<userId>/characters/<characterId>"). Covers live at
 // "<userId>/covers/<entryId>/<coverVersion>", e.g.
 // "1234-abcd/covers/1699999999999/1700000000123" - one file per uploaded
 // version. Older covers may still sit at the legacy single-file path
@@ -2575,7 +2634,8 @@ async function resizeImageForUpload(fileOrBlob) {
 // why) if anything is wrong. kind must be exactly 'covers' or
 // 'characters', and id must be a non-empty string with no slashes, so a
 // bad value can never point at some other path.
-//   characters: "<userId>/characters/<id>"            (unchanged)
+//   characters: "<userId>/characters/<characterId>/<version>" - version
+//               must be a positive integer (the character's imageVersion).
 //   covers:     "<userId>/covers/<entryId>/<version>" - version must be
 //               a positive integer (the entry's coverVersion). Every
 //               uploaded cover gets its own path, so a browser/CDN can
@@ -2595,12 +2655,16 @@ async function buildCloudImagePath(kind, id, version) {
     console.error('Cloud image: cover version must be a positive integer, got:', version);
     return null;
   }
+  if (kind === 'characters' && !isValidCoverVersion(version)) {
+    console.error('Cloud image: character image version must be a positive integer, got:', version);
+    return null;
+  }
   const userId = await getCloudImageUserId();
   if (!userId) return null;
   if (kind === 'covers') {
     return userId + '/covers/' + id + '/' + version;
   }
-  return userId + '/' + kind + '/' + id;
+  return userId + '/characters/' + id + '/' + version;
 }
 
 function isValidCloudImageId(id) {
@@ -2635,6 +2699,20 @@ async function buildCoverCloudPaths(entryId) {
   return { folder: base, legacy: base };
 }
 
+// Character equivalent of buildCoverCloudPaths(): "folder" is
+// "<userId>/characters/<characterId>" (versioned files inside it) and
+// "legacy" is the old single-file path at that same string.
+async function buildCharacterCloudPaths(characterId) {
+  if (!isValidCloudImageId(characterId)) {
+    console.error('Cloud character image: id must be a non-empty string with no slashes, got:', characterId);
+    return null;
+  }
+  const userId = await getCloudImageUserId();
+  if (!userId) return null;
+  const base = userId + '/characters/' + characterId;
+  return { folder: base, legacy: base };
+}
+
 // True if a Supabase Storage error means "that file doesn't exist".
 function isStorageNotFoundError(error) {
   if (!error) return false;
@@ -2645,8 +2723,8 @@ function isStorageNotFoundError(error) {
     !!(original && original.status === 404);
 }
 
-// Uploads (or replaces) one image. version is required for 'covers'
-// (see buildCloudImagePath()) and ignored for 'characters'. Returns
+// Uploads (or replaces) one image. version is required for both
+// 'covers' and 'characters' (see buildCloudImagePath()). Returns
 // true on success, false on any failure. Never throws.
 async function uploadImageToCloud(kind, id, blob, version) {
   try {
@@ -2672,10 +2750,10 @@ async function uploadImageToCloud(kind, id, blob, version) {
 }
 
 // Downloads one image using the signed-in user's credentials (the
-// bucket is private - no public URL). version is required for 'covers'
-// and ignored for 'characters'. Returns a Blob, or null if it doesn't
-// exist or anything fails. Never throws. (A missing cover is not
-// logged as an error; the cover download sync handles that case.)
+// bucket is private - no public URL). version is required for both
+// kinds. Returns a Blob, or null if it doesn't exist or anything fails.
+// Never throws. (A missing file is not logged as an error; the cover
+// and character download syncs handle that case.)
 async function downloadImageFromCloud(kind, id, version) {
   try {
     const path = await buildCloudImagePath(kind, id, version);
@@ -2685,7 +2763,7 @@ async function downloadImageFromCloud(kind, id, version) {
       .from('images')
       .download(path);
     if (error) {
-      if (!(kind === 'covers' && isStorageNotFoundError(error))) {
+      if (!isStorageNotFoundError(error)) {
         console.error('downloadImageFromCloud failed for', path, error);
       }
       return null;
@@ -2697,8 +2775,7 @@ async function downloadImageFromCloud(kind, id, version) {
   }
 }
 
-// Deletes one image. version is required for 'covers' and ignored for
-// 'characters'. Returns true on success - including when it was already
+// Deletes one image. version is required for both kinds. Returns true on success - including when it was already
 // gone (Supabase's remove() doesn't error on a missing file, and a "not
 // found" error is treated as success too). False on any other failure.
 // Never throws.
@@ -3293,6 +3370,8 @@ window.syncCoversFromCloud = syncCoversFromCloud;
 window.addEventListener('online', function () {
   coverDownloadFailures.clear();
   syncCoversFromCloud();
+  characterImageDownloadFailures.clear();
+  syncCharacterImagesFromCloud();
 });
 
 // Same idea as imageObjectUrlCache above, just its own separate Map for
@@ -3307,6 +3386,10 @@ const characterImageObjectUrlCache = new Map();
 // at loadImageForCharacter()/characterImageObjectUrlCache instead of the
 // comic-cover versions.
 function applyCharacterImageToElement(imageElement, characterId) {
+  // Tags the box with its character (even if there's no local image
+  // yet), so an image downloaded from the cloud later can fill it in
+  // place - see refreshShownCharacterImages().
+  imageElement.dataset.characterImageId = characterId;
   const cachedUrl = characterImageObjectUrlCache.get(characterId);
   if (cachedUrl) {
     setCoverElementImage(imageElement, cachedUrl);
@@ -3337,6 +3420,421 @@ function forgetCachedCharacterImageUrl(characterId) {
     characterImageObjectUrlCache.delete(characterId);
   }
 }
+
+// --- Character image cloud sync ---
+// The character-image equivalent of "Cover cloud sync" and "Cover cloud
+// download" above, following the same design:
+//   - character.imageVersion (inside entry.characters, synced with the
+//     entry) means "a cloud copy exists at that version".
+//   - The local IndexedDB copy is always saved first and is what the app
+//     shows. Uploads/deletes run in the background, one queue per
+//     character, and the last choice wins (the "latest" counter).
+//   - localImageVersion (CHARACTER_IMAGE_VERSION_STORE_NAME) records
+//     which cloud version this device's local image matches.
+// Characters with a local image but no imageVersion (made before this
+// existed) are left exactly as they are: nothing uploads automatically.
+
+// Finds a character by id across every comic, with the comic it lives
+// in. Used by background tasks, which must act on the LIVE objects (an
+// entry may have been reloaded or deleted while they ran).
+function findCharacterById(characterId) {
+  for (let i = 0; i < manhwaEntries.length; i++) {
+    const entry = manhwaEntries[i];
+    const characters = (entry && entry.characters) || [];
+    for (let j = 0; j < characters.length; j++) {
+      if (characters[j] && characters[j].id === characterId) {
+        return { entry: entry, character: characters[j] };
+      }
+    }
+  }
+  return null;
+}
+
+const characterImageCloudStates = new Map(); // characterId -> { latest, chain }
+
+function getCharacterImageCloudState(characterId) {
+  let state = characterImageCloudStates.get(characterId);
+  if (!state) {
+    state = { latest: 0, chain: Promise.resolve() };
+    characterImageCloudStates.set(characterId, state);
+  }
+  return state;
+}
+
+function queueCharacterImageCloudTask(characterId, task) {
+  const state = getCharacterImageCloudState(characterId);
+  state.chain = state.chain.then(task).catch(function (error) {
+    console.error('Character image cloud task failed for ' + characterId + ':', error);
+  });
+}
+
+// Makes any queued or in-flight upload for this character stale, so it
+// won't set imageVersion when it finishes.
+function cancelPendingCharacterImageUploads(characterId) {
+  getCharacterImageCloudState(characterId).latest += 1;
+}
+
+// Removes a character's cloud files: everything under
+// "<userId>/characters/<characterId>/" except keepVersion (null removes
+// them all), plus the legacy "<userId>/characters/<characterId>" file.
+// Returns true on success, false on failure (logged). Never throws.
+async function removeCloudCharacterFiles(characterId, keepVersion) {
+  try {
+    const paths = await buildCharacterCloudPaths(characterId);
+    if (!paths) return false;
+
+    const keepName = keepVersion == null ? null : String(keepVersion);
+    const toRemove = [];
+    const pageSize = 100;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await supabaseClient.storage
+        .from('images')
+        .list(paths.folder, { limit: pageSize, offset: offset });
+      if (error) {
+        console.error('Could not list cloud images for character ' + characterId + ':', error);
+        return false;
+      }
+      const page = data || [];
+      page.forEach(function (item) {
+        // item.id is null for sub-folders; only real files are removed.
+        if (item && item.name && item.id !== null && item.name !== keepName) {
+          toRemove.push(paths.folder + '/' + item.name);
+        }
+      });
+      if (page.length < pageSize) break;
+      offset += pageSize;
+    }
+    // Legacy single file; remove() is a no-op if it's not there.
+    toRemove.push(paths.legacy);
+
+    const { error } = await supabaseClient.storage
+      .from('images')
+      .remove(toRemove);
+    if (error && !isStorageNotFoundError(error)) {
+      console.error('Could not remove cloud images for character ' + characterId + ':', error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('Could not remove cloud images for character ' + characterId + ':', error);
+    return false;
+  }
+}
+
+// Called (not awaited) after a picked character image has been saved
+// locally. Resizes the picked file, uploads it to a NEW versioned path,
+// and only on success stamps character.imageVersion, touches + syncs the
+// parent comic and records localImageVersion. On failure it only logs:
+// imageVersion is left unchanged and the user is never blocked.
+function uploadCharacterImageInBackground(characterId, pickedFile) {
+  const state = getCharacterImageCloudState(characterId);
+  state.latest += 1;
+  const myTurn = state.latest;
+
+  queueCharacterImageCloudTask(characterId, async function () {
+    if (myTurn !== state.latest) {
+      return; // a newer pick / remove / delete is queued behind this one
+    }
+
+    let resized;
+    try {
+      resized = await resizeImageForUpload(pickedFile);
+    } catch (error) {
+      console.error('Could not prepare character image for upload (' + characterId + '):', error);
+      return;
+    }
+    if (myTurn !== state.latest) {
+      return;
+    }
+
+    // Version picked BEFORE uploading; imageVersion isn't touched until
+    // the upload succeeds. Bumped past the current one in case the
+    // clock is behind it.
+    const before = findCharacterById(characterId);
+    const currentVersion = before ? before.character.imageVersion : undefined;
+    let newVersion = Date.now();
+    if (isValidCoverVersion(currentVersion) && newVersion <= currentVersion) {
+      newVersion = currentVersion + 1;
+    }
+
+    const uploaded = await uploadImageToCloud('characters', characterId, resized, newVersion);
+    if (!uploaded) {
+      console.error('Character image upload failed for ' + characterId + '; imageVersion left unchanged.');
+      return;
+    }
+
+    // Something newer was requested meanwhile: its own task decides
+    // imageVersion and cleans up the file we just uploaded.
+    if (myTurn !== state.latest) {
+      return;
+    }
+    // The character (or its whole comic) is gone - don't resync a
+    // deleted entry. Its delete task, queued after us, cleans the cloud.
+    const live = findCharacterById(characterId);
+    if (!live) {
+      return;
+    }
+    const entry = live.entry;
+
+    live.character.imageVersion = newVersion;
+    // The local image IS this version, so the download sync must never
+    // fetch it back.
+    setLocalCharacterImageVersion(characterId, newVersion).catch(function (error) {
+      console.error('Could not record local image version for character ' + characterId + ':', error);
+    });
+    touchEntry(entry);
+    saveToStorage();
+
+    // Older cloud versions are removed only after the entry (pointing at
+    // the new version) has synced - other devices may need them until
+    // then. Not awaited, so the queue isn't held up.
+    syncEntryToSupabase(entry).then(function (synced) {
+      if (!synced) {
+        console.warn('Entry ' + entry.id + ' not synced yet; older cloud images for character ' + characterId + ' kept for now.');
+        return;
+      }
+      queueCharacterImageCloudTask(characterId, async function () {
+        if (myTurn !== state.latest) {
+          return;
+        }
+        const cleaned = await removeCloudCharacterFiles(characterId, newVersion);
+        if (!cleaned) {
+          console.error('Could not clean up older cloud images for character ' + characterId + '.');
+        }
+      });
+    });
+  });
+}
+
+// Called (not awaited) when a character's image is removed, the
+// character is deleted, or its comic is deleted. Cancels any pending
+// upload, then (after any in-flight one finishes) removes everything
+// under the character's cloud folder plus the legacy path.
+function deleteCharacterImageFromCloudInBackground(characterId) {
+  cancelPendingCharacterImageUploads(characterId);
+  queueCharacterImageCloudTask(characterId, async function () {
+    const deleted = await removeCloudCharacterFiles(characterId, null);
+    if (!deleted) {
+      console.error('Could not delete cloud images for character ' + characterId + '.');
+    }
+  });
+}
+
+// Downloads one character's image for the given version, falling back
+// once to the legacy single-file path. Resolves { blob } on success,
+// { blob: null, missing: true } if neither exists, or
+// { blob: null, missing: false } on any other failure (logged).
+async function downloadCharacterImageFromCloud(characterId, version) {
+  try {
+    const versionedPath = await buildCloudImagePath('characters', characterId, version);
+    const paths = await buildCharacterCloudPaths(characterId);
+    if (!versionedPath || !paths) {
+      return { blob: null, missing: false };
+    }
+
+    const candidates = [versionedPath, paths.legacy];
+    for (let i = 0; i < candidates.length; i++) {
+      const { data, error } = await supabaseClient.storage
+        .from('images')
+        .download(candidates[i]);
+      if (!error && data instanceof Blob) {
+        return { blob: data, missing: false };
+      }
+      if (error && !isStorageNotFoundError(error)) {
+        console.error('Character image download failed for', candidates[i], error);
+        return { blob: null, missing: false };
+      }
+    }
+    return { blob: null, missing: true };
+  } catch (error) {
+    console.error('Character image download failed for ' + characterId + ':', error);
+    return { blob: null, missing: false };
+  }
+}
+
+const MAX_CHARACTER_IMAGE_DOWNLOADS = 3;
+// "characterId|imageVersion" keys that were missing or failed this
+// session - not retried until the next page load, 'online' event, or
+// logout/user switch (tracked via coverSyncGeneration, which
+// setCoverSyncUser() bumps).
+const characterImageDownloadFailures = new Set();
+let characterImageFailuresGeneration = 0;
+const characterImageDownloadsInFlight = new Map(); // characterId -> Promise<boolean>
+
+function resetCharacterImageFailuresIfUserChanged() {
+  if (characterImageFailuresGeneration !== coverSyncGeneration) {
+    characterImageFailuresGeneration = coverSyncGeneration;
+    characterImageDownloadFailures.clear();
+  }
+}
+
+// Downloads and saves one character's cloud image if this device needs
+// it. Resolves true only if a new image was saved locally. Never
+// rejects, never uploads, never changes character.imageVersion.
+function downloadCharacterImageIfNeeded(characterId) {
+  const existing = characterImageDownloadsInFlight.get(characterId);
+  if (existing) {
+    return existing;
+  }
+
+  const attempt = (async function () {
+    const found = findCharacterById(characterId);
+    if (!found || !isValidCoverVersion(found.character.imageVersion) ||
+        !coverSyncUserId || !navigator.onLine) {
+      return false;
+    }
+    const version = found.character.imageVersion;
+    const failureKey = characterId + '|' + version;
+    if (characterImageDownloadFailures.has(failureKey)) {
+      return false;
+    }
+
+    // Captured BEFORE reading local state: a new pick, remove or delete
+    // bumps this, and whatever we download is then stale.
+    const cloudState = getCharacterImageCloudState(characterId);
+    const turnAtStart = cloudState.latest;
+    const generation = coverSyncGeneration;
+
+    const status = await getLocalCharacterImageStatus(characterId);
+    if (status.hasLocal && status.version === version) {
+      return false; // already up to date
+    }
+
+    const result = await downloadCharacterImageFromCloud(characterId, version);
+    if (generation !== coverSyncGeneration) {
+      return false; // logged out / switched user meanwhile
+    }
+    if (!(result.blob instanceof Blob)) {
+      // Missing or failed: keep the placeholder, no error shown, and
+      // don't ask again this session.
+      characterImageDownloadFailures.add(failureKey);
+      return false;
+    }
+
+    // Re-check: the character may have been deleted, its image changed
+    // or removed, or a new one picked here while we were downloading.
+    const current = findCharacterById(characterId);
+    if (!current || current.character.imageVersion !== version ||
+        cloudState.latest !== turnAtStart) {
+      return false;
+    }
+
+    await saveDownloadedCharacterImageLocally(characterId, result.blob, version);
+    return true;
+  })().catch(function (error) {
+    console.error('Character image download failed for ' + characterId + ':', error);
+    const found = findCharacterById(characterId);
+    if (found && found.character.imageVersion) {
+      characterImageDownloadFailures.add(characterId + '|' + found.character.imageVersion);
+    }
+    return false;
+  }).finally(function () {
+    characterImageDownloadsInFlight.delete(characterId);
+  });
+
+  characterImageDownloadsInFlight.set(characterId, attempt);
+  return attempt;
+}
+
+// Updates, in place, every character picture currently on the page for
+// these characters (a comic's Favorite Characters section and the
+// Characters tab) - no re-render, so nothing flashes and the scroll
+// position is untouched. The Add/Edit form preview is only updated when
+// it's still showing that character's saved image - never over a
+// picture the user just picked or removed there.
+// The new object URL is applied BEFORE the old one is revoked, so a
+// box never briefly points at a dead URL.
+function refreshShownCharacterImages(characterIds) {
+  characterIds.forEach(function (characterId) {
+    loadImageForCharacter(characterId).then(function (imageBlob) {
+      if (!imageBlob) {
+        return;
+      }
+      const oldUrl = characterImageObjectUrlCache.get(characterId);
+      const newUrl = URL.createObjectURL(imageBlob);
+      characterImageObjectUrlCache.set(characterId, newUrl);
+
+      document.querySelectorAll('[data-character-image-id]').forEach(function (element) {
+        if (element.dataset.characterImageId !== characterId) {
+          return;
+        }
+        if (element === characterFormPreviewBox &&
+            (editingCharacterId !== characterId || pickedCharacterImageBlob || characterImageWasRemoved)) {
+          return;
+        }
+        setCoverElementImage(element, newUrl);
+      });
+
+      if (oldUrl && oldUrl !== newUrl) {
+        URL.revokeObjectURL(oldUrl);
+      }
+    }).catch(function (error) {
+      console.error('Could not show downloaded character image:', error);
+    });
+  });
+}
+
+// Checks every character with an imageVersion and downloads the images
+// this device is missing or has a different version of, at most 3 at a
+// time. Background only: nothing awaits it. If called while running, it
+// runs once more afterwards. Refreshes the page only for images that
+// were actually saved.
+let characterImageSyncRunning = false;
+let characterImageSyncRerunRequested = false;
+async function syncCharacterImagesFromCloud() {
+  if (!coverSyncUserId || !navigator.onLine) {
+    return;
+  }
+  if (characterImageSyncRunning) {
+    characterImageSyncRerunRequested = true;
+    return;
+  }
+  characterImageSyncRunning = true;
+  resetCharacterImageFailuresIfUserChanged();
+  const generation = coverSyncGeneration;
+  const changedIds = [];
+
+  try {
+    const characterIds = [];
+    manhwaEntries.forEach(function (entry) {
+      ((entry && entry.characters) || []).forEach(function (character) {
+        if (character && character.id && isValidCoverVersion(character.imageVersion)) {
+          characterIds.push(character.id);
+        }
+      });
+    });
+
+    let nextIndex = 0;
+    async function worker() {
+      while (nextIndex < characterIds.length && generation === coverSyncGeneration) {
+        const characterId = characterIds[nextIndex++];
+        if (await downloadCharacterImageIfNeeded(characterId)) {
+          changedIds.push(characterId);
+        }
+      }
+    }
+    const workers = [];
+    for (let i = 0; i < MAX_CHARACTER_IMAGE_DOWNLOADS; i++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
+  } catch (error) {
+    console.error('Character image sync failed:', error);
+  } finally {
+    characterImageSyncRunning = false;
+  }
+
+  if (changedIds.length > 0 && generation === coverSyncGeneration) {
+    refreshShownCharacterImages(changedIds);
+  }
+
+  if (characterImageSyncRerunRequested) {
+    characterImageSyncRerunRequested = false;
+    syncCharacterImagesFromCloud();
+  }
+}
+window.syncCharacterImagesFromCloud = syncCharacterImagesFromCloud;
 
 // Builds the small "pencil" (edit) + "trash" (delete) icon button row.
 // Shared by the normal card display, the private-mode list row, and
@@ -3410,6 +3908,22 @@ function buildEntryActions(entry, onEditClick) {
     if (entry.hasImage || entry.coverVersion) {
       deleteCoverFromCloudInBackground(entry.id);
     }
+
+    // Same for every character in this comic: their local images (which
+    // used to be left behind) and their cloud files.
+    (entry.characters || []).forEach(function (character) {
+      if (!character || !character.id) {
+        return;
+      }
+      cancelPendingCharacterImageUploads(character.id);
+      deleteImageForCharacter(character.id).catch(function (error) {
+        console.error('Could not delete character image:', error);
+      });
+      forgetCachedCharacterImageUrl(character.id);
+      if (character.hasImage || character.imageVersion) {
+        deleteCharacterImageFromCloudInBackground(character.id);
+      }
+    });
 
     // Redraw the shelf so the deleted card disappears immediately
     renderList();
@@ -3539,6 +4053,11 @@ let editingCharacterId = null;
 // once "Save Character" is actually clicked). null means no new picture
 // has been picked since the form was last opened/reset.
 let pickedCharacterImageBlob = null;
+
+// The original File behind pickedCharacterImageBlob. The cloud upload
+// resizes this with resizeImageForUpload() (the same way covers do),
+// rather than re-compressing the already-shrunk local Blob.
+let pickedCharacterImageFile = null;
 
 // The temporary "blob:..." preview url made straight from
 // pickedCharacterImageBlob, purely so the form can show that picture
@@ -3968,6 +4487,7 @@ function resetCharacterFormFields() {
     pickedCharacterImagePreviewUrl = null;
   }
   pickedCharacterImageBlob = null;
+  pickedCharacterImageFile = null;
   characterImageWasRemoved = false;
 
   clearCoverElementImage(characterFormPreviewBox);
@@ -4033,6 +4553,7 @@ characterImageInput.addEventListener('change', function () {
       }
 
       pickedCharacterImageBlob = resizedBlob;
+      pickedCharacterImageFile = pickedFile;
       characterImageWasRemoved = false;
 
       pickedCharacterImagePreviewUrl = URL.createObjectURL(resizedBlob);
@@ -4061,6 +4582,7 @@ removeCharacterImageButton.addEventListener('click', function () {
     pickedCharacterImagePreviewUrl = null;
   }
   pickedCharacterImageBlob = null;
+  pickedCharacterImageFile = null;
   characterImageWasRemoved = true;
 
   clearCoverElementImage(characterFormPreviewBox);
@@ -4117,6 +4639,8 @@ saveCharacterButton.addEventListener('click', function () {
   character.name = name;
 
   if (pickedCharacterImageBlob) {
+    // Captured now: finishSavingCharacter() resets the form fields.
+    const fileToUpload = pickedCharacterImageFile || pickedCharacterImageBlob;
     // A new picture was picked in this form session - save it into
     // IndexedDB under this character's own id, the exact same way a
     // comic's own cover photo is saved under ITS id (see
@@ -4129,7 +4653,22 @@ saveCharacterButton.addEventListener('click', function () {
         // reasoning as coverImageInput's own listener below.
         forgetCachedCharacterImageUrl(character.id);
         character.hasImage = true;
+
+        // This just-picked image is newer than whatever is in the cloud.
+        // Mark it as matching the current cloud version so the download
+        // sync won't replace it with the older copy while the upload is
+        // pending (or if it fails) - same as covers.
+        if (character.imageVersion) {
+          setLocalCharacterImageVersion(character.id, character.imageVersion).catch(function (error) {
+            console.error('Could not record local image version for character ' + character.id + ':', error);
+          });
+        }
+
         finishSavingCharacter(entry);
+
+        // Local copy saved and showing - upload in the background. Not
+        // awaited, so it can never block or undo anything above.
+        uploadCharacterImageInBackground(character.id, fileToUpload);
       })
       .catch(function (error) {
         console.error('Could not save character image:', error);
@@ -4137,17 +4676,24 @@ saveCharacterButton.addEventListener('click', function () {
         character.hasImage = false;
         finishSavingCharacter(entry);
       });
-  } else if (characterImageWasRemoved && character.hasImage) {
+  } else if (characterImageWasRemoved && (character.hasImage || character.imageVersion)) {
     // "Remove Image" was clicked on a character that had a real saved
     // picture - actually delete it from IndexedDB now that Save has
     // been clicked (see the removeCharacterImageButton listener above
     // for why this is deferred until now instead of happening
     // immediately).
+    // Stop any upload still in progress from setting imageVersion
+    // after the image has been removed.
+    cancelPendingCharacterImageUploads(character.id);
     deleteImageForCharacter(character.id)
       .then(function () {
         forgetCachedCharacterImageUrl(character.id);
         character.hasImage = false;
+        delete character.imageVersion;
         finishSavingCharacter(entry);
+
+        // Background cloud delete - not awaited, failures only logged.
+        deleteCharacterImageFromCloudInBackground(character.id);
       })
       .catch(function (error) {
         console.error('Could not remove character image:', error);
@@ -4169,10 +4715,16 @@ function deleteCharacter(entry, character) {
   const indexToRemove = entry.characters.indexOf(character);
   entry.characters.splice(indexToRemove, 1);
 
+  // Stop any in-flight upload from stamping imageVersion on a character
+  // that no longer exists.
+  cancelPendingCharacterImageUploads(character.id);
   deleteImageForCharacter(character.id).catch(function (error) {
     console.error('Could not delete character image:', error);
   });
   forgetCachedCharacterImageUrl(character.id);
+  if (character.hasImage || character.imageVersion) {
+    deleteCharacterImageFromCloudInBackground(character.id);
+  }
 
   touchEntry(entry);
   saveToStorage();
@@ -6978,6 +7530,7 @@ async function showAuthOrApp(session) {
     // awaited, so the library shows immediately.
     if (libraryLoadState === 'loaded') {
       syncCoversFromCloud();
+      syncCharacterImagesFromCloud();
     }
     await loadListsFromSupabase();
     // Lists arrive after the first render; redraw if they're on screen.
@@ -7344,6 +7897,7 @@ async function runForegroundRefresh() {
 
     if (entriesLoaded) {
       syncCoversFromCloud();
+      syncCharacterImagesFromCloud();
     }
     // Something was skipped (writes still queued, the user started
     // editing mid-fetch, or a load failed): try again next time the
