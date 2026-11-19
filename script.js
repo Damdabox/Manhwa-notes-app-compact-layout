@@ -6,6 +6,14 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 // place it's written - change it here and the mailto: link updates too.
 const CONTACT_EMAIL = 'appdamda@gmail.com';
 
+// These two settings control the size of EVERY image uploaded to the
+// cloud (covers and character pictures). resizeImageForUpload() shrinks
+// any image wider than IMAGE_MAX_WIDTH pixels down to that width
+// (keeping its shape), then saves it as a JPEG at IMAGE_QUALITY
+// (0 = smallest/worst, 1 = largest/best). Change them here only.
+const IMAGE_MAX_WIDTH = 600;
+const IMAGE_QUALITY = 0.8;
+
 // Grab the elements we need from the page
 const titleInput = document.getElementById('titleInput');
 const typeInput = document.getElementById('typeInput');
@@ -2385,6 +2393,171 @@ function loadImageForCharacter(characterId) {
 }
 function deleteImageForCharacter(characterId) {
   return deleteImageFromStore(CHARACTER_IMAGE_STORE_NAME, characterId);
+}
+
+// --- Cloud image helpers (Supabase Storage) ---
+//
+// NOT CONNECTED TO ANYTHING YET. These are building blocks for syncing
+// cover and character images to the private "images" bucket. Nothing
+// in the app calls them yet; the IndexedDB functions above are still
+// the only place images are saved. They are plain top-level functions,
+// so they're global and can be tried from the browser Console.
+//
+// Every image lives at "<userId>/<kind>/<id>", e.g.
+// "1234-abcd/covers/1699999999999".
+
+// Shrinks an image File/Blob for upload and returns a Promise for a
+// JPEG Blob. Wider than IMAGE_MAX_WIDTH -> scaled down proportionally;
+// smaller images are never scaled up. imageOrientation: 'from-image'
+// applies the photo's EXIF rotation so phone pictures aren't sideways.
+async function resizeImageForUpload(fileOrBlob) {
+  if (!(fileOrBlob instanceof Blob)) {
+    throw new Error('resizeImageForUpload: expected a File or Blob.');
+  }
+  // An empty type is allowed (some pickers leave it blank) - decoding
+  // below is the real test. A non-empty, non-image type is rejected.
+  if (fileOrBlob.type && !fileOrBlob.type.startsWith('image/')) {
+    throw new Error('resizeImageForUpload: file is not an image (type "' + fileOrBlob.type + '").');
+  }
+
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(fileOrBlob, { imageOrientation: 'from-image' });
+  } catch (error) {
+    throw new Error('resizeImageForUpload: could not decode this image. It may be corrupted or an unsupported format.');
+  }
+
+  try {
+    let width = bitmap.width;
+    let height = bitmap.height;
+    if (!width || !height) {
+      throw new Error('resizeImageForUpload: image has no size.');
+    }
+    if (width > IMAGE_MAX_WIDTH) {
+      height = Math.round(height * (IMAGE_MAX_WIDTH / width));
+      width = IMAGE_MAX_WIDTH;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    // JPEG has no transparency - without a white fill first, see-through
+    // parts of a PNG would come out black.
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+
+    return await new Promise(function (resolve, reject) {
+      canvas.toBlob(function (blob) {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('resizeImageForUpload: the browser could not export the image as JPEG.'));
+        }
+      }, 'image/jpeg', IMAGE_QUALITY);
+    });
+  } finally {
+    bitmap.close();
+  }
+}
+
+// Builds "<userId>/<kind>/<id>" for the cloud helpers below, or returns
+// null (after logging why) if anything is wrong. kind must be exactly
+// 'covers' or 'characters', and id must be a non-empty string with no
+// slashes, so a bad value can never point at some other path.
+// The user id comes from getSession(), which reads the saved login
+// locally with no network request, so this works while offline.
+async function buildCloudImagePath(kind, id) {
+  if (kind !== 'covers' && kind !== 'characters') {
+    console.error('Cloud image: kind must be "covers" or "characters", got:', kind);
+    return null;
+  }
+  if (typeof id !== 'string' || id.trim() === '' || id.includes('/') || id.includes('\\')) {
+    console.error('Cloud image: id must be a non-empty string with no slashes, got:', id);
+    return null;
+  }
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) {
+    console.error('Cloud image: not signed in.');
+    return null;
+  }
+  return session.user.id + '/' + kind + '/' + id;
+}
+
+// Uploads (or replaces) one image. Returns true on success, false on
+// any failure. Never throws.
+async function uploadImageToCloud(kind, id, blob) {
+  try {
+    if (!(blob instanceof Blob)) {
+      console.error('uploadImageToCloud: expected a Blob, got:', blob);
+      return false;
+    }
+    const path = await buildCloudImagePath(kind, id);
+    if (!path) return false;
+
+    const { error } = await supabaseClient.storage
+      .from('images')
+      .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+    if (error) {
+      console.error('uploadImageToCloud failed for', path, error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('uploadImageToCloud failed:', error);
+    return false;
+  }
+}
+
+// Downloads one image using the signed-in user's credentials (the
+// bucket is private - no public URL). Returns a Blob, or null if it
+// doesn't exist or anything fails. Never throws.
+async function downloadImageFromCloud(kind, id) {
+  try {
+    const path = await buildCloudImagePath(kind, id);
+    if (!path) return null;
+
+    const { data, error } = await supabaseClient.storage
+      .from('images')
+      .download(path);
+    if (error) {
+      console.error('downloadImageFromCloud failed for', path, error);
+      return null;
+    }
+    return data || null;
+  } catch (error) {
+    console.error('downloadImageFromCloud failed:', error);
+    return null;
+  }
+}
+
+// Deletes one image. Returns true on success - including when it was
+// already gone (Supabase's remove() doesn't error on a missing file,
+// and a "not found" error is treated as success too). False on any
+// other failure. Never throws.
+async function deleteImageFromCloud(kind, id) {
+  try {
+    const path = await buildCloudImagePath(kind, id);
+    if (!path) return false;
+
+    const { error } = await supabaseClient.storage
+      .from('images')
+      .remove([path]);
+    if (error) {
+      const status = String(error.statusCode || error.status || '');
+      const message = String(error.message || '').toLowerCase();
+      if (status === '404' || message.includes('not found')) {
+        return true;
+      }
+      console.error('deleteImageFromCloud failed for', path, error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('deleteImageFromCloud failed:', error);
+    return false;
+  }
 }
 
 // A Blob on its own can't be used as an <img>/background-image source
