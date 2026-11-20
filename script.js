@@ -48,6 +48,8 @@ const quickNoteModalTextInput = document.getElementById('quickNoteModalTextInput
 const quickNoteModalSaveButton = document.getElementById('quickNoteModalSaveButton');
 const quickNoteModalDeleteButton = document.getElementById('quickNoteModalDeleteButton');
 const quickNoteModalCloseButton = document.getElementById('quickNoteModalCloseButton');
+const quickNoteModalEditButton = document.getElementById('quickNoteModalEditButton');
+const quickNoteModalReadView = document.getElementById('quickNoteModalReadView');
 const manhwaList = document.getElementById('manhwaList');
 const charactersList = document.getElementById('charactersList');
 const listsView = document.getElementById('listsView');
@@ -5777,7 +5779,7 @@ function buildListComicCard(list, entry) {
       notePreview.appendChild(noteRibbon);
       const notePreviewText = document.createElement('span');
       notePreviewText.className = 'note-preview-text';
-      notePreviewText.textContent = buildNoteSnippet(entry.noteText);
+      renderNoteTextInto(notePreviewText, entry.noteText, { preview: true });
       notePreview.appendChild(notePreviewText);
       notePreview.addEventListener('click', openEntry);
       card.appendChild(notePreview);
@@ -6290,7 +6292,9 @@ function renderList() {
 
       const notePreviewText = document.createElement('span');
       notePreviewText.className = 'note-preview-text';
-      notePreviewText.textContent = buildNoteSnippet(entry.noteText);
+      // Links in the preview open the Link popup (and stop the click
+      // from also opening the note); anywhere else opens the note.
+      renderNoteTextInto(notePreviewText, entry.noteText, { preview: true });
       notePreview.appendChild(notePreviewText);
 
       listItem.appendChild(notePreview);
@@ -7206,18 +7210,255 @@ bulkAddSubmitButton.addEventListener('click', function () {
 // for every single card, even though only the first few lines are
 // ever visible.
 const NOTE_SNIPPET_LENGTH = 280;
-function buildNoteSnippet(noteText) {
+
+// --- Links inside Quick Notes ---
+// A note's links are stored as plain text inside noteText (nothing about
+// the data changes). These helpers find them at display time so they can
+// be drawn as tappable links that open the shared Link popup.
+
+// Only text starting with http://, https:// or www. is ever a link -
+// bare domains ("example.com"), javascript:, data:, etc. stay plain text.
+const NOTE_LINK_PATTERN = /\b(?:https?:\/\/|www\.)[^\s<>"']+/gi;
+const NOTE_LINK_TRAILING_PUNCTUATION = '.,;:!?)]}\'"';
+const NOTE_LINK_MAX = 200;
+
+// Pure helper: splits text into [{type:'text'|'link', text, url, start}]
+// segments. "start" is the segment's offset in the original string (used
+// to select a link in the textarea on long-press). Joining every
+// segment's text always gives back the original string exactly.
+function tokenizeNoteText(text) {
+  const source = String(text || '');
+  const segments = [];
+  let cursor = 0;
+  let linkCount = 0;
+
+  function pushText(start, end) {
+    if (end <= start) {
+      return;
+    }
+    const last = segments[segments.length - 1];
+    if (last && last.type === 'text') {
+      last.text += source.slice(start, end);
+    } else {
+      segments.push({ type: 'text', text: source.slice(start, end), url: '', start: start });
+    }
+  }
+
+  const pattern = new RegExp(NOTE_LINK_PATTERN.source, 'gi');
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    if (linkCount >= NOTE_LINK_MAX) {
+      break;
+    }
+
+    let linkText = match[0];
+    while (linkText.length > 0 &&
+           NOTE_LINK_TRAILING_PUNCTUATION.indexOf(linkText.charAt(linkText.length - 1)) !== -1) {
+      linkText = linkText.slice(0, -1);
+    }
+
+    // Nothing left after the prefix (e.g. "https://." or "www.") - not a link.
+    const hasBody = /^(?:https?:\/\/|www\.)./i.test(linkText);
+    const url = hasBody ? safeUrl(linkText) : '';
+    if (!url) {
+      continue; // left as plain text by the pushText() calls around it
+    }
+
+    const linkStart = match.index;
+    pushText(cursor, linkStart);
+    segments.push({ type: 'link', text: linkText, url: url, start: linkStart });
+    cursor = linkStart + linkText.length;
+    linkCount += 1;
+  }
+
+  pushText(cursor, source.length);
+  return segments;
+}
+
+// Segments for a shelf card's preview: built from the FULL (trimmed)
+// note so a link is never cut in half before it's detected, then cut at
+// NOTE_SNIPPET_LENGTH visible characters. A cut-off link keeps its full
+// url. Same "No content yet" / trailing "..." behavior as before.
+function buildNotePreviewSegments(noteText) {
   const trimmedText = (noteText || '').trim();
 
   if (trimmedText === '') {
-    return 'No content yet';
-  }
-  if (trimmedText.length <= NOTE_SNIPPET_LENGTH) {
-    return trimmedText;
+    return [{ type: 'text', text: 'No content yet', url: '', start: 0 }];
   }
 
-  return trimmedText.slice(0, NOTE_SNIPPET_LENGTH).trim() + '...';
+  const segments = tokenizeNoteText(trimmedText);
+  if (trimmedText.length <= NOTE_SNIPPET_LENGTH) {
+    return segments;
+  }
+
+  const preview = [];
+  let remaining = NOTE_SNIPPET_LENGTH;
+  for (let i = 0; i < segments.length && remaining > 0; i++) {
+    const segment = segments[i];
+    if (segment.text.length <= remaining) {
+      preview.push(segment);
+      remaining -= segment.text.length;
+    } else {
+      preview.push({ type: segment.type, text: segment.text.slice(0, remaining), url: segment.url, start: segment.start });
+      remaining = 0;
+    }
+  }
+
+  // Matches the old ".slice(...).trim() + '...'".
+  const last = preview[preview.length - 1];
+  last.text = last.text.replace(/\s+$/, '');
+  if (last.text === '') {
+    preview.pop();
+  }
+  preview.push({ type: 'text', text: '...', url: '', start: -1 });
+  return preview;
 }
+
+// Draws note text into container using DOM APIs only (text nodes for all
+// note text - never innerHTML), so "<", "&" etc. always show literally.
+// Each link becomes <span class="note-link" role="link" tabindex="0">.
+// Clicking it (or Enter/Space) opens the shared Link popup above it and
+// stops the click from reaching the card/note underneath.
+// options:
+//   preview: true   -> use buildNotePreviewSegments() (shelf cards)
+//   onLinkLongPress -> function(segment); enables long-press on links
+function renderNoteTextInto(container, text, options) {
+  const settings = options || {};
+  const segments = settings.preview ? buildNotePreviewSegments(text) : tokenizeNoteText(text);
+
+  while (container.firstChild) {
+    container.removeChild(container.firstChild);
+  }
+
+  segments.forEach(function (segment) {
+    if (segment.type !== 'link') {
+      container.appendChild(document.createTextNode(segment.text));
+      return;
+    }
+
+    const linkElement = document.createElement('span');
+    linkElement.className = 'note-link';
+    linkElement.setAttribute('role', 'link');
+    linkElement.setAttribute('tabindex', '0');
+    linkElement.textContent = segment.text;
+
+    linkElement.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (isNoteLinkClickSuppressed()) {
+        return;
+      }
+      openLinkPopupFor(linkElement, segment.url);
+    });
+
+    linkElement.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        event.stopPropagation();
+        openLinkPopupFor(linkElement, segment.url);
+      }
+    });
+
+    if (typeof settings.onLinkLongPress === 'function') {
+      wireNoteLinkLongPress(linkElement, segment, settings.onLinkLongPress);
+    }
+
+    container.appendChild(linkElement);
+  });
+}
+
+// Long-press on a note link: hold ~500ms without moving more than 10px.
+// Uses pointer events; the click that follows a long-press is swallowed
+// (a short time window, so a stale flag can never eat a later tap) so
+// it never opens the popup, and the native context menu is suppressed
+// only while a press is active.
+const NOTE_LINK_LONG_PRESS_MS = 500;
+const NOTE_LINK_LONG_PRESS_MOVE_PX = 10;
+const NOTE_LINK_SUPPRESS_CLICK_MS = 700;
+let noteLinkSuppressClicksUntil = 0;
+let noteLinkActivePress = null;
+
+function isNoteLinkClickSuppressed() {
+  return Date.now() < noteLinkSuppressClicksUntil;
+}
+
+function wireNoteLinkLongPress(linkElement, segment, onLongPress) {
+  linkElement.addEventListener('pointerdown', function (event) {
+    if (event.pointerType === 'mouse' && event.button !== 0) {
+      return;
+    }
+    // Stops compatibility mouse events (so the textarea that replaces
+    // this text can't grab focus/caret from the same touch) and text
+    // selection starting on the link. The click event still fires.
+    event.preventDefault();
+    cancelNoteLinkPress();
+
+    const press = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      fired: false,
+      onLongPress: onLongPress,
+      segment: segment,
+      timer: null
+    };
+    press.timer = setTimeout(function () {
+      press.fired = true;
+      noteLinkSuppressClicksUntil = Date.now() + NOTE_LINK_SUPPRESS_CLICK_MS;
+      press.onLongPress(press.segment);
+    }, NOTE_LINK_LONG_PRESS_MS);
+    noteLinkActivePress = press;
+  });
+
+  linkElement.addEventListener('contextmenu', function (event) {
+    if (noteLinkActivePress || isNoteLinkClickSuppressed()) {
+      event.preventDefault();
+    }
+  });
+}
+
+function cancelNoteLinkPress() {
+  if (noteLinkActivePress) {
+    clearTimeout(noteLinkActivePress.timer);
+    noteLinkActivePress = null;
+  }
+}
+
+// Listened for on the document (not the link) because a long-press
+// hides the reading view - and the link with it - mid-press.
+document.addEventListener('pointermove', function (event) {
+  const press = noteLinkActivePress;
+  if (!press || press.fired || event.pointerId !== press.pointerId) {
+    return;
+  }
+  const dx = event.clientX - press.startX;
+  const dy = event.clientY - press.startY;
+  if (Math.sqrt(dx * dx + dy * dy) > NOTE_LINK_LONG_PRESS_MOVE_PX) {
+    cancelNoteLinkPress();
+  }
+});
+
+document.addEventListener('pointerup', function (event) {
+  const press = noteLinkActivePress;
+  if (!press || event.pointerId !== press.pointerId) {
+    return;
+  }
+  cancelNoteLinkPress();
+  if (press.fired) {
+    noteLinkSuppressClicksUntil = Date.now() + NOTE_LINK_SUPPRESS_CLICK_MS;
+    // pointerup counts as a user gesture, which iOS requires before
+    // it will focus a textarea / show the keyboard - so apply the
+    // focus + selection once more here.
+    press.onLongPress(press.segment);
+  }
+});
+
+document.addEventListener('pointercancel', function (event) {
+  const press = noteLinkActivePress;
+  if (press && event.pointerId === press.pointerId) {
+    cancelNoteLinkPress();
+  }
+});
 
 // --- Add Entry sheet (phone widths only) ---
 // On laptop/tablet, .form (the Add Entry fields) just sits on the page
@@ -7353,9 +7594,84 @@ function openQuickNoteModal(entry) {
   // exists.
   quickNoteModalDeleteButton.style.display = entry ? '' : 'none';
 
+  // New notes start in editing mode. An existing note opens in reading
+  // mode only if it has at least one link - otherwise editing, as before.
+  const hasLink = !!entry && tokenizeNoteText(entry.noteText).some(function (segment) {
+    return segment.type === 'link';
+  });
+  setQuickNoteMode(hasLink ? 'read' : 'edit');
+
   quickNoteModalOverlay.style.display = 'flex';
-  quickNoteModalTitleInput.focus();
+  if (hasLink) {
+    // Focus stays inside the dialog without popping up a phone keyboard.
+    quickNoteModalEditButton.focus({ preventScroll: true });
+  } else {
+    quickNoteModalTitleInput.focus();
+  }
 }
+
+// --- Quick Note reading/editing modes ---
+// The textarea is ALWAYS the one source of truth for the note's text
+// (Save reads it exactly as before). Reading mode just hides it and
+// shows #quickNoteModalReadView, freshly drawn from the textarea's
+// current value - so switching modes can never lose unsaved typing.
+function setQuickNoteMode(mode) {
+  if (mode === 'read') {
+    renderNoteTextInto(quickNoteModalReadView, quickNoteModalTextInput.value, {
+      onLinkLongPress: selectNoteLinkInEditor
+    });
+    quickNoteModalTextInput.style.display = 'none';
+    quickNoteModalReadView.style.display = '';
+    quickNoteModalEditButton.style.display = '';
+  } else {
+    quickNoteModalTextInput.style.display = '';
+    quickNoteModalReadView.style.display = 'none';
+    quickNoteModalEditButton.style.display = 'none';
+  }
+}
+
+function isQuickNoteReading() {
+  return quickNoteModalReadView.style.display !== 'none';
+}
+
+// Switches to editing mode, focuses the textarea, and selects
+// [start, end) - offsets in the full text, taken from the tokenizer.
+// Re-applied in a frame and a short timeout because some mobile
+// browsers reset the selection right after focusing.
+function editQuickNoteWithSelection(start, end) {
+  if (isQuickNoteReading()) {
+    setQuickNoteMode('edit');
+  }
+  function applySelection() {
+    quickNoteModalTextInput.focus({ preventScroll: true });
+    quickNoteModalTextInput.setSelectionRange(start, end);
+  }
+  applySelection();
+  requestAnimationFrame(applySelection);
+  setTimeout(applySelection, 80);
+}
+
+// Long-press on a link in reading mode: edit with exactly that link
+// selected, so Backspace/Delete removes it.
+function selectNoteLinkInEditor(segment) {
+  editQuickNoteWithSelection(segment.start, segment.start + segment.text.length);
+}
+
+function editQuickNoteAtEnd() {
+  const end = quickNoteModalTextInput.value.length;
+  editQuickNoteWithSelection(end, end);
+}
+
+// Tapping non-link text in reading mode switches to editing (links stop
+// their own clicks, so this only sees taps elsewhere in the text).
+quickNoteModalReadView.addEventListener('click', function () {
+  if (isNoteLinkClickSuppressed()) {
+    return;
+  }
+  editQuickNoteAtEnd();
+});
+
+quickNoteModalEditButton.addEventListener('click', editQuickNoteAtEnd);
 
 // Hides the popup again without saving anything - used by the "X"
 // button, clicking the dimmed backdrop, and pressing Escape below, plus
@@ -7367,6 +7683,10 @@ function openQuickNoteModal(entry) {
 function closeQuickNoteModal() {
   quickNoteModalOverlay.style.display = 'none';
   editingQuickNoteEntry = null;
+  // A link popup opened from this note's text shouldn't outlive it
+  // (e.g. closing with Escape, which isn't a click).
+  closeLinkPopup();
+  cancelNoteLinkPress();
 }
 
 // "Quick Notes" button in the Add-entry row: opens the popup empty, for

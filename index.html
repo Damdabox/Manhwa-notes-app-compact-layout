@@ -811,16 +811,27 @@ The End"></textarea>
       <div class="modal-header">
         <h3 id="quickNoteModalHeading">Quick Note</h3>
 
-        <!-- The "X" close button: just hides the overlay again, same as
-             clicking outside the box or pressing Escape (see script.js) -
-             none of the three save anything, they just close the popup
-             and leave the note (new or existing) exactly as it was
-             before you opened it. -->
-        <button id="quickNoteModalCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
+        <div class="modal-header-actions">
+          <!-- Only shown in reading mode (see setQuickNoteMode() in
+               script.js): switches to the plain textarea for editing. -->
+          <button id="quickNoteModalEditButton" type="button" class="quick-note-edit-button" style="display: none;">Edit</button>
+
+          <!-- The "X" close button: just hides the overlay again, same as
+               clicking outside the box or pressing Escape (see script.js) -
+               none of the three save anything, they just close the popup
+               and leave the note (new or existing) exactly as it was
+               before you opened it. -->
+          <button id="quickNoteModalCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
+        </div>
       </div>
 
       <input type="text" id="quickNoteModalTitleInput" placeholder="Note title">
       <textarea id="quickNoteModalTextInput" class="bulk-add-textarea" rows="8" placeholder="Write your note here..."></textarea>
+
+      <!-- Reading mode: the note text with tappable links, built by
+           renderNoteTextInto() in script.js from the textarea's value
+           (the textarea stays the one source of truth for Save). -->
+      <div id="quickNoteModalReadView" class="quick-note-read-view" style="display: none;"></div>
 
       <div class="bulk-add-controls">
         <button id="quickNoteModalSaveButton" type="button">Save Note</button>
