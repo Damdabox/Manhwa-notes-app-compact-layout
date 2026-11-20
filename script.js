@@ -3497,7 +3497,7 @@ function applyThumbnailToCoverElement(coverElement, entry) {
     failedThumbnailUrls.add(url);
     if (img.getAttribute('src') === url) {
       img.remove();
-      coverElement.classList.remove('showing-thumbnail');
+      coverElement.classList.remove('showing-thumbnail', 'thumbnail-natural');
     }
   };
   img.src = url;
@@ -3505,11 +3505,34 @@ function applyThumbnailToCoverElement(coverElement, entry) {
 }
 
 // The detail page's cover box. Only a Video with no own cover gets the
-// thumbnail (and the 16:9 shape via .showing-thumbnail); everything else
-// is left exactly as showDetailView() drew it.
+// thumbnail; everything else is left exactly as showDetailView() drew it.
+// While the thumbnail loads (or if it fails) the box keeps the 16:9
+// placeholder (.showing-thumbnail). Once it has loaded, .thumbnail-natural
+// lets the box take the picture's own shape, uncropped (see style.css).
+// Detail page only: shelf cards never get .thumbnail-natural.
 function applyDetailThumbnail(entry) {
   const shown = applyThumbnailToCoverElement(detailCoverBox, entry);
   detailCoverBox.classList.toggle('showing-thumbnail', shown);
+  // Start from the placeholder every time, so a shape from a previous
+  // entry (or a previous URL) never sticks around.
+  detailCoverBox.classList.remove('thumbnail-natural');
+  const img = shown ? findThumbnailImg(detailCoverBox) : null;
+  if (!img) {
+    return;
+  }
+  const src = img.getAttribute('src');
+  function markLoaded() {
+    // Only if this same img still shows this same URL in the detail box
+    // (a late load from an earlier entry must not resize the box).
+    if (findThumbnailImg(detailCoverBox) === img && img.getAttribute('src') === src &&
+        detailCoverBox.classList.contains('showing-thumbnail') && img.naturalWidth > 0) {
+      detailCoverBox.classList.add('thumbnail-natural');
+    }
+  }
+  img.onload = markLoaded;
+  if (img.complete) {
+    markLoaded();
+  }
 }
 
 // Redraws the thumbnail on every box currently showing this entry,

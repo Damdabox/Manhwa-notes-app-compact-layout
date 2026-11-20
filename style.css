@@ -890,6 +890,34 @@ body.private-mode #manhwaList {
   aspect-ratio: 16 / 9;
 }
 
+/* Detail page only, once the thumbnail has loaded (script.js,
+   applyDetailThumbnail): the box takes the picture's own shape instead
+   of 16:9, and the whole picture is shown, uncropped. The width stays
+   the cover column's width; the height is capped at 70% of the screen
+   so a tall picture can't push the page off screen (object-fit:
+   contain letterboxes it inside that cap). Shelf cards never get
+   .thumbnail-natural, so they keep the absolute, cropped rule above. */
+.cover-placeholder.detail-cover.showing-thumbnail.thumbnail-natural:not(.has-image) {
+  aspect-ratio: auto;
+  height: auto;
+}
+
+.cover-placeholder.detail-cover.thumbnail-natural:not(.has-image) > .video-thumbnail {
+  position: static;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+/* The img now sits in the box's normal flow, so hide the "No Cover"
+   text instead of letting it sit beside the picture. */
+.cover-placeholder.detail-cover.thumbnail-natural:not(.has-image) > .cover-placeholder-text,
+.cover-placeholder.detail-cover.thumbnail-natural:not(.has-image) > .cover-placeholder-title {
+  display: none;
+}
+
 /* The diagonal "New"-style ribbon showing the entry's status.
    How it works, step by step:
    1. "position: absolute" + "top"/"left" lifts it out of the normal
