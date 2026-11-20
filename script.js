@@ -3114,6 +3114,425 @@ function forgetCachedImageUrl(comicId) {
   }
 }
 
+// --- Video thumbnails ---
+// Videos only. A Video entry with a link gets an automatic thumbnail
+// (entry.thumbnailUrl), shown only when the user hasn't picked their own
+// cover (hasImage). YouTube links are worked out locally with no network
+// call; anything else asks the "link-preview" Edge Function. All three
+// fields below are optional, so older entries stay valid:
+//   thumbnailUrl      - the thumbnail image (https)
+//   thumbnailForLink  - the link that thumbnailUrl belongs to
+//   thumbnailTriedFor - a link the function said has no thumbnail, so it
+//                       isn't asked again until the link changes
+// None of this calls touchEntry(), so the shelf order never changes.
+
+const THUMBNAIL_FUNCTION_TIMEOUT_MS = 8000;
+const BLOCKED_THUMBNAIL_HOST_SUFFIXES = ['.local', '.internal', '.localhost', '.lan'];
+
+// true only for an https URL that's safe to put in an <img src>.
+function isSafeThumbnailUrl(u) {
+  if (typeof u !== 'string' || u.length === 0 || u.length > 2048) {
+    return false;
+  }
+  let parsed;
+  try {
+    parsed = new URL(u);
+  } catch (err) {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  if (!host.includes('.') || host === 'localhost') {
+    return false;
+  }
+  // IPv6 literals come back wrapped in [...]; IPv4 literals are all digits/dots.
+  if (host.startsWith('[') || /^[0-9.]+$/.test(host)) {
+    return false;
+  }
+  return !BLOCKED_THUMBNAIL_HOST_SUFFIXES.some(function (suffix) {
+    return host.endsWith(suffix);
+  });
+}
+
+// safeUrl() plus "it actually parses as a URL". Returns '' if not.
+function getValidVideoLink(link) {
+  const cleaned = safeUrl(link);
+  if (!cleaned) {
+    return '';
+  }
+  try {
+    new URL(cleaned);
+    return cleaned;
+  } catch (err) {
+    return '';
+  }
+}
+
+// Pure: no network. Returns the YouTube thumbnail for a YouTube link, or null.
+function getYouTubeThumbnail(link) {
+  const cleaned = safeUrl(link);
+  if (!cleaned) {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = new URL(cleaned);
+  } catch (err) {
+    return null;
+  }
+  const host = parsed.hostname.toLowerCase();
+  const segments = parsed.pathname.split('/').filter(function (part) { return part !== ''; });
+  let id = null;
+
+  if (host === 'youtu.be') {
+    id = segments[0] || null;
+  } else if (host === 'youtube.com' || host === 'www.youtube.com' ||
+             host === 'm.youtube.com' || host === 'music.youtube.com') {
+    if (segments.length === 1 && segments[0] === 'watch') {
+      id = parsed.searchParams.get('v');
+    } else if (segments.length >= 2 &&
+               ['shorts', 'embed', 'live'].indexOf(segments[0]) !== -1) {
+      id = segments[1];
+    }
+  }
+
+  if (!id || !/^[A-Za-z0-9_-]{11}$/.test(id)) {
+    return null;
+  }
+  return 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg';
+}
+
+async function isLoggedInForThumbnails() {
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    return !!session;
+  } catch (err) {
+    return false;
+  }
+}
+
+// Asks the link-preview Edge Function. Never throws. Returns
+//   { thumbnailUrl: string|null, definitive: boolean }
+// thumbnailUrl is only set if isSafeThumbnailUrl() passes. definitive is
+// true when the answer is final for this link (a thumbnail, or "this
+// page has none"), and false when it should be retried later (offline,
+// not logged in, timeout, the site didn't answer, etc).
+async function fetchThumbnailViaFunction(link) {
+  const retryLater = { thumbnailUrl: null, definitive: false };
+  if (!navigator.onLine || !(await isLoggedInForThumbnails())) {
+    return retryLater;
+  }
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  let timer = null;
+  const timeout = new Promise(function (resolve) {
+    timer = setTimeout(function () {
+      if (controller) {
+        controller.abort();
+      }
+      resolve({ timedOut: true });
+    }, THUMBNAIL_FUNCTION_TIMEOUT_MS);
+  });
+
+  try {
+    const invokeOptions = { body: { url: link } };
+    if (controller) {
+      invokeOptions.signal = controller.signal;
+    }
+    const outcome = await Promise.race([
+      supabaseClient.functions.invoke('link-preview', invokeOptions),
+      timeout
+    ]);
+
+    if (outcome.timedOut) {
+      console.warn('link-preview timed out');
+      return retryLater;
+    }
+
+    const { data, error } = outcome;
+    if (error) {
+      // 400 = the function refused this link (blocked_url). That won't
+      // change until the link does, so it counts as "no thumbnail".
+      const status = error.context && error.context.status;
+      console.warn('link-preview failed:', status || error.message);
+      return status === 400 ? { thumbnailUrl: null, definitive: true } : retryLater;
+    }
+
+    if (data && isSafeThumbnailUrl(data.thumbnailUrl)) {
+      return { thumbnailUrl: data.thumbnailUrl, definitive: true };
+    }
+    const reason = data && data.reason;
+    return {
+      thumbnailUrl: null,
+      definitive: reason === 'no_image' || reason === 'not_html' ||
+        reason === 'blocked_url' || (!!data && !reason)
+    };
+  } catch (err) {
+    console.warn('link-preview failed:', err);
+    return retryLater;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Removes every thumbnail field. Returns true if anything was removed.
+function clearThumbnailFields(entry) {
+  const hadAny = entry.thumbnailUrl !== undefined ||
+    entry.thumbnailForLink !== undefined ||
+    entry.thumbnailTriedFor !== undefined;
+  delete entry.thumbnailUrl;
+  delete entry.thumbnailForLink;
+  delete entry.thumbnailTriedFor;
+  return hadAny;
+}
+
+// One lookup per entry+link at a time, so an edit and the backfill
+// can't both call the function for the same link.
+const thumbnailLookupsInFlight = new Map();
+
+// Works out (or clears) the thumbnail for one entry, then syncs it.
+// Safe to call any time; it does nothing if the entry is already
+// resolved or already marked "no thumbnail" for its current link.
+async function resolveThumbnailForEntry(entry) {
+  if (!entry || !entry.id) {
+    return;
+  }
+  const entryId = entry.id;
+  const link = entry.type === 'Videos' ? getValidVideoLink(entry.link) : '';
+
+  if (!link) {
+    if (clearThumbnailFields(entry)) {
+      syncEntryToSupabase(entry);
+      refreshShownThumbnails(entryId);
+    }
+    return;
+  }
+  if (entry.thumbnailForLink === link || entry.thumbnailTriedFor === link) {
+    return;
+  }
+
+  const lookupKey = entryId + '|' + link;
+  if (thumbnailLookupsInFlight.has(lookupKey)) {
+    return thumbnailLookupsInFlight.get(lookupKey);
+  }
+
+  const lookup = (async function () {
+    const youTubeThumbnail = getYouTubeThumbnail(link);
+    const result = youTubeThumbnail
+      ? { thumbnailUrl: youTubeThumbnail, definitive: true }
+      : await fetchThumbnailViaFunction(link);
+
+    // Race guard: the entry may have been deleted, reloaded, or had its
+    // link changed while we were waiting.
+    const current = findEntryById(entryId);
+    if (!current || current.type !== 'Videos' || getValidVideoLink(current.link) !== link) {
+      return;
+    }
+    if (!result.definitive) {
+      return;
+    }
+
+    if (result.thumbnailUrl) {
+      current.thumbnailUrl = result.thumbnailUrl;
+      current.thumbnailForLink = link;
+      delete current.thumbnailTriedFor;
+    } else {
+      delete current.thumbnailUrl;
+      delete current.thumbnailForLink;
+      current.thumbnailTriedFor = link;
+    }
+    syncEntryToSupabase(current);
+    refreshShownThumbnails(entryId);
+  })().catch(function (err) {
+    console.warn('Could not resolve thumbnail:', err);
+  }).finally(function () {
+    thumbnailLookupsInFlight.delete(lookupKey);
+  });
+
+  thumbnailLookupsInFlight.set(lookupKey, lookup);
+  return lookup;
+}
+
+// Runs resolveThumbnailForEntry() for several entries, at most
+// "limit" at a time. Fire-and-forget.
+function resolveThumbnailsWithLimit(entries, limit) {
+  const queue = entries.slice();
+  function next() {
+    const entry = queue.shift();
+    if (!entry) {
+      return Promise.resolve();
+    }
+    return resolveThumbnailForEntry(entry).then(next, next);
+  }
+  for (let i = 0; i < Math.min(limit, queue.length); i++) {
+    next();
+  }
+}
+
+// After a Video's link (or type) was saved: look it up in the background.
+function scheduleThumbnailResolve(entry) {
+  setTimeout(function () {
+    resolveThumbnailForEntry(entry);
+  }, 0);
+}
+
+// --- Thumbnail backfill (existing entries) ---
+// Once per page session, after entries load. YouTube links are
+// unlimited (no network); function calls are capped at 10 per run, one
+// at a time ~300ms apart. Skipped entirely if offline, logged out, or
+// there are queued writes that haven't synced yet.
+const THUMBNAIL_BACKFILL_FUNCTION_LIMIT = 10;
+const THUMBNAIL_BACKFILL_DELAY_MS = 300;
+let thumbnailBackfillStarted = false;
+const thumbnailBackfillAttempted = new Set();
+
+async function backfillVideoThumbnails() {
+  if (thumbnailBackfillStarted || !navigator.onLine) {
+    return;
+  }
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) {
+      return;
+    }
+    const pending = await getPendingWriteKinds(session.user.id);
+    if (pending.entry || pending.list || thumbnailBackfillStarted) {
+      return;
+    }
+    thumbnailBackfillStarted = true;
+
+    const candidates = manhwaEntries.filter(function (entry) {
+      if (entry.type !== 'Videos') {
+        return false;
+      }
+      const link = getValidVideoLink(entry.link);
+      return !!link && entry.thumbnailForLink !== link && entry.thumbnailTriedFor !== link;
+    });
+
+    let functionCalls = 0;
+    for (const candidate of candidates) {
+      // Re-read: a foreground refresh may have swapped the object.
+      const entry = findEntryById(candidate.id);
+      const link = entry && entry.type === 'Videos' ? getValidVideoLink(entry.link) : '';
+      const attemptKey = candidate.id + '|' + link;
+      if (!link || thumbnailBackfillAttempted.has(attemptKey) ||
+          entry.thumbnailForLink === link || entry.thumbnailTriedFor === link) {
+        continue;
+      }
+      if (!getYouTubeThumbnail(link)) {
+        if (functionCalls >= THUMBNAIL_BACKFILL_FUNCTION_LIMIT || !navigator.onLine) {
+          continue;
+        }
+        if (functionCalls > 0) {
+          await new Promise(function (resolve) {
+            setTimeout(resolve, THUMBNAIL_BACKFILL_DELAY_MS);
+          });
+        }
+        functionCalls++;
+      }
+      thumbnailBackfillAttempted.add(attemptKey);
+      await resolveThumbnailForEntry(entry);
+    }
+  } catch (err) {
+    console.warn('Thumbnail backfill failed:', err);
+  }
+}
+
+// --- Thumbnail display ---
+// Priority: own cover (hasImage) > thumbnailUrl > the normal placeholder.
+// Hidden in Private mode. Shown as an <img> inside the cover box (see
+// .video-thumbnail in style.css); a failed load just removes it.
+const failedThumbnailUrls = new Set();
+
+function getDisplayableThumbnail(entry) {
+  if (!entry || entry.type !== 'Videos' || entry.hasImage || displayMode === 'private') {
+    return null;
+  }
+  const url = entry.thumbnailUrl;
+  if (!isSafeThumbnailUrl(url) || failedThumbnailUrls.has(url)) {
+    return null;
+  }
+  return url;
+}
+
+function findThumbnailImg(coverElement) {
+  for (let i = 0; i < coverElement.children.length; i++) {
+    if (coverElement.children[i].classList.contains('video-thumbnail')) {
+      return coverElement.children[i];
+    }
+  }
+  return null;
+}
+
+// Adds, updates or removes the thumbnail <img> in one cover box.
+// Returns true if a thumbnail is now shown.
+function applyThumbnailToCoverElement(coverElement, entry) {
+  coverElement.dataset.thumbEntryId = entry.id;
+  const url = getDisplayableThumbnail(entry);
+  let img = findThumbnailImg(coverElement);
+
+  if (!url) {
+    if (img) {
+      img.remove();
+    }
+    return false;
+  }
+  if (img && img.getAttribute('src') === url) {
+    return true;
+  }
+  if (!img) {
+    img = document.createElement('img');
+    img.className = 'video-thumbnail';
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    img.setAttribute('referrerpolicy', 'no-referrer');
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    // First child, so the status ribbon (added after) stays on top.
+    coverElement.insertBefore(img, coverElement.firstChild);
+  }
+  img.onerror = function () {
+    failedThumbnailUrls.add(url);
+    if (img.getAttribute('src') === url) {
+      img.remove();
+      coverElement.classList.remove('showing-thumbnail');
+    }
+  };
+  img.src = url;
+  return true;
+}
+
+// The detail page's cover box. Only a Video with no own cover gets the
+// thumbnail (and the 16:9 shape via .showing-thumbnail); everything else
+// is left exactly as showDetailView() drew it.
+function applyDetailThumbnail(entry) {
+  const shown = applyThumbnailToCoverElement(detailCoverBox, entry);
+  detailCoverBox.classList.toggle('showing-thumbnail', shown);
+}
+
+// Redraws the thumbnail on every box currently showing this entry,
+// without a full renderList() (which could wipe an edit in progress).
+function refreshShownThumbnails(entryId) {
+  const entry = findEntryById(entryId);
+  Array.prototype.forEach.call(
+    document.querySelectorAll('[data-thumb-entry-id]'),
+    function (element) {
+      if (element === detailCoverBox || element.dataset.thumbEntryId !== entryId) {
+        return;
+      }
+      if (entry) {
+        applyThumbnailToCoverElement(element, entry);
+      }
+    }
+  );
+  if (entry && currentDetailEntry && currentDetailEntry.id === entryId &&
+      detailView.style.display === 'block') {
+    applyDetailThumbnail(entry);
+  }
+}
+
 // --- Cover cloud download ---
 // Brings covers chosen on another device onto this one. For each comic
 // with an entry.coverVersion, if this device has no local cover or its
@@ -4212,6 +4631,9 @@ function showDetailView(entry) {
   if (entry.hasImage) {
     applyCoverImageToElement(detailCoverBox, entry.id);
   }
+  // Video with no own cover: automatic thumbnail (hidden in Private
+  // mode). Also removes a thumbnail left over from the last entry shown.
+  applyDetailThumbnail(entry);
 
   libraryView.style.display = 'none';
   detailView.style.display = 'block';
@@ -4378,6 +4800,8 @@ cancelEntryEditButton.addEventListener('click', function () {
 // is already correct by the time Back is clicked.
 saveEntryEditButton.addEventListener('click', function () {
   const entry = currentDetailEntry;
+  const linkBeforeEdit = entry.link;
+  const typeBeforeEdit = entry.type;
 
   entry.title = editEntryTitle.value;
   entry.type = editEntryType.value;
@@ -4419,6 +4843,11 @@ saveEntryEditButton.addEventListener('click', function () {
 
   showDetailView(entry);
   renderList();
+
+  // Link or type changed: (re)look up the video thumbnail, or clear it.
+  if (entry.link !== linkBeforeEdit || entry.type !== typeBeforeEdit) {
+    scheduleThumbnailResolve(entry);
+  }
 });
 
 // "Add Scene" button: just reveals the description/link form below it
@@ -5349,6 +5778,8 @@ function buildListComicCard(list, entry) {
       cover.appendChild(statusRibbon);
       if (entry.hasImage) {
         applyCoverImageToElement(cover, entry.id);
+      } else if (entry.type === 'Videos') {
+        applyThumbnailToCoverElement(cover, entry);
       }
       cover.addEventListener('click', openEntry);
       card.appendChild(cover);
@@ -5923,6 +6354,9 @@ function renderList() {
     // Cover" placeholder. Nothing else changes for them.
     if (entry.hasImage) {
       applyCoverImageToElement(coverPlaceholder, entry.id);
+    } else if (entry.type === 'Videos') {
+      // No own cover: show the automatic video thumbnail, if any.
+      applyThumbnailToCoverElement(coverPlaceholder, entry);
     }
 
     if (isEditing) {
@@ -6149,6 +6583,8 @@ function renderList() {
       saveButton.className = 'save-button';
       saveButton.textContent = 'Save';
       saveButton.addEventListener('click', function () {
+        const linkBeforeEdit = entry.link;
+        const typeBeforeEdit = entry.type;
         // Write the input values straight onto the entry object. Since
         // "entry" is the same object stored inside manhwaEntries (not
         // a copy), changing its properties here changes the real data
@@ -6205,6 +6641,11 @@ function renderList() {
         // updates the ribbon/star rating - since tabs filter by type,
         // not status.
         renderList();
+
+        // Link or type changed: (re)look up the video thumbnail, or clear it.
+        if (entry.link !== linkBeforeEdit || entry.type !== typeBeforeEdit) {
+          scheduleThumbnailResolve(entry);
+        }
       });
       listItem.appendChild(saveButton);
     } else {
@@ -6440,6 +6881,11 @@ addButton.addEventListener('click', function () {
   // Redraw the list so the new entry shows up
   renderList();
 
+  // New Video with a link: look up its thumbnail in the background.
+  if (newEntry.type === 'Videos' && newEntry.link) {
+    scheduleThumbnailResolve(newEntry);
+  }
+
   // Clear the inputs so they're ready for the next entry
   titleInput.value = '';
   typeInput.value = 'Manhwa';
@@ -6648,6 +7094,16 @@ bulkAddSubmitButton.addEventListener('click', function () {
     saveToStorage();
     addedEntries.forEach(syncEntryToSupabase);
     renderList();
+    // Any Videos with links (Bulk Add currently makes Manhwa with no
+    // link, so this is normally empty): thumbnails, 2 at a time.
+    const addedVideos = addedEntries.filter(function (entry) {
+      return entry.type === 'Videos' && entry.link;
+    });
+    if (addedVideos.length > 0) {
+      setTimeout(function () {
+        resolveThumbnailsWithLimit(addedVideos, 2);
+      }, 0);
+    }
   }
 
   // Build the one summary popup: always says how many were added, and
@@ -7210,6 +7666,9 @@ privacyToggleInput.addEventListener('change', function () {
   displayMode = privacyToggleInput.checked ? 'private' : 'cover';
   document.body.classList.toggle('private-mode', displayMode === 'private');
   renderList();
+  if (detailView.style.display === 'block' && currentDetailEntry) {
+    applyDetailThumbnail(currentDetailEntry);
+  }
 });
 
 // --- Zoom controls ---
@@ -7531,6 +7990,8 @@ async function showAuthOrApp(session) {
     if (libraryLoadState === 'loaded') {
       syncCoversFromCloud();
       syncCharacterImagesFromCloud();
+      // Automatic video thumbnails for existing entries (once per session).
+      backfillVideoThumbnails();
     }
     await loadListsFromSupabase();
     // Lists arrive after the first render; redraw if they're on screen.
@@ -7674,9 +8135,12 @@ let foregroundRefreshRunning = false;
 // it even if a minute hasn't passed yet.
 let foregroundRefreshOwed = false;
 
-// Same "updatedAt + coverVersion" comparison for every entry.
+// Same "updatedAt + coverVersion + thumbnailUrl" comparison for every
+// entry. thumbnailUrl is included because thumbnail lookups don't
+// change updatedAt (so the shelf order stays put).
 function getEntryRefreshKey(entry) {
-  return (entry.updatedAt || 0) + '|' + (entry.coverVersion || 0);
+  return (entry.updatedAt || 0) + '|' + (entry.coverVersion || 0) + '|' +
+    (entry.thumbnailUrl || '');
 }
 
 // One string describing every entry or list as it is right now. If it
@@ -7898,6 +8362,9 @@ async function runForegroundRefresh() {
     if (entriesLoaded) {
       syncCoversFromCloud();
       syncCharacterImagesFromCloud();
+      // Only does anything if the first attempt was skipped (offline,
+      // queued writes); it never runs twice in one session.
+      backfillVideoThumbnails();
     }
     // Something was skipped (writes still queued, the user started
     // editing mid-fetch, or a load failed): try again next time the

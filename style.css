@@ -866,6 +866,30 @@ body.private-mode #manhwaList {
   aspect-ratio: 16 / 9;
 }
 
+/* Automatic video thumbnail (script.js, applyThumbnailToCoverElement).
+   An <img> laid over the whole cover box, behind the status ribbon
+   (which comes later in the DOM). Hidden as soon as the box shows the
+   user's own cover (.has-image), so an own cover always wins. */
+.cover-placeholder > .video-thumbnail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-placeholder.has-image > .video-thumbnail {
+  display: none;
+}
+
+/* Detail page: 16:9 only while a thumbnail is actually shown there
+   (a Video with no own cover). Otherwise the box keeps its usual shape. */
+.cover-placeholder.detail-cover.showing-thumbnail:not(.has-image) {
+  aspect-ratio: 16 / 9;
+}
+
 /* The diagonal "New"-style ribbon showing the entry's status.
    How it works, step by step:
    1. "position: absolute" + "top"/"left" lifts it out of the normal
