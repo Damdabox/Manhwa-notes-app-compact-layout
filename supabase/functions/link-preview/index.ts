@@ -24,7 +24,9 @@
  *
  * Logging:
  *   - Logs the outcome string only (e.g. ok, blocked_url, timeout, no_image, unauthorized).
- *     No hostnames, URLs, queries or user info are ever logged.
+ *     fetch_failed may carry a short internal detail from a fixed set, e.g.
+ *     "fetch_failed:http_403" or "fetch_failed:too_many_redirects". The detail is logged only,
+ *     never returned to the caller. No hostnames, URLs, queries or user info are ever logged.
  *
  * TODO: per-user rate limiting is NOT implemented yet.
  */
@@ -70,10 +72,33 @@ interface PreviewResult {
   reason: Reason | null;
 }
 
+/**
+ * Short internal detail for log lines only. Always one of a fixed set of strings
+ * (never derived from hostnames, URLs or response content), and never sent to callers.
+ */
+type FailureDetail =
+  | "http_403"
+  | "http_404"
+  | "http_429"
+  | "http_4xx"
+  | "http_5xx"
+  | "http_other"
+  | "too_many_redirects"
+  | "redirect_no_location";
+
 class PreviewError extends Error {
-  constructor(public reason: Reason) {
+  constructor(public reason: Reason, public detail: FailureDetail | null = null) {
     super(reason);
   }
+}
+
+function httpStatusDetail(status: number): FailureDetail {
+  if (status === 403) return "http_403";
+  if (status === 404) return "http_404";
+  if (status === 429) return "http_429";
+  if (status >= 500 && status < 600) return "http_5xx";
+  if (status >= 400 && status < 500) return "http_4xx";
+  return "http_other";
 }
 
 // ---- Helpers: responses & logging ------------------------------------------
@@ -332,8 +357,8 @@ async function fetchWithChecks(
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get("location");
       await discardBody(res);
-      if (!location) throw new PreviewError("fetch_failed");
-      if (hop === MAX_REDIRECTS) throw new PreviewError("fetch_failed"); // too many redirects
+      if (!location) throw new PreviewError("fetch_failed", "redirect_no_location");
+      if (hop === MAX_REDIRECTS) throw new PreviewError("fetch_failed", "too_many_redirects");
       const next = validateTargetUrl(location, current);
       if (!next) throw new PreviewError("blocked_url");
       current = next;
@@ -342,7 +367,7 @@ async function fetchWithChecks(
 
     if (!res.ok) {
       await discardBody(res);
-      throw new PreviewError("fetch_failed");
+      throw new PreviewError("fetch_failed", httpStatusDetail(res.status));
     }
     return { res, finalUrl: current };
   }
@@ -603,7 +628,10 @@ function normalizeImageUrl(candidate: string, pageUrl: URL): string | null {
 
 // ---- Main flow -------------------------------------------------------------
 
-async function buildPreview(target: URL): Promise<PreviewResult> {
+/** `detail` is for logging only; callers receive `preview` alone. */
+async function buildPreview(
+  target: URL,
+): Promise<{ preview: PreviewResult; detail: FailureDetail | null }> {
   const signal = AbortSignal.timeout(TOTAL_TIMEOUT_MS);
   try {
     const { res, finalUrl } = await fetchWithChecks(target, signal);
@@ -612,12 +640,12 @@ async function buildPreview(target: URL): Promise<PreviewResult> {
 
     for (const candidate of images) {
       const thumb = normalizeImageUrl(candidate, finalUrl);
-      if (thumb) return result(null, thumb, title);
+      if (thumb) return { preview: result(null, thumb, title), detail: null };
     }
-    return result("no_image", null, title);
+    return { preview: result("no_image", null, title), detail: null };
   } catch (err) {
-    if (err instanceof PreviewError) return result(err.reason);
-    return result(signal.aborted ? "timeout" : "fetch_failed");
+    if (err instanceof PreviewError) return { preview: result(err.reason), detail: err.detail };
+    return { preview: result(signal.aborted ? "timeout" : "fetch_failed"), detail: null };
   }
 }
 
@@ -663,8 +691,9 @@ async function handler(req: Request): Promise<Response> {
     return json(result("blocked_url"), 400);
   }
 
-  const preview = await buildPreview(target);
-  logOutcome(preview.reason ?? "ok");
+  const { preview, detail } = await buildPreview(target);
+  const outcome = preview.reason ?? "ok";
+  logOutcome(detail ? `${outcome}:${detail}` : outcome);
   return json(preview, 200);
 }
 
