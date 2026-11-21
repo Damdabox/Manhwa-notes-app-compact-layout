@@ -4690,7 +4690,13 @@ let characterImageWasRemoved = false;
 // made more sense for them than this full-page swap), so this function
 // only ever deals with actual comics now.
 function showDetailView(entry) {
+  // Save the box onto the entry it was opened for BEFORE it's refilled:
+  // covers opening another entry, and the Edit form's Save redrawing
+  // this same entry (which would otherwise reset the box to old notes).
+  saveDetailNotes(false);
+
   currentDetailEntry = entry;
+  detailNotesEntryId = entry.id;
 
   detailTitle.textContent = entry.title;
   detailCoverColumn.style.display = '';
@@ -4769,6 +4775,9 @@ function showDetailView(entry) {
   // existed - either way the textarea just starts empty, never with
   // any placeholder text that could look like a real saved note.
   detailNotesTextarea.value = entry.notes || '';
+  // Fresh box for this entry: no leftover status from the last one.
+  notesStatusToken++;
+  setDetailNotesStatus('');
 
   // Reset the "Edit" form (see the "Detail page Edit form" section
   // below) back to hidden every time a (possibly different) comic's
@@ -4840,6 +4849,11 @@ function showDetailView(entry) {
 // else needs to happen here for the tab/search/privacy mode to "come
 // back" correctly.
 function showLibraryView() {
+  // Back button (and any other way off the detail page): save unsaved
+  // notes first, then stop tying the box to that entry.
+  saveDetailNotes(false);
+  detailNotesEntryId = null;
+
   detailView.style.display = 'none';
   libraryView.style.display = 'block';
 
@@ -4870,11 +4884,105 @@ backButton.addEventListener('click', showLibraryView);
 // way every other edit in this app does - so the notes are still
 // there next time this comic's detail page is opened, even after a
 // page refresh.
-saveNotesButton.addEventListener('click', function () {
-  currentDetailEntry.notes = detailNotesTextarea.value;
-  touchEntry(currentDetailEntry);
+//
+// Autosave uses this exact same code path (saveDetailNotes() below):
+// 1.5s after typing stops, and right away when the box loses focus,
+// Back is pressed, another entry is opened, the Edit form opens or
+// saves, the tab is switched, or the page is hidden / unloaded.
+
+// The id of the entry the notes box was filled from, captured in
+// showDetailView(). Notes are only ever saved onto THIS entry (looked
+// up live by id at save time), never onto whatever currentDetailEntry
+// happens to point at later. null when no detail page is open.
+let detailNotesEntryId = null;
+
+// Pending 1.5s autosave timer, and a counter so an older save's
+// "Saved" can't overwrite a newer save's "Saving..." in the status.
+const NOTES_AUTOSAVE_DELAY_MS = 1500;
+let notesAutosaveTimer = null;
+let notesStatusToken = 0;
+let notesStatusClearTimer = null;
+const detailNotesStatus = document.getElementById('detailNotesStatus');
+
+function setDetailNotesStatus(text) {
+  clearTimeout(notesStatusClearTimer);
+  detailNotesStatus.textContent = text;
+}
+
+// Saves the notes box onto the entry it was opened for. Unless force is
+// true (the Save Notes button), does nothing when the box matches what
+// that entry already has. Local state is updated synchronously; the
+// Supabase sync is started but not awaited (a failed send goes to the
+// offline queue inside syncEntryToSupabase()). Returns true if it saved.
+function saveDetailNotes(force) {
+  clearTimeout(notesAutosaveTimer);
+  notesAutosaveTimer = null;
+  if (detailNotesEntryId === null) {
+    return false;
+  }
+  const entry = findEntryById(detailNotesEntryId);
+  if (!entry) {
+    return false;
+  }
+  const value = detailNotesTextarea.value;
+  const changed = value !== (entry.notes || '');
+  if (!force && !changed) {
+    return false;
+  }
+
+  entry.notes = value;
+  touchEntry(entry);
   saveToStorage();
-  syncEntryToSupabase(currentDetailEntry);
+
+  const syncPromise = syncEntryToSupabase(entry);
+  // Status only when the text actually changed (the button's own
+  // "Saved!" label covers a Save Notes click on an unchanged box).
+  if (!changed) {
+    return true;
+  }
+  const token = ++notesStatusToken;
+  setDetailNotesStatus('Saving…');
+  syncPromise.then(function () {
+    // Saved either way: synced, or queued to retry when back online.
+    if (token !== notesStatusToken) {
+      return;
+    }
+    setDetailNotesStatus('Saved');
+    notesStatusClearTimer = setTimeout(function () {
+      if (token === notesStatusToken) {
+        detailNotesStatus.textContent = '';
+      }
+    }, 2000);
+  });
+  return true;
+}
+
+// Restart the 1.5s timer on every keystroke; only saves if changed.
+detailNotesTextarea.addEventListener('input', function () {
+  clearTimeout(notesAutosaveTimer);
+  notesAutosaveTimer = setTimeout(function () {
+    saveDetailNotes(false);
+  }, NOTES_AUTOSAVE_DELAY_MS);
+});
+
+detailNotesTextarea.addEventListener('blur', function () {
+  saveDetailNotes(false);
+});
+
+// Page being hidden (app switched, tab switched, phone locked) or
+// unloaded: save now. Local state updates synchronously and the sync
+// starts; if it doesn't finish, the offline queue picks it up.
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'hidden') {
+    saveDetailNotes(false);
+  }
+});
+window.addEventListener('pagehide', function () {
+  saveDetailNotes(false);
+});
+
+saveNotesButton.addEventListener('click', function () {
+  saveDetailNotes(true);
 
   // Quick "Saved!" confirmation on the button itself, then switch the
   // label back after a second - just enough feedback to confirm the
@@ -4925,6 +5033,7 @@ let detailEditTags = [];
 // current values, then swaps it in for #detailViewFields. Called by
 // editEntryButton's click handler below.
 function openDetailEditForm() {
+  saveDetailNotes(false);
   const entry = currentDetailEntry;
 
   editEntryTitle.value = entry.title;
@@ -4990,6 +5099,9 @@ cancelEntryEditButton.addEventListener('click', function () {
 // (e.g. its status ribbon, or which tab it belongs in if Type changed)
 // is already correct by the time Back is clicked.
 saveEntryEditButton.addEventListener('click', function () {
+  // Save unsaved notes first so the showDetailView() redraw below
+  // refills the box with them, not with the old notes.
+  saveDetailNotes(false);
   const entry = currentDetailEntry;
   const linkBeforeEdit = entry.link;
   const typeBeforeEdit = entry.type;
@@ -7965,6 +8077,7 @@ quickNoteModalDeleteButton.addEventListener('click', function () {
 // buildTypeFilterDropdownMenu() below) can share this one copy of the
 // logic instead of repeating it.
 function selectTypeFilter(filterValue) {
+  saveDetailNotes(false);
   currentFilter = filterValue;
 
   // Move the "active" highlight: strip it from every tab, then add it
@@ -8465,6 +8578,8 @@ async function signIn() {
 }
 
 async function signOut() {
+  // Save unsaved notes while still signed in as their owner.
+  saveDetailNotes(false);
   await supabaseClient.auth.signOut();
 }
 
@@ -8505,6 +8620,9 @@ async function showAuthOrApp(session) {
     // user's detail page open.
     if (detailView.style.display === 'block' &&
         (!currentDetailEntry || manhwaEntries.indexOf(currentDetailEntry) === -1)) {
+      // The notes box belongs to the previous account's entry: never
+      // save it into this account's data.
+      detailNotesEntryId = null;
       showLibraryView();
     }
     // Fetch covers chosen on other devices in the background - not

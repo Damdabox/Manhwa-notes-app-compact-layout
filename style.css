@@ -1576,6 +1576,18 @@ body.private-mode #manhwaList {
   cursor: pointer;
 }
 
+/* Save Notes button + the quiet autosave status next to it. */
+.detail-notes-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.detail-notes-status {
+  font-size: 13px;
+  color: #777;
+}
+
 /* --- Favorite Scenes --- */
 /* Same "own full-width block, separated from what's above it with a
    top border" idea as .detail-notes-section right above this. */

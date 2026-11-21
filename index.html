@@ -677,7 +677,12 @@ The End"></textarea>
     <div class="detail-notes-section">
       <label for="detailNotesTextarea" class="detail-notes-label">My Notes</label>
       <textarea id="detailNotesTextarea" class="detail-notes-textarea" rows="6"></textarea>
-      <button id="saveNotesButton" type="button">Save Notes</button>
+      <div class="detail-notes-actions">
+        <button id="saveNotesButton" type="button">Save Notes</button>
+        <!-- Quiet autosave status ("Saving..." / "Saved"), filled in by
+             saveDetailNotes() in script.js. Empty when nothing changed. -->
+        <span id="detailNotesStatus" class="detail-notes-status" aria-live="polite"></span>
+      </div>
     </div>
 
     <!-- Favorite Scenes section: sits below the notes section, same
