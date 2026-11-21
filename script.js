@@ -782,6 +782,13 @@ function addTagFromInput(inputElement, tagsArray, container) {
 // Keeping the data separate from the page display makes it easy to
 // redraw the whole list whenever something changes.
 const manhwaEntries = [];
+// Whose entries manhwaEntries holds (a user id), or null before the
+// first Supabase load. loadFromSupabase() merges rows into the existing
+// objects only when it's the same user; a different user starts fresh.
+let manhwaEntriesOwnerId = null;
+// The user showAuthOrApp() has loaded (or is loading) the app for, or
+// null when signed out. Used to skip repeat auth events for that user.
+let appSessionUserId = null;
 
 // The logged-in user's Lists (see the "--- Lists ---" section further
 // down). One object per list, shaped like:
@@ -2059,11 +2066,19 @@ function loadFromStorage() {
 //     are actually applied, don't render, and fail silently (the
 //     current entries are left exactly as they are).
 //   canApply: async function returning true/false, checked right
-//     before manhwaEntries is replaced. Returning false abandons the
+//     before manhwaEntries is updated. Returning false abandons the
 //     load, e.g. because the user started editing while it was fetching.
-// Returns true if the entries were replaced, false otherwise.
+//
+// Rows are merged INTO the existing entry objects (matched by id), so
+// anything already holding an entry - the detail page, an edit form,
+// the list picker, a pending callback - keeps pointing at the live one.
+// See applyLoadedRowsToEntries() below.
+//
+// Returns false if nothing was applied, otherwise
+// { changedIds: Set, removedIds: Set } (both may be empty).
 async function loadFromSupabase(options) {
   const background = !!(options && options.background);
+  const loadStateBefore = libraryLoadState;
   if (!background) {
     libraryLoadState = 'loading';
   }
@@ -2095,27 +2110,178 @@ async function loadFromSupabase(options) {
     return false;
   }
 
-  // Clear manhwaEntries first so repeated calls (e.g. re-running this
-  // after login) don't duplicate everything already on the shelf.
-  manhwaEntries.length = 0;
+  // Reloading a library that's already loaded for this same user: use
+  // the foreground refresh's guards, whoever called this.
+  const isReload = manhwaEntriesOwnerId === user.id && loadStateBefore === 'loaded';
+  if (isReload && !(await isEntryReloadAllowed(user.id))) {
+    if (!background) {
+      libraryLoadState = loadStateBefore;
+    }
+    return false;
+  }
 
-  rows.forEach(function (row) {
-    manhwaEntries.push(row.data);
-  });
+  // Entries with a queued (not yet synced) write for this user. Those
+  // are never overwritten or removed by a load.
+  const pendingEntryIds = new Set();
+  try {
+    (await getPendingWrites()).forEach(function (record) {
+      if (record.user_id === user.id && record.kind !== 'list') {
+        pendingEntryIds.add(record.entry_id);
+      }
+    });
+  } catch (err) {
+    console.error('Could not read pending writes before loading entries:', err);
+  }
 
-  // Same backfill loadFromStorage() does for old entries missing
-  // fields like hasImage/type/volume/page/episode - applied here too
-  // since entries loaded from Supabase can be just as old.
-  manhwaEntries.forEach(function (entry) {
-    backfillEntryDefaults(entry);
-  });
+  // A different account's entries (or the old localStorage copy) are
+  // thrown away; nothing about them should be merged or kept.
+  if (manhwaEntriesOwnerId !== user.id) {
+    manhwaEntries.length = 0;
+  }
+
+  const result = applyLoadedRowsToEntries(rows, pendingEntryIds);
+  manhwaEntriesOwnerId = user.id;
+  repointHeldEntries();
 
   libraryLoadState = 'loaded';
   lastDataRefreshAt = Date.now();
   if (!background) {
     renderList();
   }
-  return true;
+  return result;
+}
+
+// true if a reload of the current user's entries may replace local data
+// right now. Same guards as the foreground refresh: nothing open that a
+// reload could clobber (unsaved notes, edit forms, the list picker...,
+// see isForegroundRefreshBlocked()), no retry run in flight, and no
+// queued entry writes for this user.
+async function isEntryReloadAllowed(userId) {
+  if (isForegroundRefreshBlocked() || retryPendingWritesPromise) {
+    return false;
+  }
+  const pending = await getPendingWriteKinds(userId);
+  return !pending.entry;
+}
+
+// true if the detail page's notes box has text that hasn't been saved
+// with "Save Notes" yet.
+function detailNotesHaveUnsavedChanges() {
+  return detailView.style.display === 'block' && !!currentDetailEntry &&
+    detailNotesTextarea.value !== (currentDetailEntry.notes || '');
+}
+
+// Merges loaded rows into manhwaEntries IN PLACE:
+//   - an existing entry (same id) gets the row's fields copied onto the
+//     SAME object, and keys the row no longer has are deleted from it;
+//   - a new id is added; an id missing from the rows is removed.
+// An existing entry is left exactly as it is when its local updatedAt
+// is newer than the row's, when the offline queue holds a write for it,
+// or when it's the detail page's entry and the notes box has unsaved
+// text. A local entry missing from the rows is kept (not removed) in
+// those same cases, e.g. one created offline that hasn't synced yet.
+// Returns { changedIds, removedIds }.
+function applyLoadedRowsToEntries(rows, pendingEntryIds) {
+  const changedIds = new Set();
+  const removedIds = new Set();
+  const unsavedNotesEntry = detailNotesHaveUnsavedChanges() ? currentDetailEntry : null;
+
+  const existingById = new Map();
+  manhwaEntries.forEach(function (entry) {
+    existingById.set(entry.id, entry);
+  });
+
+  function mustKeepLocal(entry, rowData) {
+    if (pendingEntryIds.has(entry.id) || entry === unsavedNotesEntry) {
+      return true;
+    }
+    return !!rowData && (entry.updatedAt || 0) > (rowData.updatedAt || 0);
+  }
+
+  const rowIds = new Set();
+  rows.forEach(function (row) {
+    const fresh = row.data;
+    if (!fresh || typeof fresh !== 'object') {
+      return;
+    }
+    // Same backfill loadFromStorage() does for old entries missing
+    // fields like hasImage/type/volume/page/episode - applied here too
+    // since entries loaded from Supabase can be just as old.
+    backfillEntryDefaults(fresh);
+    rowIds.add(fresh.id);
+
+    const existing = existingById.get(fresh.id);
+    if (!existing) {
+      manhwaEntries.push(fresh);
+      changedIds.add(fresh.id);
+      return;
+    }
+    // Same version as what's here (same updatedAt + coverVersion +
+    // thumbnailUrl): leave the object untouched, as the foreground
+    // refresh always did.
+    if (mustKeepLocal(existing, fresh) ||
+        getEntryRefreshKey(existing) === getEntryRefreshKey(fresh)) {
+      return;
+    }
+    Object.keys(existing).forEach(function (key) {
+      if (!Object.prototype.hasOwnProperty.call(fresh, key)) {
+        delete existing[key];
+      }
+    });
+    Object.assign(existing, fresh);
+    // The detail page's Save Scene / Save Character handlers assume these
+    // arrays exist (showDetailView() creates them), so don't take them
+    // away from the entry it's showing.
+    if (existing === currentDetailEntry) {
+      if (!existing.scenes) {
+        existing.scenes = [];
+      }
+      if (!existing.characters) {
+        existing.characters = [];
+      }
+    }
+    changedIds.add(existing.id);
+  });
+
+  // Remove entries the rows no longer have (deleted on another device),
+  // unless they hold local work that hasn't reached Supabase yet.
+  for (let i = manhwaEntries.length - 1; i >= 0; i--) {
+    const entry = manhwaEntries[i];
+    if (rowIds.has(entry.id) || mustKeepLocal(entry, null)) {
+      continue;
+    }
+    if ((entry.updatedAt || 0) > lastDataRefreshAt && lastDataRefreshAt > 0) {
+      // Created/edited here after the last load; its upsert may simply
+      // not have landed before this fetch ran.
+      continue;
+    }
+    manhwaEntries.splice(i, 1);
+    removedIds.add(entry.id);
+  }
+
+  return { changedIds: changedIds, removedIds: removedIds };
+}
+
+// Safety net after every load: anything holding an entry object (the
+// detail page, the card edit form, the Add to list picker, the Quick
+// Note popup) is pointed at the object now in manhwaEntries with the
+// same id. With the in-place merge above this only matters when the
+// entries were reset for a different user. If the entry is gone, the
+// card edit / picker / popup references are dropped; the detail page's
+// is left for the caller, which goes back to the shelf.
+function repointHeldEntries() {
+  function fresh(entry) {
+    if (!entry || manhwaEntries.indexOf(entry) !== -1) {
+      return entry;
+    }
+    return findEntryById(entry.id);
+  }
+  if (currentDetailEntry) {
+    currentDetailEntry = fresh(currentDetailEntry) || currentDetailEntry;
+  }
+  entryBeingEdited = fresh(entryBeingEdited);
+  listPickerEntry = fresh(listPickerEntry);
+  editingQuickNoteEntry = fresh(editingQuickNoteEntry);
 }
 
 // --- Cover images (IndexedDB) ---
@@ -8309,6 +8475,13 @@ async function checkSession() {
 
 async function showAuthOrApp(session) {
   if (session) {
+    // Already loaded (or loading) the app for this user: checkSession()
+    // and the INITIAL_SESSION event both land here at startup, and only
+    // the first one may load. Set before any await so the second sees it.
+    if (session.user.id === appSessionUserId) {
+      return;
+    }
+    appSessionUserId = session.user.id;
     // A different account than the one these lists belong to - drop
     // them right away instead of showing them until the reload below.
     if (userListsOwnerId !== null && userListsOwnerId !== session.user.id) {
@@ -8328,6 +8501,12 @@ async function showAuthOrApp(session) {
     // records stay queued.
     await retryPendingWrites();
     await loadFromSupabase();
+    // Entries were reset for a different user: don't leave the old
+    // user's detail page open.
+    if (detailView.style.display === 'block' &&
+        (!currentDetailEntry || manhwaEntries.indexOf(currentDetailEntry) === -1)) {
+      showLibraryView();
+    }
     // Fetch covers chosen on other devices in the background - not
     // awaited, so the library shows immediately.
     if (libraryLoadState === 'loaded') {
@@ -8342,6 +8521,7 @@ async function showAuthOrApp(session) {
       renderList();
     }
   } else {
+    appSessionUserId = null;
     clearUserLists();
     setCoverSyncUser(null);
     libraryLoadState = 'idle';
@@ -8406,8 +8586,34 @@ async function migrateLocalDataToSupabase() {
   console.log(`Migrated ${rowsToInsert.length} entries to Supabase`);
 }
 
-supabaseClient.auth.onAuthStateChange((_event, session) => {
-  showAuthOrApp(session);
+// Only events that change WHO is signed in do a full load. Supabase
+// also fires TOKEN_REFRESHED, USER_UPDATED, and repeat SIGNED_IN /
+// INITIAL_SESSION events for the same user (e.g. on tab focus); those
+// leave the loaded library alone - reloading there is what used to
+// swap entry objects out from under the detail page.
+supabaseClient.auth.onAuthStateChange((event, session) => {
+  // TEMP: auth event debugging.
+  console.debug('[auth] onAuthStateChange:', event);
+
+  if (event === 'SIGNED_OUT') {
+    showAuthOrApp(null);
+    return;
+  }
+  if (event === 'SIGNED_IN') {
+    if (session && session.user.id !== appSessionUserId) {
+      showAuthOrApp(session);
+    }
+    return;
+  }
+  if (event === 'INITIAL_SESSION') {
+    // checkSession() may already have started the startup load; if so,
+    // showAuthOrApp() returns right away for the same user.
+    if (appSessionUserId === null) {
+      showAuthOrApp(session);
+    }
+    return;
+  }
+  // TOKEN_REFRESHED, USER_UPDATED, PASSWORD_RECOVERY, ...: nothing to load.
 });
 
 signUpBtn.addEventListener('click', signUp);
@@ -8580,11 +8786,9 @@ async function runForegroundRefresh() {
     }
 
     // Snapshot what's on screen now, so we can tell what changed and
-    // keep the existing objects for anything that didn't.
-    const entriesBefore = new Map();
-    manhwaEntries.forEach(function (entry) {
-      entriesBefore.set(entry.id, entry);
-    });
+    // keep the existing objects for anything that didn't. (Entries need
+    // no snapshot: loadFromSupabase() merges into the same objects and
+    // reports which ids changed.)
     const listsBefore = new Map();
     userLists.forEach(function (list) {
       listsBefore.set(list.listId, list);
@@ -8631,28 +8835,10 @@ async function runForegroundRefresh() {
       });
     }
 
-    // Entries: put back the existing object for every entry whose
-    // updatedAt and coverVersion didn't change, so cards, the detail
-    // page and anything else already holding them stay valid.
-    let entriesChanged = false;
-    if (entriesLoaded) {
-      const idsNow = new Set();
-      for (let i = 0; i < manhwaEntries.length; i++) {
-        const fresh = manhwaEntries[i];
-        idsNow.add(fresh.id);
-        const old = entriesBefore.get(fresh.id);
-        if (old && getEntryRefreshKey(old) === getEntryRefreshKey(fresh)) {
-          manhwaEntries[i] = old;
-        } else {
-          entriesChanged = true;
-        }
-      }
-      entriesBefore.forEach(function (_entry, id) {
-        if (!idsNow.has(id)) {
-          entriesChanged = true;
-        }
-      });
-    }
+    // Entries were merged in place by id (see applyLoadedRowsToEntries()),
+    // so cards, the detail page and anything else holding them stay valid.
+    const entriesChanged = !!entriesLoaded &&
+      (entriesLoaded.changedIds.size > 0 || entriesLoaded.removedIds.size > 0);
 
     // Lists: same idea, compared by updatedAt.
     let listsChanged = false;
@@ -8675,16 +8861,18 @@ async function runForegroundRefresh() {
       });
     }
 
-    // Detail page: point it at the reloaded entry, redraw it only if
-    // that entry changed, and go back to the shelf if it was deleted on
-    // another device.
+    // Detail page: redraw it only if its entry changed, and go back to
+    // the shelf if it was deleted on another device. Never redrawn while
+    // the notes box has unsaved text (the refresh is blocked then, and
+    // the merge skips that entry anyway), so the box is never replaced.
     let leftDetailView = false;
     if (entriesChanged && detailView.style.display === 'block' && currentDetailEntry) {
       const freshDetailEntry = findEntryById(currentDetailEntry.id);
       if (!freshDetailEntry) {
         showLibraryView();
         leftDetailView = true;
-      } else if (freshDetailEntry !== currentDetailEntry) {
+      } else if (entriesLoaded.changedIds.has(freshDetailEntry.id) &&
+                 !detailNotesHaveUnsavedChanges()) {
         showDetailView(freshDetailEntry);
       }
     }
