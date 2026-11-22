@@ -245,6 +245,136 @@ h1 {
   cursor: text;
 }
 
+/* --- Quick Note window size ---
+   Scoped to the #quickNote... ids on purpose: the list picker and the
+   privacy popup share .modal-overlay/.modal-box and must not change.
+
+   The box itself no longer scrolls (overflow: hidden). Only the note
+   text scrolls, so the header (Edit / X) and Save/Delete always stay
+   on screen however long the note is. Header, title and buttons keep
+   their natural size (flex-shrink: 0); only the text area gives up
+   space if the window is too short. */
+#quickNoteModal {
+  width: min(760px, 92vw);
+  max-width: none;
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+}
+
+#quickNoteModal > .modal-header,
+#quickNoteModalTitleInput,
+#quickNoteModal > .bulk-add-controls {
+  flex-shrink: 0;
+}
+
+/* Editing textarea and reading view share EVERY box and text metric
+   below, so switching modes never moves the text or resizes the
+   window. Their height comes from one shared value that script.js
+   sets on both (see sizeQuickNoteBody()): content height clamped
+   between 55vh and 80vh. The plain "height: 55vh" is only the
+   starting value before script.js measures. min-height: 0 lets the
+   flex column shrink the text area below 55vh only when the window
+   is shorter than its contents (a short laptop window), which keeps
+   Save visible instead of pushing it off screen.
+   overscroll-behavior: contain stops a scroll that reaches the end of
+   the note from carrying over to the page behind. */
+#quickNoteModalTextInput,
+#quickNoteModalReadView {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  height: 55vh;
+  min-height: 0;
+  max-height: 80vh;
+  flex: 0 1 auto;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 10px;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  letter-spacing: normal;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Dark scrollbar (and resize grip) instead of the default white one. */
+  color-scheme: dark;
+}
+
+/* Only the editing box gets the drag handle. */
+#quickNoteModalTextInput {
+  resize: vertical;
+}
+
+/* Invisible copy of the textarea's text, used by script.js only to
+   work out where the caret sits so it can be scrolled into view after
+   the keyboard opens (see keepQuickNoteCaretVisible()). Same metrics
+   as the textarea above. */
+.quick-note-caret-mirror {
+  position: absolute;
+  top: 0;
+  left: -9999px;
+  visibility: hidden;
+  pointer-events: none;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Page lock while the Quick Note is open: script.js adds this class
+   and sets body's "top" to minus the current scroll position, so the
+   page stays visually where it was but can't scroll; closing removes
+   both and scrolls back to the same spot. */
+body.quick-note-scroll-lock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 600px) {
+  /* Phone: nearly the whole screen. The overlay follows the visual
+     viewport (the part not covered by the on-screen keyboard) through
+     two variables script.js keeps updated while the note is open
+     (--qn-viewport-top / --qn-viewport-height); without them it is
+     simply the full screen. 100vh first, then 100dvh for browsers
+     that understand it. */
+  #quickNoteModalOverlay {
+    padding: 8px;
+    bottom: auto;
+    top: var(--qn-viewport-top, 0px);
+    height: var(--qn-viewport-height, 100vh);
+    height: var(--qn-viewport-height, 100dvh);
+  }
+
+  /* Fixed height (92dvh) rather than "grow with content", so the text
+     area always fills the window. max-height: 100% clamps it to the
+     overlay, which is what shrinks it above the keyboard. */
+  #quickNoteModal {
+    width: 100%;
+    height: 92vh;
+    height: 92dvh;
+    max-height: 100%;
+    padding: 14px;
+  }
+
+  /* Text area fills whatever height is left between the title and the
+     buttons. script.js doesn't set a height on phones. */
+  #quickNoteModalTextInput,
+  #quickNoteModalReadView {
+    flex: 1 1 auto;
+    height: auto;
+    max-height: none;
+    resize: none;
+  }
+}
+
 /* Edit (reading mode only) + X, grouped on the right of the header. */
 .modal-header-actions {
   display: flex;

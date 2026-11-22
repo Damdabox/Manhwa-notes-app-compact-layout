@@ -8147,6 +8147,217 @@ sheetQuickNoteLink.addEventListener('click', function () {
 // check this variable to know which of the two jobs they're doing.
 let editingQuickNoteEntry = null;
 
+// --- Quick Note window: size, page lock, on-screen keyboard ---
+// Matches the phone breakpoint in style.css. On phones the text area
+// just fills the window (CSS), so none of the auto-grow below applies.
+const quickNotePhoneQuery = window.matchMedia('(max-width: 600px)');
+
+// One height (e.g. "512px") shared by the textarea AND the reading
+// view, so both modes are always exactly the same size.
+let quickNoteBodyHeight = '';
+// True once the user drags the textarea's resize handle: from then on
+// their height wins over auto-grow until the popup is opened again.
+let quickNoteUserResized = false;
+let quickNoteHeightAtPointerDown = '';
+
+function isQuickNoteOpen() {
+  return quickNoteModalOverlay.style.display !== 'none';
+}
+
+function applyQuickNoteBodyHeight(height) {
+  quickNoteModalTextInput.style.height = height;
+  quickNoteModalReadView.style.height = height;
+}
+
+// Desktop/tablet: grow with the note's content, never below 55vh and
+// never above 80vh (after that it scrolls inside). The visible box is
+// measured by briefly setting its height to 0 - scrollHeight then
+// reports the full content height. overflow is hidden while measuring
+// so a temporary scrollbar can't change the line wrapping. All of
+// this happens in one go, so nothing flickers on screen.
+function sizeQuickNoteBody() {
+  if (quickNotePhoneQuery.matches) {
+    quickNoteBodyHeight = '';
+    applyQuickNoteBodyHeight('');
+    return;
+  }
+  if (quickNoteUserResized) {
+    applyQuickNoteBodyHeight(quickNoteBodyHeight);
+    return;
+  }
+  const box = isQuickNoteReading() ? quickNoteModalReadView : quickNoteModalTextInput;
+  const scrollTop = box.scrollTop;
+  box.style.overflowY = 'hidden';
+  box.style.height = '0px';
+  const contentHeight = box.scrollHeight;
+  box.style.overflowY = '';
+  const vh = window.innerHeight / 100;
+  const clamped = Math.min(Math.max(contentHeight, 55 * vh), 80 * vh);
+  quickNoteBodyHeight = Math.round(clamped) + 'px';
+  applyQuickNoteBodyHeight(quickNoteBodyHeight);
+  box.scrollTop = scrollTop;
+}
+
+quickNoteModalTextInput.addEventListener('input', sizeQuickNoteBody);
+
+// Spotting a manual resize: the browser's drag handle writes a new
+// inline height on the textarea, so compare it before/after a press.
+quickNoteModalTextInput.addEventListener('pointerdown', function () {
+  quickNoteHeightAtPointerDown = quickNoteModalTextInput.style.height;
+});
+window.addEventListener('pointerup', function () {
+  if (!isQuickNoteOpen() || quickNotePhoneQuery.matches) {
+    return;
+  }
+  const height = quickNoteModalTextInput.style.height;
+  if (height && height !== quickNoteHeightAtPointerDown && height !== quickNoteBodyHeight) {
+    quickNoteUserResized = true;
+    quickNoteBodyHeight = height;
+    applyQuickNoteBodyHeight(height);
+  }
+});
+
+// Window resized or crossed the phone breakpoint: re-fit.
+window.addEventListener('resize', function () {
+  if (isQuickNoteOpen()) {
+    sizeQuickNoteBody();
+  }
+});
+quickNotePhoneQuery.addEventListener('change', function () {
+  if (isQuickNoteOpen()) {
+    updateQuickNoteViewport();
+    sizeQuickNoteBody();
+  }
+});
+
+// Page lock. position: fixed on body (class in style.css) is what
+// actually stops scrolling on iOS Safari too; "top: -scrollY" keeps
+// the page visually where it was. Two small corrections:
+//  - "right" leaves room for the desktop scrollbar that disappears,
+//    so the centered page doesn't slide sideways;
+//  - an in-flow element is measured before/after, and any vertical
+//    shift (e.g. a first child's margin no longer collapsing through
+//    body) is cancelled out, so nothing moves behind the dim backdrop.
+// Calling it twice is harmless; closing scrolls back to the saved spot.
+let quickNoteSavedScrollY = null;
+
+function lockPageScrollForQuickNote() {
+  if (quickNoteSavedScrollY !== null) {
+    return;
+  }
+  const body = document.body;
+  const scrollY = window.scrollY;
+  const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+  const reference = Array.prototype.find.call(body.children, function (element) {
+    return element !== quickNoteModalOverlay &&
+      element.getClientRects().length > 0 &&
+      getComputedStyle(element).position !== 'fixed';
+  });
+  const topBefore = reference ? reference.getBoundingClientRect().top : 0;
+
+  quickNoteSavedScrollY = scrollY;
+  body.style.top = -scrollY + 'px';
+  body.style.right = scrollbarWidth > 0 ? scrollbarWidth + 'px' : '';
+  body.classList.add('quick-note-scroll-lock');
+
+  if (reference) {
+    const shift = reference.getBoundingClientRect().top - topBefore;
+    if (shift !== 0) {
+      body.style.top = (-scrollY - shift) + 'px';
+    }
+  }
+}
+
+function unlockPageScrollForQuickNote() {
+  if (quickNoteSavedScrollY === null) {
+    return;
+  }
+  const scrollY = quickNoteSavedScrollY;
+  quickNoteSavedScrollY = null;
+  document.body.classList.remove('quick-note-scroll-lock');
+  document.body.style.top = '';
+  document.body.style.right = '';
+  window.scrollTo(0, scrollY);
+}
+
+// On-screen keyboard (phones). The keyboard covers the bottom of the
+// screen without shrinking position: fixed elements on iOS, so the
+// overlay is pinned to the VISUAL viewport (the part still showing)
+// through two CSS variables - the window then shrinks to sit above
+// the keyboard, the text area takes the smaller height, and Save stays
+// reachable. Cleared when closed or on wider screens, where the CSS
+// falls back to the full screen.
+function updateQuickNoteViewport() {
+  const viewport = window.visualViewport;
+  const style = quickNoteModalOverlay.style;
+  if (!viewport || !isQuickNoteOpen() || !quickNotePhoneQuery.matches) {
+    style.removeProperty('--qn-viewport-top');
+    style.removeProperty('--qn-viewport-height');
+    return;
+  }
+  style.setProperty('--qn-viewport-top', viewport.offsetTop + 'px');
+  style.setProperty('--qn-viewport-height', viewport.height + 'px');
+  // Only when the visible height actually changed (keyboard opened or
+  // closed), so this never fights the user scrolling the note.
+  if (viewport.height !== quickNoteLastViewportHeight) {
+    quickNoteLastViewportHeight = viewport.height;
+    keepQuickNoteCaretVisible();
+  }
+}
+let quickNoteLastViewportHeight = 0;
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', updateQuickNoteViewport);
+  window.visualViewport.addEventListener('scroll', updateQuickNoteViewport);
+}
+
+// After the text area shrinks (keyboard opening) the caret can end up
+// below its visible part. Browsers don't expose the caret's position,
+// so an invisible copy of the text up to the caret (same width and
+// text metrics, see .quick-note-caret-mirror in style.css) tells us
+// how far down it is; then the textarea is scrolled just enough to
+// show that line. textContent only - never innerHTML.
+let quickNoteCaretMirror = null;
+
+function keepQuickNoteCaretVisible() {
+  const textarea = quickNoteModalTextInput;
+  if (document.activeElement !== textarea || isQuickNoteReading()) {
+    return;
+  }
+  if (!quickNoteCaretMirror) {
+    quickNoteCaretMirror = document.createElement('div');
+    quickNoteCaretMirror.className = 'quick-note-caret-mirror';
+    quickNoteCaretMirror.setAttribute('aria-hidden', 'true');
+    quickNoteModalOverlay.appendChild(quickNoteCaretMirror);
+  }
+  const computed = getComputedStyle(textarea);
+  const paddingTop = parseFloat(computed.paddingTop) || 0;
+  const paddingBottom = parseFloat(computed.paddingBottom) || 0;
+  const lineHeight = parseFloat(computed.lineHeight) || 24;
+
+  quickNoteCaretMirror.style.width = textarea.clientWidth + 'px';
+  // The zero-width space gives a trailing newline a line of its own.
+  quickNoteCaretMirror.textContent = textarea.value.slice(0, textarea.selectionEnd) + '​';
+
+  const caretBottom = quickNoteCaretMirror.offsetHeight - paddingBottom;
+  const caretTop = caretBottom - lineHeight;
+  if (caretTop - paddingTop < textarea.scrollTop) {
+    textarea.scrollTop = Math.max(0, caretTop - paddingTop);
+  } else if (caretBottom + paddingBottom > textarea.scrollTop + textarea.clientHeight) {
+    textarea.scrollTop = caretBottom + paddingBottom - textarea.clientHeight;
+  }
+}
+
+// Phones only: the keyboard is still sliding in at focus time. The
+// visualViewport resize above handles most browsers; this covers ones
+// that don't fire it. (Not on desktop, where there's no keyboard to
+// hide the caret and scrolling on focus would just make the text jump.)
+quickNoteModalTextInput.addEventListener('focus', function () {
+  if (quickNotePhoneQuery.matches) {
+    setTimeout(keepQuickNoteCaretVisible, 300);
+  }
+});
+
 // Shows the popup. Pass an existing note's entry object to edit it
 // (its title/text get loaded into the fields, and the Delete button
 // appears); pass null (or nothing) to open the popup empty, ready to
@@ -8169,7 +8380,17 @@ function openQuickNoteModal(entry) {
   });
   setQuickNoteMode(hasLink ? 'read' : 'edit');
 
+  // Freeze the page behind first (remembers its scroll position), then
+  // show the popup and size it - sizing has to wait until it's visible,
+  // since a hidden element has no height to measure. Each note starts
+  // with the auto-grow height and scrolled to the top.
+  lockPageScrollForQuickNote();
   quickNoteModalOverlay.style.display = 'flex';
+  quickNoteUserResized = false;
+  updateQuickNoteViewport();
+  sizeQuickNoteBody();
+  quickNoteModalTextInput.scrollTop = 0;
+  quickNoteModalReadView.scrollTop = 0;
   if (hasLink) {
     // Focus stays inside the dialog without popping up a phone keyboard.
     quickNoteModalEditButton.focus({ preventScroll: true });
@@ -8184,6 +8405,12 @@ function openQuickNoteModal(entry) {
 // shows #quickNoteModalReadView, freshly drawn from the textarea's
 // current value - so switching modes can never lose unsaved typing.
 function setQuickNoteMode(mode) {
+  // Both boxes share one height and identical text metrics (see
+  // "Quick Note window size" in style.css), so carrying the scroll
+  // offset across keeps the same lines in the same place - switching
+  // modes doesn't move the text or resize the window.
+  const outgoing = isQuickNoteReading() ? quickNoteModalReadView : quickNoteModalTextInput;
+  const scrollTop = outgoing.scrollTop;
   if (mode === 'read') {
     renderNoteTextInto(quickNoteModalReadView, quickNoteModalTextInput.value, {
       onLinkLongPress: selectNoteLinkInEditor
@@ -8191,10 +8418,12 @@ function setQuickNoteMode(mode) {
     quickNoteModalTextInput.style.display = 'none';
     quickNoteModalReadView.style.display = '';
     quickNoteModalEditButton.style.display = '';
+    quickNoteModalReadView.scrollTop = scrollTop;
   } else {
     quickNoteModalTextInput.style.display = '';
     quickNoteModalReadView.style.display = 'none';
     quickNoteModalEditButton.style.display = 'none';
+    quickNoteModalTextInput.scrollTop = scrollTop;
   }
 }
 
@@ -8250,6 +8479,8 @@ quickNoteModalEditButton.addEventListener('click', editQuickNoteAtEnd);
 // closed.
 function closeQuickNoteModal() {
   quickNoteModalOverlay.style.display = 'none';
+  updateQuickNoteViewport();
+  unlockPageScrollForQuickNote();
   editingQuickNoteEntry = null;
   // A link popup opened from this note's text shouldn't outlive it
   // (e.g. closing with Escape, which isn't a click).
