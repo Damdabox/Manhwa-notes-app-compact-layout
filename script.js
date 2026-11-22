@@ -357,21 +357,27 @@ function renderDetailRatingStars(entry) {
       const clickXInsideStar = event.clientX - starBox.left;
       const clickedLeftHalf = clickXInsideStar < starBox.width / 2;
 
-      entry.rating = clickedLeftHalf ? starNumber - 0.5 : starNumber;
+      // "entry" was captured when these stars were drawn - write onto
+      // the live entry with the same id instead. Gone: do nothing.
+      const live = findEntryById(entry.id);
+      if (!live) {
+        return;
+      }
+      live.rating = clickedLeftHalf ? starNumber - 0.5 : starNumber;
 
       // Same "stamp it as just-edited, then save" pattern every other
       // edit in this file follows - see touchEntry() near the top of
       // this file. This is what makes a tapped rating count as an
       // edit for the shelf's "newest first" sort, exactly like editing
       // a rating through the old number input used to.
-      touchEntry(entry);
+      touchEntry(live);
       saveToStorage();
-      syncEntryToSupabase(entry);
+      syncEntryToSupabase(live);
 
       // Redraw immediately so the newly tapped star (and every star
       // before it) fills in right away - this is the whole point of
       // making the row tappable instead of hiding rating behind Edit.
-      renderDetailRatingStars(entry);
+      renderDetailRatingStars(live);
 
       // Also redraw the shelf underneath, so this comic's card already
       // shows the new rating by the time Back is pressed.
@@ -521,11 +527,22 @@ function renderSceneEntries(entry) {
       // this removes just this one scene (by its position in the
       // array) and shifts the rest down, then saves the shorter list
       // and redraws so the deleted row disappears.
-      entry.scenes.splice(index, 1);
-      touchEntry(entry);
+      // Re-read by id: "entry" and "index" were captured when this row
+      // was drawn. If the live object or its scenes array has changed
+      // since, this row is stale - just redraw from the live entry.
+      const live = findEntryById(entry.id);
+      if (!live) {
+        return;
+      }
+      if (live !== entry || !live.scenes || live.scenes[index] !== scene) {
+        renderSceneEntries(live);
+        return;
+      }
+      live.scenes.splice(index, 1);
+      touchEntry(live);
       saveToStorage();
-      syncEntryToSupabase(entry);
-      renderSceneEntries(entry);
+      syncEntryToSupabase(live);
+      renderSceneEntries(live);
     });
     row.appendChild(deleteButton);
 
@@ -1316,19 +1333,24 @@ async function queuePendingWrite(entry) {
 }
 
 // Removes this entry's pending record once a sync of it has succeeded -
-// but only if the queued version isn't newer than what was just synced.
-// If the user made another edit (which failed and got queued) while this
-// sync was in flight, that newer record has to stay for the next retry.
-function removePendingWriteIfSynced(entry) {
+// but only if the synced version is at least as new as the queued one
+// (syncedUpdatedAt >= the record's updatedAt). If the user made another
+// edit (which failed and got queued) while this sync was in flight, that
+// newer record has to stay for the next retry.
+//
+// syncedUpdatedAt must be the updatedAt of the body that was actually
+// SENT, captured when the request was built - not read off the entry
+// afterwards, since a newer edit may have bumped it during the await.
+function removePendingWriteIfSynced(entryId, syncedUpdatedAt) {
   return openPendingWritesDatabase().then(function (db) {
     return new Promise(function (resolve, reject) {
       const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
       const store = transaction.objectStore(PENDING_WRITES_STORE_NAME);
-      const getRequest = store.get(entry.id);
+      const getRequest = store.get(entryId);
       getRequest.onsuccess = function () {
         const existing = getRequest.result;
-        if (existing && (existing.entry.updatedAt || 0) <= (entry.updatedAt || 0)) {
-          store.delete(entry.id);
+        if (existing && (syncedUpdatedAt || 0) >= (existing.entry.updatedAt || 0)) {
+          store.delete(entryId);
         }
       };
       transaction.oncomplete = function () { resolve(); };
@@ -1459,6 +1481,66 @@ function retryPendingListWrite(record) {
   return syncListToSupabase(record.list);
 }
 
+// Re-sends one queued entry record without ever sending an older
+// snapshot over a newer local state. Returns true/false like
+// syncEntryToSupabase(). The record is only ever removed by a successful
+// sync (removePendingWriteIfSynced() inside sendEntrySync()).
+//
+//   - Entries loaded for this user, live entry exists:
+//       live newer or same  -> send the live entry (normal sync path);
+//       snapshot newer      -> copy the snapshot onto the live object
+//                              first (e.g. the page was reloaded and
+//                              the load brought back an older copy),
+//                              then send it.
+//   - Entries loaded for this user, no live entry: the snapshot is put
+//     back into manhwaEntries and synced. (An entry created offline that
+//     a reload dropped; also an entry deleted locally after its edit was
+//     queued - entry deletes don't clear queue records, which is
+//     unchanged, so that entry comes back, as it already did before.)
+//   - Entries NOT loaded for this user yet (login runs this before
+//     loadFromSupabase()): there is no local state to be newer than the
+//     snapshot, so the snapshot itself is sent, through the same
+//     per-entry lock.
+async function retryPendingEntryWrite(record, userId) {
+  const snapshot = record.entry;
+  if (!snapshot || snapshot.id !== record.entry_id) {
+    return false;
+  }
+
+  if (manhwaEntriesOwnerId !== userId) {
+    return requestEntrySync(snapshot.id, function () {
+      return snapshot;
+    });
+  }
+
+  const live = findEntryById(snapshot.id);
+  if (!live) {
+    manhwaEntries.push(snapshot);
+    renderList();
+    return syncEntryToSupabase(snapshot);
+  }
+
+  if ((snapshot.updatedAt || 0) > (live.updatedAt || 0)) {
+    Object.keys(live).forEach(function (key) {
+      if (!Object.prototype.hasOwnProperty.call(snapshot, key)) {
+        delete live[key];
+      }
+    });
+    Object.assign(live, snapshot);
+    // Same guard applyLoadedRowsToEntries() uses for the open entry.
+    if (live === currentDetailEntry) {
+      if (!live.scenes) {
+        live.scenes = [];
+      }
+      if (!live.characters) {
+        live.characters = [];
+      }
+    }
+    renderList();
+  }
+  return syncEntryToSupabase(live);
+}
+
 // Tries to re-send every queued entry that belongs to the logged-in user.
 // List records (kind: 'list', see above) are re-sent here too.
 // Records are removed by syncEntryToSupabase() itself when a sync
@@ -1495,7 +1577,7 @@ function retryPendingWrites() {
         }
         const synced = record.kind === 'list'
           ? await retryPendingListWrite(record)
-          : await syncEntryToSupabase(record.entry);
+          : await retryPendingEntryWrite(record, session.user.id);
         if (synced) {
           syncedCount++;
         } else {
@@ -1580,55 +1662,189 @@ async function updatePendingIndicator() {
 // (user_id, entry_id) unique constraint on the table. So editing a
 // comic updates its existing row, and a brand-new comic gets a new one.
 //
+// The entry passed in is only used for its id. The body is built from
+// the LIVE entry in manhwaEntries (looked up by id after getUser(), right
+// before the request), so an older captured copy can never overwrite a
+// newer one. If the entry no longer exists locally, nothing is sent.
+//
+// Only one upsert per entry is in flight at a time. A sync requested
+// while one is in flight marks the entry dirty; when the current one
+// finishes, ONE more sync is sent with the then-latest state, however
+// many requests came in meanwhile (they all get that follow-up's
+// result). An attempt that hasn't finished after ENTRY_SYNC_TIMEOUT_MS
+// is treated as failed (queued + banner) and releases the lock; its late
+// response, if any, is ignored and never touches the queue.
+//
 // Callers don't await this - it's fire-and-forget. Any failure is
-// logged to the console, so the app keeps running, and the entry is
-// saved to the offline pending-writes queue (see queueFailedSync()
+// logged to the console, so the app keeps running, and the live entry
+// is saved to the offline pending-writes queue (see queueFailedSync()
 // above, which also shows the sync banner) so the edit survives a
-// reload. On success, any queued copy of the entry is removed.
-// retryPendingWrites() awaits this so the next entry isn't sent until
-// this one finishes, and uses the returned true (synced) / false
-// (failed) to decide whether to show the "synced" banner.
-async function syncEntryToSupabase(entry) {
+// reload. On success, any queued copy no newer than what was sent is
+// removed. retryPendingWrites() awaits this so the next entry isn't
+// sent until this one finishes, and uses the returned true (synced) /
+// false (failed or skipped) to decide whether to show the "synced"
+// banner.
+const ENTRY_SYNC_TIMEOUT_MS = 20000;
+// entryId -> { inFlight, followUp } where followUp is null, or
+// { promise, resolve } for the one collapsed sync waiting its turn.
+const entrySyncStates = new Map();
+
+function syncEntryToSupabase(entry) {
+  if (!entry || !entry.id) {
+    return Promise.resolve(false);
+  }
+  const entryId = entry.id;
+  return requestEntrySync(entryId, function () {
+    return findEntryById(entryId);
+  });
+}
+
+// readEntry() returns the object to send (and to queue on failure), read
+// at the moment the body is built; null/undefined means "skip". Follow-ups
+// always read the live entry.
+function requestEntrySync(entryId, readEntry) {
+  let state = entrySyncStates.get(entryId);
+  if (!state) {
+    state = { inFlight: false, followUp: null };
+    entrySyncStates.set(entryId, state);
+  }
+  if (state.inFlight) {
+    if (!state.followUp) {
+      let resolveFollowUp;
+      const promise = new Promise(function (resolve) {
+        resolveFollowUp = resolve;
+      });
+      state.followUp = { promise: promise, resolve: resolveFollowUp };
+    }
+    return state.followUp.promise;
+  }
+  return runEntrySync(entryId, state, readEntry);
+}
+
+function runEntrySync(entryId, state, readEntry) {
+  state.inFlight = true;
+  // Per-attempt flag: set once this attempt has timed out, so its late
+  // response knows to leave the queue alone.
+  const attempt = { timedOut: false };
+
+  return new Promise(function (resolve) {
+    let settled = false;
+    function settle(result) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+      finishEntrySync(entryId, state);
+    }
+
+    const timer = setTimeout(function () {
+      if (settled) {
+        return;
+      }
+      attempt.timedOut = true;
+      console.error('Sync of entry ' + entryId + ' timed out after ' + ENTRY_SYNC_TIMEOUT_MS + 'ms.');
+      const toQueue = readEntry();
+      if (toQueue) {
+        queueFailedSync(toQueue);
+      }
+      settle(false);
+    }, ENTRY_SYNC_TIMEOUT_MS);
+
+    sendEntrySync(readEntry, attempt).then(settle, function () {
+      settle(false);
+    });
+  });
+}
+
+// Releases the lock, then sends the one collapsed follow-up (if any)
+// with the live entry as it is now.
+function finishEntrySync(entryId, state) {
+  state.inFlight = false;
+  const followUp = state.followUp;
+  state.followUp = null;
+  if (followUp) {
+    runEntrySync(entryId, state, function () {
+      return findEntryById(entryId);
+    }).then(followUp.resolve);
+  } else if (entrySyncStates.get(entryId) === state) {
+    entrySyncStates.delete(entryId);
+  }
+}
+
+// One upsert attempt. Never throws.
+async function sendEntrySync(readEntry, attempt) {
+  // Failure path: queue the latest local state (if the entry still
+  // exists) and show the banner - unless this attempt already timed
+  // out, in which case the timeout already did that.
+  function fail() {
+    if (attempt.timedOut) {
+      return false;
+    }
+    const toQueue = readEntry();
+    if (toQueue) {
+      queueFailedSync(toQueue);
+    }
+    return false;
+  }
+
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
       console.error('Could not get current user for syncEntryToSupabase:', userError && userError.message);
-      queueFailedSync(entry);
+      return fail();
+    }
+    if (attempt.timedOut) {
       return false;
     }
+
+    // Read the entry NOW, after the await. Copied, so what's sent (and
+    // its updatedAt, used for the queue check below) can't change while
+    // the request is going out.
+    const live = readEntry();
+    if (!live) {
+      return false;
+    }
+    const body = JSON.parse(JSON.stringify(live));
 
     const { error: upsertError } = await supabaseClient
       .from('Entries')
       .upsert(
         {
           user_id: user.id,
-          entry_id: entry.id,
+          entry_id: body.id,
           // entry.updatedAt is a Date.now() number (milliseconds), but
           // the updated_at column is a timestamptz, so convert it to an
           // ISO date string - same as migrateLocalDataToSupabase() does.
-          updated_at: new Date(entry.updatedAt || Date.now()).toISOString(),
-          data: entry
+          updated_at: new Date(body.updatedAt || Date.now()).toISOString(),
+          data: body
         },
         { onConflict: 'user_id,entry_id' }
       );
 
     if (upsertError) {
       console.error('Could not sync entry to Supabase:', upsertError.message);
-      queueFailedSync(entry);
+      return fail();
+    }
+
+    // A late answer to an attempt that already timed out: the timeout
+    // queued the entry and a newer attempt may be running, so leave the
+    // queue exactly as it is.
+    if (attempt.timedOut) {
       return false;
     }
 
-    // Synced - drop any queued copy of this entry, whether this was a
-    // retry or just a normal edit. Otherwise an older queued version
-    // could get retried later and overwrite this newer one in Supabase.
-    await removePendingWriteIfSynced(entry).catch(function (err) {
-      console.error('Could not remove pending write for entry ' + entry.id + ':', err);
+    // Synced - drop the queued copy if it's no newer than what was sent.
+    // Otherwise an older queued version could get retried later and
+    // overwrite this one in Supabase.
+    await removePendingWriteIfSynced(body.id, body.updatedAt).catch(function (err) {
+      console.error('Could not remove pending write for entry ' + body.id + ':', err);
     });
     return true;
   } catch (err) {
     console.error('Could not sync entry to Supabase:', err);
-    queueFailedSync(entry);
-    return false;
+    return fail();
   }
 }
 
@@ -3124,9 +3340,13 @@ function uploadCoverInBackground(entry, pickedFile) {
     // succeeded, so on failure the entry still points at a file that
     // exists. (Bumped past the current version on the off chance the
     // clock is behind it.)
+    const before = findEntryById(entry.id);
+    if (!before) {
+      return;
+    }
     let newVersion = Date.now();
-    if (isValidCoverVersion(entry.coverVersion) && newVersion <= entry.coverVersion) {
-      newVersion = entry.coverVersion + 1;
+    if (isValidCoverVersion(before.coverVersion) && newVersion <= before.coverVersion) {
+      newVersion = before.coverVersion + 1;
     }
 
     const uploaded = await uploadImageToCloud('covers', entry.id, resized, newVersion);
@@ -3145,20 +3365,27 @@ function uploadCoverInBackground(entry, pickedFile) {
       return;
     }
 
-    entry.coverVersion = newVersion;
+    // "entry" was captured when the cover was picked. Stamp only
+    // coverVersion, on the live entry with that id. If it's gone
+    // (deleted), do nothing; its delete cleans the cloud.
+    const live = findEntryById(entry.id);
+    if (!live) {
+      return;
+    }
+    live.coverVersion = newVersion;
     // The local cover IS this version, so the download sync must never
     // fetch it back. Written right away, before anything else can run.
     setLocalCoverVersion(entry.id, newVersion).catch(function (error) {
       console.error('Could not record local cover version for entry ' + entry.id + ':', error);
     });
-    touchEntry(entry);
+    touchEntry(live);
     saveToStorage();
 
     // Not awaited, so the queue isn't held up by the entry sync. Only
     // once the entry (pointing at the new version) has synced are the
     // older cloud files removed - until then other devices may still
     // need them. If the sync fails, the old files simply stay for now.
-    syncEntryToSupabase(entry).then(function (synced) {
+    syncEntryToSupabase(live).then(function (synced) {
       if (!synced) {
         console.warn('Entry ' + entry.id + ' not synced yet; older cloud covers kept for now.');
         return;
@@ -3468,6 +3695,12 @@ async function resolveThumbnailForEntry(entry) {
     return;
   }
   const entryId = entry.id;
+  // Callers may hold an object captured earlier (setTimeout, backfill) -
+  // work on the live entry with this id. Gone: do nothing.
+  entry = findEntryById(entryId);
+  if (!entry) {
+    return;
+  }
   const link = entry.type === 'Videos' ? getValidVideoLink(entry.link) : '';
 
   if (!link) {
@@ -5326,10 +5559,15 @@ removeCharacterImageButton.addEventListener('click', function () {
 // inside it, so saving the whole entry is what actually persists the
 // character), redraw the character list, and close/reset the form.
 function finishSavingCharacter(entry) {
-  touchEntry(entry);
-  saveToStorage();
-  syncEntryToSupabase(entry);
-  renderCharacterEntries(entry);
+  // Can run after an IndexedDB await - use the live entry with this id.
+  // If it's gone, there's nothing to save, but still close the form.
+  const live = findEntryById(entry.id);
+  if (live) {
+    touchEntry(live);
+    saveToStorage();
+    syncEntryToSupabase(live);
+    renderCharacterEntries(live);
+  }
 
   addCharacterForm.style.display = 'none';
   resetCharacterFormFields();
@@ -5384,14 +5622,19 @@ saveCharacterButton.addEventListener('click', function () {
         // from before - forget it before caching the new one, same
         // reasoning as coverImageInput's own listener below.
         forgetCachedCharacterImageUrl(character.id);
-        character.hasImage = true;
+        // Re-read: set only this field, on the live character.
+        const liveCharacter = findCharacterById(character.id);
+        if (liveCharacter) {
+          liveCharacter.character.hasImage = true;
+        }
 
         // This just-picked image is newer than whatever is in the cloud.
         // Mark it as matching the current cloud version so the download
         // sync won't replace it with the older copy while the upload is
         // pending (or if it fails) - same as covers.
-        if (character.imageVersion) {
-          setLocalCharacterImageVersion(character.id, character.imageVersion).catch(function (error) {
+        const currentImageVersion = liveCharacter && liveCharacter.character.imageVersion;
+        if (currentImageVersion) {
+          setLocalCharacterImageVersion(character.id, currentImageVersion).catch(function (error) {
             console.error('Could not record local image version for character ' + character.id + ':', error);
           });
         }
@@ -5405,7 +5648,10 @@ saveCharacterButton.addEventListener('click', function () {
       .catch(function (error) {
         console.error('Could not save character image:', error);
         alert('Sorry, that image could not be saved. The character will be saved without it.');
-        character.hasImage = false;
+        const liveCharacter = findCharacterById(character.id);
+        if (liveCharacter) {
+          liveCharacter.character.hasImage = false;
+        }
         finishSavingCharacter(entry);
       });
   } else if (characterImageWasRemoved && (character.hasImage || character.imageVersion)) {
@@ -5420,8 +5666,11 @@ saveCharacterButton.addEventListener('click', function () {
     deleteImageForCharacter(character.id)
       .then(function () {
         forgetCachedCharacterImageUrl(character.id);
-        character.hasImage = false;
-        delete character.imageVersion;
+        const liveCharacter = findCharacterById(character.id);
+        if (liveCharacter) {
+          liveCharacter.character.hasImage = false;
+          delete liveCharacter.character.imageVersion;
+        }
         finishSavingCharacter(entry);
 
         // Background cloud delete - not awaited, failures only logged.
@@ -5444,7 +5693,20 @@ saveCharacterButton.addEventListener('click', function () {
 // same ".splice() + clean up IndexedDB + save + redraw" pattern
 // buildEntryActions() uses to delete a whole comic.
 function deleteCharacter(entry, character) {
-  const indexToRemove = entry.characters.indexOf(character);
+  // Both were captured when the row was drawn: remove the character by
+  // id from the live entry. If the entry is gone, do nothing.
+  const live = findEntryById(entry.id);
+  if (!live) {
+    return;
+  }
+  entry = live;
+  const indexToRemove = (entry.characters || []).findIndex(function (existing) {
+    return existing && existing.id === character.id;
+  });
+  if (indexToRemove === -1) {
+    renderCharacterEntries(entry);
+    return;
+  }
   entry.characters.splice(indexToRemove, 1);
 
   // Stop any in-flight upload from stamping imageVersion on a character
@@ -5499,13 +5761,17 @@ coverImageInput.addEventListener('change', function () {
         // download sync won't replace it with the older cloud copy
         // while the upload is pending (or if it fails). A successful
         // upload then records its own new version.
-        if (entry.coverVersion) {
-          setLocalCoverVersion(entry.id, entry.coverVersion).catch(function (error) {
+        // Runs after IndexedDB awaits: use the live entry with this id.
+        const live = findEntryById(entry.id);
+        if (live && live.coverVersion) {
+          setLocalCoverVersion(entry.id, live.coverVersion).catch(function (error) {
             console.error('Could not record local cover version for entry ' + entry.id + ':', error);
           });
         }
 
-        entry.hasImage = true;
+        if (live) {
+          live.hasImage = true;
+        }
         saveToStorage();
 
         // Update the big cover on this detail page immediately...
@@ -5553,11 +5819,16 @@ removeCoverImageButton.addEventListener('click', function () {
     .then(function () {
       forgetCachedImageUrl(entry.id);
 
-      entry.hasImage = false;
-      delete entry.coverVersion;
-      touchEntry(entry);
-      saveToStorage();
-      syncEntryToSupabase(entry);
+      // Runs after an IndexedDB await: clear only the cover fields, on
+      // the live entry with this id. Gone: nothing to sync.
+      const live = findEntryById(entry.id);
+      if (live) {
+        live.hasImage = false;
+        delete live.coverVersion;
+        touchEntry(live);
+        saveToStorage();
+        syncEntryToSupabase(live);
+      }
 
       clearCoverElementImage(detailCoverBox);
       renderList();
