@@ -8595,6 +8595,13 @@ privacyToggleInput.addEventListener('change', function () {
 // swapped for a simpler version at small sizes - it's the exact same
 // card, just drawn smaller (or bigger).
 
+// Starting Card Size when this device has no saved choice yet. Phone
+// = the same "(max-width: 600px)" breakpoint used below and in
+// style.css. A saved value (localStorage, per device) always wins.
+const CARD_SIZE_DEFAULT_DESKTOP = 1;
+const CARD_SIZE_DEFAULT_PHONE = 0.6;
+const CARD_SIZE_STORAGE_KEY = 'cardSizePercent';
+
 // How far the slider (and the +/- buttons) are allowed to go, and how
 // much one +/- click changes the zoom by. These match the min/max/step
 // already set on the <input type="range"> in index.html. They're "let"
@@ -8614,27 +8621,53 @@ function setCardScale(scale) {
   manhwaList.style.setProperty('--card-scale', clampedScale);
   zoomSlider.value = clampedScale;
   zoomValueLabel.textContent = Math.round(clampedScale * 100) + '%';
+  return clampedScale;
+}
+
+// Saves the user's choice as a whole percent (e.g. "60") so float
+// noise from repeated +/- steps never ends up in storage. Only called
+// from user actions, never from the startup default, so an untouched
+// device keeps following the default.
+function saveCardScale(scale) {
+  try {
+    localStorage.setItem(CARD_SIZE_STORAGE_KEY, String(Math.round(scale * 100)));
+  } catch (error) {
+    // Storage unavailable (private browsing, etc.): the setting still
+    // works for this visit, it just won't be remembered.
+  }
+}
+
+// Returns the saved scale clamped to the current slider range, or the
+// default for this screen size if nothing valid is saved.
+function loadSavedCardScale(defaultScale) {
+  try {
+    const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY);
+    const percent = saved === null || saved.trim() === '' ? NaN : Number(saved);
+    if (!Number.isFinite(percent)) return defaultScale;
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, percent / 100));
+  } catch (error) {
+    return defaultScale;
+  }
 }
 
 // Dragging the slider fires "input" continuously as it moves (not just
 // once when released), which is what makes the cards resize live.
 zoomSlider.addEventListener('input', function () {
-  setCardScale(parseFloat(zoomSlider.value));
+  saveCardScale(setCardScale(parseFloat(zoomSlider.value)));
 });
 
 zoomInButton.addEventListener('click', function () {
-  setCardScale(parseFloat(zoomSlider.value) + ZOOM_STEP);
+  saveCardScale(setCardScale(parseFloat(zoomSlider.value) + ZOOM_STEP));
 });
 
 zoomOutButton.addEventListener('click', function () {
-  setCardScale(parseFloat(zoomSlider.value) - ZOOM_STEP);
+  saveCardScale(setCardScale(parseFloat(zoomSlider.value) - ZOOM_STEP));
 });
 
-// Set the starting zoom to 100%, matching the slider's default value
-// in the HTML - except on phone widths, where cards start a bit
-// smaller (90%) so more of the shelf fits without any manual
-// adjustment. This only changes the STARTING value; the slider itself
-// still moves through its full 60%-180% range exactly as before.
+// Starting zoom: the saved value if this device has one, otherwise
+// CARD_SIZE_DEFAULT_DESKTOP (100%) or, on phone widths,
+// CARD_SIZE_DEFAULT_PHONE (60%). This runs before the first
+// renderList(), so cards never flash at one size and then jump.
 // "(max-width: 600px)" is the same phone-width breakpoint used by the
 // @media rule in style.css, so this switches at the same screen size
 // as the rest of the phone layout.
@@ -8656,7 +8689,9 @@ if (isPhoneWidth) {
   zoomSlider.step = ZOOM_STEP;
 }
 
-setCardScale(isPhoneWidth ? 0.9 : 1);
+// Runs after the phone-range override above so a saved value is
+// clamped to the range this screen actually uses.
+setCardScale(loadSavedCardScale(isPhoneWidth ? CARD_SIZE_DEFAULT_PHONE : CARD_SIZE_DEFAULT_DESKTOP));
 
 // --- Cover dimming ---
 // Lowers the brightness and saturation of cover pictures (shelf and
