@@ -717,7 +717,48 @@ body.lists-tab-active .search-bar {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Card Size + Cover dimming, side by side; on a narrow (phone) screen
+   the second group wraps onto its own line. The bottom margin that
+   used to be on .zoom-controls lives here now. */
+.display-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
   margin-bottom: 16px;
+}
+
+/* Private mode hides every cover, and the Characters tab has no
+   dimmed covers, so neither control applies there - hide the row. On
+   the Lists tab only Card Size is hidden (rules above); Cover dimming
+   stays because it dims the collage covers. */
+body.private-mode .display-controls,
+body.characters-tab-active .display-controls {
+  display: none;
+}
+
+.cover-dimming-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+#coverDimmingSlider {
+  cursor: pointer;
+  min-width: 0;
+  max-width: 160px;
+  flex: 1 1 auto;
+}
+
+/* Same fixed width as #zoomValueLabel, so "5%" vs "60%" doesn't nudge
+   the slider. */
+#coverDimmingValueLabel {
+  min-width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .zoom-button {
@@ -1328,6 +1369,58 @@ body.private-mode #manhwaList {
 .cover-placeholder.has-image .cover-placeholder-text,
 .cover-placeholder.has-image .cover-placeholder-title {
   display: none;
+}
+
+/* --- Cover dimming ---
+   script.js (setCoverDimming) sets --cover-brightness and
+   --cover-saturation on <html>, and adds the "cover-dimming" class
+   only while the slider is above 0%. The filter is applied ONLY to the
+   picture layers below, never to a whole card, so the status ribbon,
+   titles, "No Cover" text, buttons and borders stay at full
+   brightness. Placeholders (no picture) aren't matched at all.
+
+   Shelf / open-list covers (.dimmable-cover): the photo is drawn on
+   this ::before layer from --cover-image (setCoverElementImage() puts
+   it there instead of on the box's own background). It's first in the
+   box, so the absolutely positioned status ribbon (later in the DOM)
+   paints on top of it; the box's overflow: hidden + border-radius
+   clip it to the same rounded shape. The detail page never has
+   .dimmable-cover, so it's never dimmed. */
+:root {
+  --cover-brightness: 1;
+  --cover-saturation: 1;
+}
+
+.cover-placeholder.dimmable-cover.has-image::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--cover-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* The transition lives outside the .cover-dimming rule so it also
+   runs when the slider is dragged back down to 0%. */
+.cover-placeholder.dimmable-cover.has-image::before,
+.cover-placeholder.dimmable-cover > .video-thumbnail,
+.list-tile-slot.has-image {
+  transition: filter 150ms ease;
+}
+
+:root.cover-dimming .cover-placeholder.dimmable-cover.has-image::before,
+:root.cover-dimming .cover-placeholder.dimmable-cover > .video-thumbnail,
+:root.cover-dimming .list-tile-slot.has-image {
+  filter: brightness(var(--cover-brightness)) saturate(var(--cover-saturation));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover-placeholder.dimmable-cover.has-image::before,
+  .cover-placeholder.dimmable-cover > .video-thumbnail,
+  .list-tile-slot.has-image {
+    transition: none;
+  }
 }
 
 /* Standard "visually hidden" trick: makes the real file input

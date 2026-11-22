@@ -3438,8 +3438,22 @@ const imageObjectUrlCache = new Map();
 // and adds the "has-image" class that tells style.css to hide the "No
 // Cover" text and fill the box with that image (see .cover-placeholder
 // .has-image in style.css).
+//
+// Cover dimming: shelf and open-list card boxes carry the
+// "dimmable-cover" class. On those, the photo goes into the
+// --cover-image custom property instead, and style.css draws it on the
+// box's ::before layer - so the Cover dimming filter can apply to the
+// picture alone, not the status ribbon, text or border that share the
+// box. Every other box (detail page, characters) keeps the plain
+// inline background-image and is never dimmed.
 function setCoverElementImage(coverElement, objectUrl) {
-  coverElement.style.backgroundImage = 'url(' + objectUrl + ')';
+  const imageValue = 'url("' + objectUrl + '")';
+  if (coverElement.classList.contains('dimmable-cover')) {
+    coverElement.style.backgroundImage = '';
+    coverElement.style.setProperty('--cover-image', imageValue);
+  } else {
+    coverElement.style.backgroundImage = imageValue;
+  }
   coverElement.classList.add('has-image');
 }
 
@@ -3448,6 +3462,7 @@ function setCoverElementImage(coverElement, objectUrl) {
 // plain "No Cover" placeholder text again.
 function clearCoverElementImage(coverElement) {
   coverElement.style.backgroundImage = '';
+  coverElement.style.removeProperty('--cover-image');
   coverElement.classList.remove('has-image');
   delete coverElement.dataset.coverEntryId;
 }
@@ -6334,7 +6349,9 @@ function buildListComicCard(list, entry) {
       card.appendChild(notePreview);
     } else {
       const cover = document.createElement('div');
-      cover.className = 'cover-placeholder detail-link-target';
+      // dimmable-cover: opts this box into Cover dimming (see
+      // setCoverElementImage()).
+      cover.className = 'cover-placeholder dimmable-cover detail-link-target';
       if (entry.type === 'Videos') {
         cover.classList.add('video-cover');
       }
@@ -6898,7 +6915,9 @@ function renderList() {
     // ribbon that also lives inside this same box (appended further
     // down).
     const coverPlaceholder = document.createElement('div');
-    coverPlaceholder.className = 'cover-placeholder';
+    // dimmable-cover: opts this shelf box into Cover dimming (see
+    // setCoverElementImage()). The detail page's box never gets it.
+    coverPlaceholder.className = 'cover-placeholder dimmable-cover';
     // Videos get a wide/short thumbnail shape instead of the tall
     // portrait cover shape - see ".cover-placeholder.video-cover" in
     // style.css for the actual size change. Manhwa and Other Comics
@@ -8638,6 +8657,55 @@ if (isPhoneWidth) {
 }
 
 setCardScale(isPhoneWidth ? 0.9 : 1);
+
+// --- Cover dimming ---
+// Lowers the brightness and saturation of cover pictures (shelf and
+// open-list card covers, their video thumbnails, and Lists collage
+// covers - never the detail page). It only sets two CSS variables plus
+// a "cover-dimming" class on <html>; style.css applies the filter to
+// the picture layers only. 0% removes the class, so no filter at all.
+// Saved per device in localStorage. This runs before the first
+// renderList() below, so covers never appear at full brightness first.
+const COVER_DIMMING_STORAGE_KEY = 'coverDimming';
+const COVER_DIMMING_DEFAULT = 25;
+const COVER_DIMMING_MAX = 60;
+const coverDimmingSlider = document.getElementById('coverDimmingSlider');
+const coverDimmingValueLabel = document.getElementById('coverDimmingValueLabel');
+
+// percent: 0-60. brightness = 1 - value, saturation = 1 - value * 0.5.
+function setCoverDimming(percent) {
+  const clamped = Math.min(COVER_DIMMING_MAX, Math.max(0, Math.round(percent)));
+  const value = clamped / 100;
+  const root = document.documentElement;
+  root.style.setProperty('--cover-brightness', String(1 - value));
+  root.style.setProperty('--cover-saturation', String(1 - value * 0.5));
+  root.classList.toggle('cover-dimming', clamped > 0);
+  coverDimmingSlider.value = clamped;
+  coverDimmingValueLabel.textContent = clamped + '%';
+  return clamped;
+}
+
+function loadSavedCoverDimming() {
+  try {
+    const saved = localStorage.getItem(COVER_DIMMING_STORAGE_KEY);
+    const parsed = saved === null ? NaN : Number(saved);
+    return Number.isFinite(parsed) ? parsed : COVER_DIMMING_DEFAULT;
+  } catch (error) {
+    return COVER_DIMMING_DEFAULT;
+  }
+}
+
+coverDimmingSlider.addEventListener('input', function () {
+  const applied = setCoverDimming(parseFloat(coverDimmingSlider.value));
+  try {
+    localStorage.setItem(COVER_DIMMING_STORAGE_KEY, String(applied));
+  } catch (error) {
+    // Storage unavailable (private browsing, etc.): the setting still
+    // works for this visit, it just won't be remembered.
+  }
+});
+
+setCoverDimming(loadSavedCoverDimming());
 
 // --- Link popup ---
 // Every link in the app (the compact card view, the Private list view,
