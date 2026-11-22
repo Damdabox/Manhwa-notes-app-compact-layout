@@ -1208,7 +1208,10 @@ const SYNC_BANNER_MESSAGES = {
   synced: 'Back online. Your changes have synced.',
   // Shown by uploadCoverInBackground() when a cover's cloud upload
   // fails. The cover itself is still saved locally and showing.
-  coverNotUploaded: "Cover saved on this device. It hasn't been uploaded yet."
+  coverNotUploaded: "Cover saved on this device. It hasn't been uploaded yet.",
+  // Shown at most once per page session by the image retry runner when
+  // an image task is dropped (permanent error, or out of attempts).
+  imageNotSynced: "An image couldn't be synced. It's saved on this device."
 };
 const SYNC_ERROR_BANNER_MS = 6000;
 const SYNC_SUCCESS_BANNER_MS = 3500;
@@ -1223,7 +1226,8 @@ function showSyncBanner(kind) {
   message.textContent = SYNC_BANNER_MESSAGES[kind];
   // coverNotUploaded uses the same calm "queued" styling - nothing is
   // lost, it's just not in the cloud yet.
-  banner.classList.toggle('sync-banner-queued', kind === 'queued' || kind === 'coverNotUploaded');
+  banner.classList.toggle('sync-banner-queued',
+    kind === 'queued' || kind === 'coverNotUploaded' || kind === 'imageNotSynced');
   banner.classList.toggle('sync-banner-synced', kind === 'synced');
   // Only real errors interrupt a screen reader; the others are polite.
   banner.setAttribute('role', kind === 'error' ? 'alert' : 'status');
@@ -1359,9 +1363,8 @@ function removePendingWriteIfSynced(entryId, syncedUpdatedAt) {
   });
 }
 
-// Returns an array of every record currently in the queue (empty array
-// if there are none).
-function getPendingWrites() {
+// Every record in the store, including image tasks (internal).
+function getAllQueueRecords() {
   return openPendingWritesDatabase().then(function (db) {
     return new Promise(function (resolve, reject) {
       const request = db
@@ -1370,6 +1373,82 @@ function getPendingWrites() {
         .getAll();
       request.onsuccess = function () { resolve(request.result); };
       request.onerror = function () { reject(request.error); };
+    });
+  });
+}
+
+// Returns an array of every entry and list record currently in the
+// queue (empty array if there are none). Image task records ("img:..."
+// keys, see the "Image retry queue" section) share this store but are
+// left out here, so retryPendingWrites(), loadFromSupabase(),
+// getPendingWriteKinds() and the badge never mistake them for entries.
+function getPendingWrites() {
+  return getAllQueueRecords().then(function (records) {
+    return records.filter(function (record) {
+      return !isImageQueueKey(record.entry_id);
+    });
+  });
+}
+
+// --- Image retry queue (records in the same store) ---
+// One record per image, keyed "img:cover:<entryId>" or
+// "img:char:<characterId>" (stored in the entry_id keyPath field, like
+// lists). Never collides with "comic-..." or "list:..." keys. A record:
+//   { entry_id: <key>, kind: 'cover'|'character', id, entryId, userId,
+//     requestedAt, attempts, nextAttemptAt, lastError }
+// It holds NO image data: reconcileImage() reads the live local state
+// when it runs. Repeated enqueues for the same image overwrite.
+const IMAGE_QUEUE_PREFIX = 'img:';
+
+function isImageQueueKey(key) {
+  return typeof key === 'string' && key.indexOf(IMAGE_QUEUE_PREFIX) === 0;
+}
+
+function getImageQueueKey(kind, id) {
+  return IMAGE_QUEUE_PREFIX + (kind === 'cover' ? 'cover:' : 'char:') + id;
+}
+
+function getPendingImageTasks() {
+  return getAllQueueRecords().then(function (records) {
+    return records.filter(function (record) {
+      return isImageQueueKey(record.entry_id) &&
+        (record.kind === 'cover' || record.kind === 'character');
+    });
+  });
+}
+
+function getImageTaskRecord(key) {
+  return openPendingWritesDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const request = db
+        .transaction(PENDING_WRITES_STORE_NAME, 'readonly')
+        .objectStore(PENDING_WRITES_STORE_NAME)
+        .get(key);
+      request.onsuccess = function () { resolve(request.result); };
+      request.onerror = function () { reject(request.error); };
+    });
+  });
+}
+
+// Runs change(existing) inside one readwrite transaction on this key.
+// change returns the record to put, null to delete, or undefined to
+// leave it alone.
+function updateImageTaskRecord(key, change) {
+  return openPendingWritesDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(PENDING_WRITES_STORE_NAME);
+      const getRequest = store.get(key);
+      getRequest.onsuccess = function () {
+        const next = change(getRequest.result);
+        if (next === null) {
+          store.delete(key);
+        } else if (next) {
+          store.put(next);
+        }
+      };
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
     });
   });
 }
@@ -1604,7 +1683,7 @@ function retryPendingWrites() {
 
 window.addEventListener('online', function () {
   updatePendingIndicator();
-  retryPendingWrites();
+  retryPendingWrites().then(retryPendingImageTasks);
 });
 
 window.addEventListener('offline', function () {
@@ -1639,6 +1718,11 @@ async function updatePendingIndicator() {
       const records = await getPendingWrites();
       count = records.filter(function (record) {
         return record.user_id === session.user.id;
+      }).length;
+      // Image tasks too, only this user's (they use userId, not user_id).
+      const imageTasks = await getPendingImageTasks();
+      count += imageTasks.filter(function (record) {
+        return record.userId === session.user.id;
       }).length;
     }
   } catch (err) {
@@ -3111,26 +3195,72 @@ function isStorageNotFoundError(error) {
 // 'covers' and 'characters' (see buildCloudImagePath()). Returns
 // true on success, false on any failure. Never throws.
 async function uploadImageToCloud(kind, id, blob, version) {
+  return (await uploadImageToCloudResult(kind, id, blob, version, null)).ok;
+}
+
+// Same upload, but resolves { ok, error, permanent } so the image retry
+// queue can tell a permanent failure (bad request, auth/RLS, too large)
+// from a retryable one. If expectedUserId is given, it refuses to upload
+// unless that is still the signed-in user, so a task queued for one
+// account can never write into another account's folder. Never throws.
+async function uploadImageToCloudResult(kind, id, blob, version, expectedUserId) {
   try {
     if (!(blob instanceof Blob)) {
       console.error('uploadImageToCloud: expected a Blob, got:', blob);
-      return false;
+      return { ok: false, error: 'not a Blob', permanent: true };
+    }
+    const signedInUserId = await getCloudImageUserId();
+    if (!signedInUserId) {
+      return { ok: false, error: 'not signed in', permanent: false };
+    }
+    if (expectedUserId && signedInUserId !== expectedUserId) {
+      return { ok: false, error: 'different user signed in', permanent: false };
     }
     const path = await buildCloudImagePath(kind, id, version);
-    if (!path) return false;
+    if (!path) return { ok: false, error: 'invalid cloud path', permanent: true };
 
     const { error } = await supabaseClient.storage
       .from('images')
       .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
     if (error) {
       console.error('uploadImageToCloud failed for', path, error);
-      return false;
+      return { ok: false, error: describeStorageError(error), permanent: isPermanentStorageError(error) };
     }
-    return true;
+    return { ok: true };
   } catch (error) {
     console.error('uploadImageToCloud failed:', error);
-    return false;
+    return { ok: false, error: describeStorageError(error), permanent: false };
   }
+}
+
+// The HTTP status of a Supabase Storage error, or 0 if there isn't one
+// (network failure, thrown TypeError, ...). Storage sometimes reports
+// the real status in statusCode (e.g. "403" for an RLS denial) with a
+// generic 400 in status, so a numeric statusCode wins.
+function getStorageErrorStatus(error) {
+  if (!error) return 0;
+  const code = Number(error.statusCode);
+  if (Number.isInteger(code) && code >= 100) return code;
+  const status = Number(error.status);
+  if (Number.isInteger(status) && status >= 100) return status;
+  const original = error.originalError;
+  if (original && Number.isInteger(original.status)) return original.status;
+  return 0;
+}
+
+const PERMANENT_STORAGE_STATUSES = [400, 401, 403, 404, 413, 415, 422];
+
+// Permanent: 400/401/403/404/413/415/422. Everything else - network
+// errors (no status), 408, 429, 5xx, unknown - is retryable.
+function isPermanentStorageError(error) {
+  return PERMANENT_STORAGE_STATUSES.indexOf(getStorageErrorStatus(error)) !== -1;
+}
+
+function describeStorageError(error) {
+  if (!error) return 'unknown error';
+  const status = getStorageErrorStatus(error);
+  const message = String(error.message || error);
+  return (status ? status + ' ' : '') + message.slice(0, 200);
 }
 
 // Downloads one image using the signed-in user's credentials (the
@@ -3225,9 +3355,36 @@ async function downloadCoverFromCloud(entryId, version) {
 // exists. Returns true on success, false on any failure (logged).
 // Never throws. Callers run it in the background via the entry's queue.
 async function removeCloudCoverFiles(entryId, keepVersion) {
+  return (await removeCloudCoverFilesResult(entryId, keepVersion, null)).ok;
+}
+
+// removeCloudCoverFiles() returning { ok, error, permanent }. See
+// removeCloudImageFolderResult().
+async function removeCloudCoverFilesResult(entryId, keepVersion, expectedUserId) {
+  if (!isValidCloudImageId(entryId)) {
+    console.error('Cloud cover: id must be a non-empty string with no slashes, got:', entryId);
+    return { ok: false, error: 'invalid id', permanent: true };
+  }
+  return removeCloudImageFolderResult(
+    function () { return buildCoverCloudPaths(entryId); },
+    keepVersion, 'covers for entry ' + entryId, expectedUserId);
+}
+
+// Shared by the cover and character cleanup: removes every file in
+// paths.folder except keepVersion (null removes them all) plus the
+// legacy single-file path. Resolves { ok, error, permanent }. Never
+// throws. With expectedUserId, refuses to run for any other user.
+async function removeCloudImageFolderResult(buildPaths, keepVersion, label, expectedUserId) {
   try {
-    const paths = await buildCoverCloudPaths(entryId);
-    if (!paths) return false;
+    const signedInUserId = await getCloudImageUserId();
+    if (!signedInUserId) {
+      return { ok: false, error: 'not signed in', permanent: false };
+    }
+    if (expectedUserId && signedInUserId !== expectedUserId) {
+      return { ok: false, error: 'different user signed in', permanent: false };
+    }
+    const paths = await buildPaths();
+    if (!paths) return { ok: false, error: 'invalid cloud path', permanent: true };
 
     const keepName = keepVersion == null ? null : String(keepVersion);
     const toRemove = [];
@@ -3238,8 +3395,8 @@ async function removeCloudCoverFiles(entryId, keepVersion) {
         .from('images')
         .list(paths.folder, { limit: pageSize, offset: offset });
       if (error) {
-        console.error('Could not list cloud covers for entry ' + entryId + ':', error);
-        return false;
+        console.error('Could not list cloud ' + label + ':', error);
+        return { ok: false, error: describeStorageError(error), permanent: isPermanentStorageError(error) };
       }
       const page = data || [];
       page.forEach(function (item) {
@@ -3251,20 +3408,20 @@ async function removeCloudCoverFiles(entryId, keepVersion) {
       if (page.length < pageSize) break;
       offset += pageSize;
     }
-    // Legacy single-file cover; remove() is a no-op if it's not there.
+    // Legacy single file; remove() is a no-op if it's not there.
     toRemove.push(paths.legacy);
 
     const { error } = await supabaseClient.storage
       .from('images')
       .remove(toRemove);
     if (error && !isStorageNotFoundError(error)) {
-      console.error('Could not remove cloud covers for entry ' + entryId + ':', error);
-      return false;
+      console.error('Could not remove cloud ' + label + ':', error);
+      return { ok: false, error: describeStorageError(error), permanent: isPermanentStorageError(error) };
     }
-    return true;
+    return { ok: true };
   } catch (error) {
-    console.error('Could not remove cloud covers for entry ' + entryId + ':', error);
-    return false;
+    console.error('Could not remove cloud ' + label + ':', error);
+    return { ok: false, error: describeStorageError(error), permanent: false };
   }
 }
 
@@ -3293,12 +3450,17 @@ function getCoverCloudState(entryId) {
 }
 
 // Adds task to the end of this entry's queue. Errors are logged, and
-// never break the queue for the tasks after it.
+// never break the queue for the tasks after it. Returns a promise for
+// the task's own result (undefined if it threw). Never await this from
+// INSIDE a task on the same chain - it would wait for itself.
 function queueCoverCloudTask(entryId, task) {
   const state = getCoverCloudState(entryId);
-  state.chain = state.chain.then(task).catch(function (error) {
+  const result = state.chain.then(function () { return task(); }).catch(function (error) {
     console.error('Cover cloud task failed for entry ' + entryId + ':', error);
+    return undefined;
   });
+  state.chain = result;
+  return result;
 }
 
 // Makes any queued or in-flight upload for this entry stale, so it
@@ -3312,97 +3474,143 @@ function cancelPendingCoverUploads(entryId) {
 // success stamps entry.coverVersion and syncs the entry. On any
 // failure (including not being logged in) it logs, leaves coverVersion
 // as it was, and shows the small non-blocking banner.
+// If the upload can't be attempted (offline / not signed in) or fails,
+// an image task is queued (see "Image retry queue") so
+// retryPendingImageTasks() finishes it later from the local copy.
 function uploadCoverInBackground(entry, pickedFile) {
   const state = getCoverCloudState(entry.id);
   state.latest += 1;
   const myTurn = state.latest;
+  const entryId = entry.id;
+  const requestedAt = Date.now();
+  // The account these entries belong to - the only one this cover may
+  // ever be uploaded for.
+  const ownerUserId = manhwaEntriesOwnerId;
+  function isCurrent() {
+    return myTurn === state.latest;
+  }
 
-  queueCoverCloudTask(entry.id, async function () {
+  queueCoverCloudTask(entryId, async function () {
     // A newer pick (or a remove) is queued behind this one - skip.
-    if (myTurn !== state.latest) {
+    if (!isCurrent()) {
       return;
     }
 
-    let resized;
-    try {
-      resized = await resizeImageForUpload(pickedFile);
-    } catch (error) {
-      console.error('Could not prepare cover for upload (entry ' + entry.id + '):', error);
+    const userId = await getImageSessionUserId();
+    if (!userId || !navigator.onLine || (ownerUserId && userId !== ownerUserId)) {
+      console.warn('Cover upload for entry ' + entryId + ' postponed (offline or not signed in); queued.');
       showSyncBanner('coverNotUploaded');
-      return;
-    }
-    if (myTurn !== state.latest) {
+      enqueueImageTask('cover', entryId, entryId, ownerUserId || userId, requestedAt, null);
       return;
     }
 
-    // Decide the new version BEFORE uploading, and upload to its own
-    // path. entry.coverVersion is NOT touched until the upload has
-    // succeeded, so on failure the entry still points at a file that
-    // exists. (Bumped past the current version on the off chance the
-    // clock is behind it.)
-    const before = findEntryById(entry.id);
-    if (!before) {
-      return;
+    const result = await runCoverUpload(entryId, pickedFile, isCurrent, userId);
+    if (result.status === 'failed' && isCurrent()) {
+      showSyncBanner('coverNotUploaded');
     }
-    let newVersion = Date.now();
-    if (isValidCoverVersion(before.coverVersion) && newVersion <= before.coverVersion) {
-      newVersion = before.coverVersion + 1;
-    }
+    handleImmediateUploadResult('cover', entryId, entryId, userId, requestedAt, result);
+  });
+}
 
-    const uploaded = await uploadImageToCloud('covers', entry.id, resized, newVersion);
-    if (!uploaded) {
-      console.error('Cover upload failed for entry ' + entry.id + '; coverVersion left unchanged.');
-      if (myTurn === state.latest) {
-        showSyncBanner('coverNotUploaded');
+// The cover upload flow itself, shared by uploadCoverInBackground() (the
+// picked file) and reconcileImage() (the local copy, read at retry
+// time). Must run as a task on this entry's cover chain. isCurrent()
+// says whether a newer pick/remove/delete has superseded this run.
+// Resolves one of:
+//   { status: 'uploaded', version, cleanup }  cleanup: Promise<{ok,...}>
+//   { status: 'stale' }    superseded; the newer task decides
+//   { status: 'gone' }     the entry was deleted meanwhile
+//   { status: 'failed', error, permanent, stage }
+async function runCoverUpload(entryId, sourceBlob, isCurrent, expectedUserId) {
+  let resized;
+  try {
+    resized = await resizeImageForUpload(sourceBlob);
+  } catch (error) {
+    console.error('Could not prepare cover for upload (entry ' + entryId + '):', error);
+    return { status: 'failed', error: describeStorageError(error), permanent: true, stage: 'resize' };
+  }
+  if (!isCurrent()) {
+    return { status: 'stale' };
+  }
+
+  // Decide the new version BEFORE uploading, and upload to its own
+  // path. entry.coverVersion is NOT touched until the upload has
+  // succeeded, so on failure the entry still points at a file that
+  // exists. (Bumped past the current version on the off chance the
+  // clock is behind it.)
+  const before = findEntryById(entryId);
+  if (!before) {
+    return { status: 'gone' };
+  }
+  let newVersion = Date.now();
+  if (isValidCoverVersion(before.coverVersion) && newVersion <= before.coverVersion) {
+    newVersion = before.coverVersion + 1;
+  }
+
+  const uploaded = await uploadImageToCloudResult('covers', entryId, resized, newVersion, expectedUserId);
+  if (!uploaded.ok) {
+    console.error('Cover upload failed for entry ' + entryId + '; coverVersion left unchanged.');
+    return { status: 'failed', error: uploaded.error, permanent: uploaded.permanent, stage: 'upload' };
+  }
+
+  // Uploaded, but something newer was requested while we were
+  // uploading. The newer task runs next and decides coverVersion (and
+  // its cleanup removes the file we just uploaded).
+  if (!isCurrent()) {
+    return { status: 'stale' };
+  }
+
+  // Stamp only coverVersion, on the live entry with that id. If it's
+  // gone (deleted), do nothing; its delete cleans the cloud.
+  const live = findEntryById(entryId);
+  if (!live) {
+    return { status: 'gone' };
+  }
+  live.coverVersion = newVersion;
+  // The local cover IS this version, so the download sync must never
+  // fetch it back. Written right away, before anything else can run.
+  setLocalCoverVersion(entryId, newVersion).catch(function (error) {
+    console.error('Could not record local cover version for entry ' + entryId + ':', error);
+  });
+  touchEntry(live);
+  saveToStorage();
+
+  // Not awaited here, so the chain isn't held up by the entry sync.
+  return {
+    status: 'uploaded',
+    version: newVersion,
+    cleanup: syncEntryThenRemoveOlderCovers(entryId, newVersion, isCurrent, expectedUserId)
+  };
+}
+
+// Only once the entry (pointing at keepVersion) has synced are the
+// older cloud files removed - until then other devices may still need
+// them. Resolves { ok, error, permanent }; ok:false + retryable if the
+// entry didn't sync. The removal runs as its own task on the entry's
+// chain, so it never runs alongside another upload/delete for it.
+function syncEntryThenRemoveOlderCovers(entryId, keepVersion, isCurrent, expectedUserId) {
+  const live = findEntryById(entryId);
+  if (!live) {
+    return Promise.resolve({ ok: true });
+  }
+  return syncEntryToSupabase(live).then(function (synced) {
+    if (!synced) {
+      console.warn('Entry ' + entryId + ' not synced yet; older cloud covers kept for now.');
+      return { ok: false, error: 'entry not synced yet', permanent: false };
+    }
+    return queueCoverCloudTask(entryId, async function () {
+      // A newer pick/remove/delete came along: its own task handles
+      // cleanup, and our keep-version may no longer be the right one.
+      if (!isCurrent()) {
+        return { ok: true };
       }
-      return;
-    }
-
-    // Uploaded, but something newer was requested while we were
-    // uploading. The newer task runs next and decides coverVersion (and
-    // its cleanup removes the file we just uploaded).
-    if (myTurn !== state.latest) {
-      return;
-    }
-
-    // "entry" was captured when the cover was picked. Stamp only
-    // coverVersion, on the live entry with that id. If it's gone
-    // (deleted), do nothing; its delete cleans the cloud.
-    const live = findEntryById(entry.id);
-    if (!live) {
-      return;
-    }
-    live.coverVersion = newVersion;
-    // The local cover IS this version, so the download sync must never
-    // fetch it back. Written right away, before anything else can run.
-    setLocalCoverVersion(entry.id, newVersion).catch(function (error) {
-      console.error('Could not record local cover version for entry ' + entry.id + ':', error);
-    });
-    touchEntry(live);
-    saveToStorage();
-
-    // Not awaited, so the queue isn't held up by the entry sync. Only
-    // once the entry (pointing at the new version) has synced are the
-    // older cloud files removed - until then other devices may still
-    // need them. If the sync fails, the old files simply stay for now.
-    syncEntryToSupabase(live).then(function (synced) {
-      if (!synced) {
-        console.warn('Entry ' + entry.id + ' not synced yet; older cloud covers kept for now.');
-        return;
+      const cleaned = await removeCloudCoverFilesResult(entryId, keepVersion, expectedUserId);
+      if (!cleaned.ok) {
+        console.error('Could not clean up older cloud covers for entry ' + entryId + '.');
       }
-      // Queued on the entry's chain so it can never run alongside
-      // another upload/delete for this comic.
-      queueCoverCloudTask(entry.id, async function () {
-        // A newer pick/remove/delete came along: its own task handles
-        // cleanup, and our keep-version may no longer be the right one.
-        if (myTurn !== state.latest) {
-          return;
-        }
-        const cleaned = await removeCloudCoverFiles(entry.id, newVersion);
-        if (!cleaned) {
-          console.error('Could not clean up older cloud covers for entry ' + entry.id + '.');
-        }
-      });
+      return cleaned;
+    }).then(function (cleaned) {
+      return cleaned || { ok: false, error: 'cleanup task threw', permanent: false };
     });
   });
 }
@@ -3411,14 +3619,24 @@ function uploadCoverInBackground(entry, pickedFile) {
 // deleted. Cancels any pending upload, then - once any upload already
 // in flight has finished, so it can't put a file back afterwards -
 // removes every cloud file under "<userId>/covers/<entryId>/" plus the
-// legacy "<userId>/covers/<entryId>" file. Failures are only logged.
+// legacy "<userId>/covers/<entryId>" file. If that can't be attempted
+// (offline / not signed in) or fails, an image task is queued.
 function deleteCoverFromCloudInBackground(entryId) {
   cancelPendingCoverUploads(entryId);
+  const requestedAt = Date.now();
+  const ownerUserId = manhwaEntriesOwnerId;
   queueCoverCloudTask(entryId, async function () {
-    const deleted = await removeCloudCoverFiles(entryId, null);
-    if (!deleted) {
+    const userId = await getImageSessionUserId();
+    if (!userId || !navigator.onLine || (ownerUserId && userId !== ownerUserId)) {
+      console.warn('Cloud cover delete for entry ' + entryId + ' postponed (offline or not signed in); queued.');
+      enqueueImageTask('cover', entryId, entryId, ownerUserId || userId, requestedAt, null);
+      return;
+    }
+    const deleted = await removeCloudCoverFilesResult(entryId, null, userId);
+    if (!deleted.ok) {
       console.error('Could not delete cover from cloud for entry ' + entryId + '.');
     }
+    handleImmediateDeleteResult('cover', entryId, entryId, userId, requestedAt, deleted);
   });
 }
 
@@ -4319,11 +4537,16 @@ function getCharacterImageCloudState(characterId) {
   return state;
 }
 
+// Same contract as queueCoverCloudTask(): returns a promise for the
+// task's result (undefined if it threw).
 function queueCharacterImageCloudTask(characterId, task) {
   const state = getCharacterImageCloudState(characterId);
-  state.chain = state.chain.then(task).catch(function (error) {
+  const result = state.chain.then(function () { return task(); }).catch(function (error) {
     console.error('Character image cloud task failed for ' + characterId + ':', error);
+    return undefined;
   });
+  state.chain = result;
+  return result;
 }
 
 // Makes any queued or in-flight upload for this character stale, so it
@@ -4337,47 +4560,17 @@ function cancelPendingCharacterImageUploads(characterId) {
 // them all), plus the legacy "<userId>/characters/<characterId>" file.
 // Returns true on success, false on failure (logged). Never throws.
 async function removeCloudCharacterFiles(characterId, keepVersion) {
-  try {
-    const paths = await buildCharacterCloudPaths(characterId);
-    if (!paths) return false;
+  return (await removeCloudCharacterFilesResult(characterId, keepVersion, null)).ok;
+}
 
-    const keepName = keepVersion == null ? null : String(keepVersion);
-    const toRemove = [];
-    const pageSize = 100;
-    let offset = 0;
-    while (true) {
-      const { data, error } = await supabaseClient.storage
-        .from('images')
-        .list(paths.folder, { limit: pageSize, offset: offset });
-      if (error) {
-        console.error('Could not list cloud images for character ' + characterId + ':', error);
-        return false;
-      }
-      const page = data || [];
-      page.forEach(function (item) {
-        // item.id is null for sub-folders; only real files are removed.
-        if (item && item.name && item.id !== null && item.name !== keepName) {
-          toRemove.push(paths.folder + '/' + item.name);
-        }
-      });
-      if (page.length < pageSize) break;
-      offset += pageSize;
-    }
-    // Legacy single file; remove() is a no-op if it's not there.
-    toRemove.push(paths.legacy);
-
-    const { error } = await supabaseClient.storage
-      .from('images')
-      .remove(toRemove);
-    if (error && !isStorageNotFoundError(error)) {
-      console.error('Could not remove cloud images for character ' + characterId + ':', error);
-      return false;
-    }
-    return true;
-  } catch (error) {
-    console.error('Could not remove cloud images for character ' + characterId + ':', error);
-    return false;
+async function removeCloudCharacterFilesResult(characterId, keepVersion, expectedUserId) {
+  if (!isValidCloudImageId(characterId)) {
+    console.error('Cloud character image: id must be a non-empty string with no slashes, got:', characterId);
+    return { ok: false, error: 'invalid id', permanent: true };
   }
+  return removeCloudImageFolderResult(
+    function () { return buildCharacterCloudPaths(characterId); },
+    keepVersion, 'images for character ' + characterId, expectedUserId);
 }
 
 // Called (not awaited) after a picked character image has been saved
@@ -4385,82 +4578,125 @@ async function removeCloudCharacterFiles(characterId, keepVersion) {
 // and only on success stamps character.imageVersion, touches + syncs the
 // parent comic and records localImageVersion. On failure it only logs:
 // imageVersion is left unchanged and the user is never blocked.
+// If the upload can't be attempted (offline / not signed in) or fails,
+// an image task is queued so retryPendingImageTasks() finishes it later.
 function uploadCharacterImageInBackground(characterId, pickedFile) {
   const state = getCharacterImageCloudState(characterId);
   state.latest += 1;
   const myTurn = state.latest;
+  const requestedAt = Date.now();
+  const ownerUserId = manhwaEntriesOwnerId;
+  const found = findCharacterById(characterId);
+  const entryId = found ? found.entry.id : null;
+  function isCurrent() {
+    return myTurn === state.latest;
+  }
 
   queueCharacterImageCloudTask(characterId, async function () {
-    if (myTurn !== state.latest) {
+    if (!isCurrent()) {
       return; // a newer pick / remove / delete is queued behind this one
     }
 
-    let resized;
-    try {
-      resized = await resizeImageForUpload(pickedFile);
-    } catch (error) {
-      console.error('Could not prepare character image for upload (' + characterId + '):', error);
-      return;
-    }
-    if (myTurn !== state.latest) {
+    const userId = await getImageSessionUserId();
+    if (!userId || !navigator.onLine || (ownerUserId && userId !== ownerUserId)) {
+      console.warn('Character image upload for ' + characterId + ' postponed (offline or not signed in); queued.');
+      enqueueImageTask('character', characterId, entryId, ownerUserId || userId, requestedAt, null);
       return;
     }
 
-    // Version picked BEFORE uploading; imageVersion isn't touched until
-    // the upload succeeds. Bumped past the current one in case the
-    // clock is behind it.
-    const before = findCharacterById(characterId);
-    const currentVersion = before ? before.character.imageVersion : undefined;
-    let newVersion = Date.now();
-    if (isValidCoverVersion(currentVersion) && newVersion <= currentVersion) {
-      newVersion = currentVersion + 1;
-    }
+    const result = await runCharacterImageUpload(characterId, pickedFile, isCurrent, userId);
+    handleImmediateUploadResult('character', characterId, entryId, userId, requestedAt, result);
+  });
+}
 
-    const uploaded = await uploadImageToCloud('characters', characterId, resized, newVersion);
-    if (!uploaded) {
-      console.error('Character image upload failed for ' + characterId + '; imageVersion left unchanged.');
-      return;
-    }
+// The character image upload flow, shared by
+// uploadCharacterImageInBackground() and reconcileImage(). Same contract
+// as runCoverUpload(). Must run on this character's chain.
+async function runCharacterImageUpload(characterId, sourceBlob, isCurrent, expectedUserId) {
+  let resized;
+  try {
+    resized = await resizeImageForUpload(sourceBlob);
+  } catch (error) {
+    console.error('Could not prepare character image for upload (' + characterId + '):', error);
+    return { status: 'failed', error: describeStorageError(error), permanent: true, stage: 'resize' };
+  }
+  if (!isCurrent()) {
+    return { status: 'stale' };
+  }
 
-    // Something newer was requested meanwhile: its own task decides
-    // imageVersion and cleans up the file we just uploaded.
-    if (myTurn !== state.latest) {
-      return;
-    }
-    // The character (or its whole comic) is gone - don't resync a
-    // deleted entry. Its delete task, queued after us, cleans the cloud.
-    const live = findCharacterById(characterId);
-    if (!live) {
-      return;
-    }
-    const entry = live.entry;
+  // Version picked BEFORE uploading; imageVersion isn't touched until
+  // the upload succeeds. Bumped past the current one in case the
+  // clock is behind it.
+  const before = findCharacterById(characterId);
+  if (!before) {
+    return { status: 'gone' };
+  }
+  const currentVersion = before.character.imageVersion;
+  let newVersion = Date.now();
+  if (isValidCoverVersion(currentVersion) && newVersion <= currentVersion) {
+    newVersion = currentVersion + 1;
+  }
 
-    live.character.imageVersion = newVersion;
-    // The local image IS this version, so the download sync must never
-    // fetch it back.
-    setLocalCharacterImageVersion(characterId, newVersion).catch(function (error) {
-      console.error('Could not record local image version for character ' + characterId + ':', error);
-    });
-    touchEntry(entry);
-    saveToStorage();
+  const uploaded = await uploadImageToCloudResult('characters', characterId, resized, newVersion, expectedUserId);
+  if (!uploaded.ok) {
+    console.error('Character image upload failed for ' + characterId + '; imageVersion left unchanged.');
+    return { status: 'failed', error: uploaded.error, permanent: uploaded.permanent, stage: 'upload' };
+  }
 
-    // Older cloud versions are removed only after the entry (pointing at
-    // the new version) has synced - other devices may need them until
-    // then. Not awaited, so the queue isn't held up.
-    syncEntryToSupabase(entry).then(function (synced) {
-      if (!synced) {
-        console.warn('Entry ' + entry.id + ' not synced yet; older cloud images for character ' + characterId + ' kept for now.');
-        return;
+  // Something newer was requested meanwhile: its own task decides
+  // imageVersion and cleans up the file we just uploaded.
+  if (!isCurrent()) {
+    return { status: 'stale' };
+  }
+  // The character (or its whole comic) is gone - don't resync a
+  // deleted entry. Its delete task, queued after us, cleans the cloud.
+  const live = findCharacterById(characterId);
+  if (!live) {
+    return { status: 'gone' };
+  }
+  const entry = live.entry;
+
+  live.character.imageVersion = newVersion;
+  // The local image IS this version, so the download sync must never
+  // fetch it back.
+  setLocalCharacterImageVersion(characterId, newVersion).catch(function (error) {
+    console.error('Could not record local image version for character ' + characterId + ':', error);
+  });
+  touchEntry(entry);
+  saveToStorage();
+
+  return {
+    status: 'uploaded',
+    version: newVersion,
+    cleanup: syncEntryThenRemoveOlderCharacterImages(characterId, newVersion, isCurrent, expectedUserId)
+  };
+}
+
+// Character equivalent of syncEntryThenRemoveOlderCovers(): older cloud
+// versions are removed only after the parent entry (pointing at the new
+// version) has synced.
+function syncEntryThenRemoveOlderCharacterImages(characterId, keepVersion, isCurrent, expectedUserId) {
+  const live = findCharacterById(characterId);
+  if (!live) {
+    return Promise.resolve({ ok: true });
+  }
+  const entry = live.entry;
+  return syncEntryToSupabase(entry).then(function (synced) {
+    if (!synced) {
+      console.warn('Entry ' + entry.id + ' not synced yet; older cloud images for character ' + characterId + ' kept for now.');
+      return { ok: false, error: 'entry not synced yet', permanent: false };
+    }
+    return queueCharacterImageCloudTask(characterId, async function () {
+      if (!isCurrent()) {
+        return { ok: true };
       }
-      queueCharacterImageCloudTask(characterId, async function () {
-        if (myTurn !== state.latest) {
-          return;
-        }
-        const cleaned = await removeCloudCharacterFiles(characterId, newVersion);
-        if (!cleaned) {
-          console.error('Could not clean up older cloud images for character ' + characterId + '.');
-        }
-      });
+      const cleaned = await removeCloudCharacterFilesResult(characterId, keepVersion, expectedUserId);
+      if (!cleaned.ok) {
+        console.error('Could not clean up older cloud images for character ' + characterId + '.');
+      }
+      return cleaned;
+    }).then(function (cleaned) {
+      return cleaned || { ok: false, error: 'cleanup task threw', permanent: false };
     });
   });
 }
@@ -4468,14 +4704,25 @@ function uploadCharacterImageInBackground(characterId, pickedFile) {
 // Called (not awaited) when a character's image is removed, the
 // character is deleted, or its comic is deleted. Cancels any pending
 // upload, then (after any in-flight one finishes) removes everything
-// under the character's cloud folder plus the legacy path.
-function deleteCharacterImageFromCloudInBackground(characterId) {
+// under the character's cloud folder plus the legacy path. If that
+// can't be attempted or fails, an image task is queued. entryId (the
+// character's comic) is only recorded on the task, for reference.
+function deleteCharacterImageFromCloudInBackground(characterId, entryId) {
   cancelPendingCharacterImageUploads(characterId);
+  const requestedAt = Date.now();
+  const ownerUserId = manhwaEntriesOwnerId;
   queueCharacterImageCloudTask(characterId, async function () {
-    const deleted = await removeCloudCharacterFiles(characterId, null);
-    if (!deleted) {
+    const userId = await getImageSessionUserId();
+    if (!userId || !navigator.onLine || (ownerUserId && userId !== ownerUserId)) {
+      console.warn('Cloud delete for character ' + characterId + ' postponed (offline or not signed in); queued.');
+      enqueueImageTask('character', characterId, entryId || null, ownerUserId || userId, requestedAt, null);
+      return;
+    }
+    const deleted = await removeCloudCharacterFilesResult(characterId, null, userId);
+    if (!deleted.ok) {
       console.error('Could not delete cloud images for character ' + characterId + '.');
     }
+    handleImmediateDeleteResult('character', characterId, entryId || null, userId, requestedAt, deleted);
   });
 }
 
@@ -4694,6 +4941,505 @@ async function syncCharacterImagesFromCloud() {
 }
 window.syncCharacterImagesFromCloud = syncCharacterImagesFromCloud;
 
+// --- Image retry queue: enqueue, reconcile, retry runner ---
+// Cover and character uploads/cloud deletes that failed or couldn't be
+// attempted are recorded as image tasks in the offline queue (see
+// "Image retry queue" near getPendingWrites()). retryPendingImageTasks()
+// runs them via reconcileImage(), which makes the cloud match whatever
+// the LIVE local state is at that moment - so a record only says "this
+// image needs attention", never what to upload.
+//
+// requestedAt is the Date.now() of the user action that queued it. Cloud
+// versions are also Date.now() stamps taken at upload time, so a
+// request newer than the entry's current version means the local copy
+// is newer than the cloud one (localCoverVersion can't tell us that: a
+// pick deliberately records the OLD cloud version there, see the
+// coverImageInput listener). The catch-up scan queues with requestedAt
+// 0, meaning "upload only if there's no cloud version at all".
+
+const IMAGE_RETRY_DELAYS_MS = [30 * 1000, 2 * 60 * 1000, 10 * 60 * 1000, 60 * 60 * 1000];
+const IMAGE_RETRY_DAILY_MS = 24 * 60 * 60 * 1000;
+const IMAGE_TASK_MAX_ATTEMPTS = 8;
+const MAX_CONCURRENT_IMAGE_TASKS = 2;
+const IMAGE_CATCH_UP_LIMIT = 5;
+
+// Record keys with a reconcile running right now, so the same image is
+// never reconciled twice at once.
+const imageTasksInFlight = new Set();
+let imageNotSyncedMessageShown = false;
+let imageCatchUpScanDone = false;
+let imageRetryTimer = null;
+
+// Delay after the Nth failed attempt: 30 s, 2 min, 10 min, 1 h, then daily.
+function getImageRetryDelay(attempts) {
+  return IMAGE_RETRY_DELAYS_MS[attempts - 1] || IMAGE_RETRY_DAILY_MS;
+}
+
+// The signed-in user's id, or null. Reads the saved login locally (no
+// network), and doesn't log when signed out.
+async function getImageSessionUserId() {
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    return session ? session.user.id : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+// One non-blocking banner per page session.
+function notifyImageNotSynced() {
+  if (imageNotSyncedMessageShown) {
+    return;
+  }
+  imageNotSyncedMessageShown = true;
+  showSyncBanner('imageNotSynced');
+}
+
+// Saves (or overwrites) the one task record for this image. An older
+// request never overwrites a newer one, and a record belonging to a
+// different user is never touched. failure is null when the attempt
+// couldn't be made at all (due right away, e.g. on the next 'online'),
+// or { error } after a failed attempt (counts as attempt 1, 30 s wait).
+function enqueueImageTask(kind, id, entryId, userId, requestedAt, failure) {
+  if (!userId || !isValidCloudImageId(id)) {
+    console.error('Image task not queued for ' + kind + ' ' + id + ': no user or bad id.');
+    return Promise.resolve();
+  }
+  const key = getImageQueueKey(kind, id);
+  const now = Date.now();
+  const attempts = failure ? 1 : 0;
+  return updateImageTaskRecord(key, function (existing) {
+    if (existing && existing.userId !== userId) {
+      console.warn('Image task ' + key + ' belongs to another account; left alone.');
+      return undefined;
+    }
+    if (existing && (existing.requestedAt || 0) > requestedAt) {
+      return undefined; // a newer request is already queued
+    }
+    return {
+      entry_id: key,
+      kind: kind,
+      id: id,
+      entryId: entryId || null,
+      userId: userId,
+      requestedAt: requestedAt,
+      attempts: attempts,
+      nextAttemptAt: attempts ? now + getImageRetryDelay(attempts) : now,
+      lastError: failure ? String(failure.error || 'failed') : null
+    };
+  }).then(function () {
+    updatePendingIndicator();
+    scheduleImageRetryTimer();
+  }).catch(function (error) {
+    console.error('Could not queue image task ' + key + ':', error);
+  });
+}
+
+// Drops this image's record if it isn't newer than requestedAt (used
+// after an immediate success: an older failed attempt is now obsolete).
+function clearImageTaskIfNotNewer(kind, id, userId, requestedAt) {
+  const key = getImageQueueKey(kind, id);
+  return updateImageTaskRecord(key, function (existing) {
+    if (!existing || existing.userId !== userId) {
+      return undefined;
+    }
+    return (existing.requestedAt || 0) <= requestedAt ? null : undefined;
+  }).then(updatePendingIndicator).catch(function (error) {
+    console.error('Could not clear image task ' + key + ':', error);
+  });
+}
+
+// What the immediate (Choose Image) flows do with runCoverUpload() /
+// runCharacterImageUpload()'s result.
+function handleImmediateUploadResult(kind, id, entryId, userId, requestedAt, result) {
+  if (result.status === 'uploaded') {
+    clearImageTaskIfNotNewer(kind, id, userId, requestedAt);
+    result.cleanup.then(function (cleaned) {
+      if (cleaned.ok) {
+        return;
+      }
+      if (cleaned.permanent) {
+        // Only stale older versions are left behind; nothing for the
+        // user to act on, so log instead of showing the message.
+        console.error('Old cloud versions for ' + kind + ' ' + id + ' could not be removed:', cleaned.error);
+        return;
+      }
+      // Entry didn't sync or cleanup failed: reconcile cleans up later.
+      enqueueImageTask(kind, id, entryId, userId, requestedAt, { error: cleaned.error });
+    });
+    return;
+  }
+  if (result.status === 'stale' || result.status === 'gone') {
+    return; // the newer action / the delete owns this image now
+  }
+  // Failed. A cloud rejection that can never succeed is dropped with
+  // the message. A resize failure of the picked file is queued: the
+  // retry resizes the saved local copy instead.
+  if (result.permanent && result.stage !== 'resize') {
+    console.error('Image ' + kind + ' ' + id + ' rejected by the cloud; not retrying:', result.error);
+    clearImageTaskIfNotNewer(kind, id, userId, requestedAt);
+    notifyImageNotSynced();
+    return;
+  }
+  enqueueImageTask(kind, id, entryId, userId, requestedAt, { error: result.error });
+}
+
+// Same for the immediate cloud deletes.
+function handleImmediateDeleteResult(kind, id, entryId, userId, requestedAt, result) {
+  if (result.ok) {
+    clearImageTaskIfNotNewer(kind, id, userId, requestedAt);
+    return;
+  }
+  if (result.permanent) {
+    console.error('Cloud delete for ' + kind + ' ' + id + ' rejected; not retrying:', result.error);
+    clearImageTaskIfNotNewer(kind, id, userId, requestedAt);
+    notifyImageNotSynced();
+    return;
+  }
+  enqueueImageTask(kind, id, entryId, userId, requestedAt, { error: result.error });
+}
+
+// Turns a { ok:false, error, permanent } / failed-upload result into a
+// reconcile outcome.
+function toImageFailureOutcome(result) {
+  return result.permanent
+    ? { permanent: true, error: result.error }
+    : { retry: true, error: result.error };
+}
+
+// Makes the cloud match the live local state for ONE image task.
+// Resolves an outcome:
+//   { done: true }              record can be dropped
+//   { stale: true }             a newer local action took over; leave it
+//   { retry: true, error }      try again later (backoff)
+//   { permanent: true, error }  drop it, show the message
+// Runs on the image's own cloud chain, so it never overlaps with a pick,
+// remove, delete or another cleanup for the same image.
+async function reconcileImage(record, userId) {
+  const isCover = record.kind === 'cover';
+  const id = record.id;
+  const state = isCover ? getCoverCloudState(id) : getCharacterImageCloudState(id);
+  const queueTask = isCover ? queueCoverCloudTask : queueCharacterImageCloudTask;
+  const generation = coverSyncGeneration;
+
+  const step = await queueTask(id, async function () {
+    const turnAtStart = state.latest;
+    function isCurrent() {
+      return state.latest === turnAtStart && generation === coverSyncGeneration;
+    }
+    function removeAll() {
+      return isCover
+        ? removeCloudCoverFilesResult(id, null, userId)
+        : removeCloudCharacterFilesResult(id, null, userId);
+    }
+
+    // Re-read the live entry / character by id.
+    let liveEntry;
+    let liveImageOwner; // the object holding hasImage + the version field
+    if (isCover) {
+      liveEntry = findEntryById(id);
+      liveImageOwner = liveEntry;
+    } else {
+      const found = findCharacterById(id);
+      liveEntry = found ? found.entry : null;
+      liveImageOwner = found ? found.character : null;
+    }
+    const versionField = isCover ? 'coverVersion' : 'imageVersion';
+
+    // Deleted: remove every cloud file for it (and the legacy path).
+    if (!liveImageOwner) {
+      const removed = await removeAll();
+      return removed.ok ? { done: true } : toImageFailureOutcome(removed);
+    }
+
+    // Removed locally: delete the cloud folder, then clear the version
+    // field only if it's still set (and nothing newer happened).
+    if (!liveImageOwner.hasImage) {
+      const removed = await removeAll();
+      if (!removed.ok) {
+        return toImageFailureOutcome(removed);
+      }
+      if (!isCurrent()) {
+        return { stale: true };
+      }
+      const again = isCover ? findEntryById(id) : findCharacterById(id);
+      const againOwner = again ? (isCover ? again : again.character) : null;
+      const againEntry = again ? (isCover ? again : again.entry) : null;
+      if (againOwner && !againOwner.hasImage && againOwner[versionField] !== undefined) {
+        delete againOwner[versionField];
+        touchEntry(againEntry);
+        saveToStorage();
+        syncEntryToSupabase(againEntry);
+      }
+      return { done: true };
+    }
+
+    const status = isCover ? await getLocalCoverStatus(id) : await getLocalCharacterImageStatus(id);
+    if (!status.hasLocal) {
+      console.warn('Image task ' + record.entry_id + ': hasImage is true but there is no local image on this device; dropping the task.');
+      return { done: true };
+    }
+
+    const cloudVersion = isValidCoverVersion(liveImageOwner[versionField]) ? liveImageOwner[versionField] : null;
+    const localIsNewer = cloudVersion === null || (record.requestedAt || 0) > cloudVersion;
+
+    if (localIsNewer) {
+      // Read the blob from the local copy NOW, then the same upload flow
+      // Choose Image uses.
+      const blob = isCover ? await loadImageForComic(id) : await loadImageForCharacter(id);
+      if (!(blob instanceof Blob)) {
+        console.warn('Image task ' + record.entry_id + ': local image could not be read; dropping the task.');
+        return { done: true };
+      }
+      if (!isCurrent()) {
+        return { stale: true };
+      }
+      const result = isCover
+        ? await runCoverUpload(id, blob, isCurrent, userId)
+        : await runCharacterImageUpload(id, blob, isCurrent, userId);
+      if (result.status === 'uploaded') {
+        return { cleanup: result.cleanup };
+      }
+      if (result.status === 'stale') {
+        return { stale: true };
+      }
+      if (result.status === 'gone') {
+        // Deleted mid-upload: the next run removes whatever was uploaded.
+        return { retry: true, error: 'deleted during upload' };
+      }
+      return toImageFailureOutcome(result);
+    }
+
+    // The entry points at a cloud version this device has locally: only
+    // remove stale older versions (after the entry has synced).
+    if (status.version === cloudVersion) {
+      return {
+        cleanup: isCover
+          ? syncEntryThenRemoveOlderCovers(id, cloudVersion, isCurrent, userId)
+          : syncEntryThenRemoveOlderCharacterImages(id, cloudVersion, isCurrent, userId)
+      };
+    }
+
+    // The cloud holds a newer image from another device; the download
+    // sync brings it here. Nothing for this task to do.
+    return { done: true };
+  });
+
+  if (!step) {
+    return { retry: true, error: 'reconcile task threw' };
+  }
+  // Awaited here, OUTSIDE the chain task: the cleanup queues its own
+  // task on the same chain.
+  if (step.cleanup) {
+    const cleaned = await step.cleanup;
+    return cleaned.ok ? { done: true } : toImageFailureOutcome(cleaned);
+  }
+  return step;
+}
+
+// Runs one record and updates or drops it. Only ever changes the record
+// if it's still the same request (same requestedAt) for the same user -
+// a newer enqueue made meanwhile is left for the next run.
+async function processImageTask(record, userId) {
+  const key = record.entry_id;
+  if (imageTasksInFlight.has(key)) {
+    return;
+  }
+  imageTasksInFlight.add(key);
+  try {
+    let outcome;
+    try {
+      outcome = await reconcileImage(record, userId);
+    } catch (error) {
+      console.error('Image task ' + key + ' failed:', error);
+      outcome = { retry: true, error: describeStorageError(error) };
+    }
+    if (outcome.stale) {
+      return;
+    }
+
+    function isSameRequest(existing) {
+      return existing && existing.userId === userId &&
+        (existing.requestedAt || 0) === (record.requestedAt || 0);
+    }
+
+    if (outcome.done) {
+      await updateImageTaskRecord(key, function (existing) {
+        return isSameRequest(existing) ? null : undefined;
+      });
+      return;
+    }
+
+    const attempts = (record.attempts || 0) + 1;
+    if (outcome.permanent || attempts >= IMAGE_TASK_MAX_ATTEMPTS) {
+      console.error('Image task ' + key + ' dropped after ' + attempts + ' attempt(s): ' + outcome.error);
+      await updateImageTaskRecord(key, function (existing) {
+        return isSameRequest(existing) ? null : undefined;
+      });
+      notifyImageNotSynced();
+      return;
+    }
+
+    console.warn('Image task ' + key + ' will retry (attempt ' + attempts + '): ' + outcome.error);
+    await updateImageTaskRecord(key, function (existing) {
+      if (!isSameRequest(existing)) {
+        return undefined;
+      }
+      return Object.assign({}, existing, {
+        attempts: attempts,
+        nextAttemptAt: Date.now() + getImageRetryDelay(attempts),
+        lastError: String(outcome.error || 'failed')
+      });
+    });
+  } finally {
+    imageTasksInFlight.delete(key);
+  }
+}
+
+// Retries due image tasks for the signed-in user, at most 2 at a time.
+// Skips when offline, signed out, or before this user's library has
+// loaded (reconcile reads live entries, and "entry not found" would
+// otherwise look like a delete). Called right after retryPendingWrites()
+// finishes. If called while running, it runs once more afterwards; that
+// can't loop quickly because failed records are pushed out by backoff.
+let imageRetryRunPromise = null;
+let imageRetryRerunRequested = false;
+function retryPendingImageTasks() {
+  if (imageRetryRunPromise) {
+    imageRetryRerunRequested = true;
+    return imageRetryRunPromise;
+  }
+  imageRetryRunPromise = (async function () {
+    try {
+      const userId = await getImageSessionUserId();
+      if (!userId || !navigator.onLine || libraryLoadState !== 'loaded' ||
+          manhwaEntriesOwnerId !== userId) {
+        return;
+      }
+      const now = Date.now();
+      const due = (await getPendingImageTasks()).filter(function (record) {
+        return record.userId === userId && (record.nextAttemptAt || 0) <= now;
+      });
+
+      let nextIndex = 0;
+      async function worker() {
+        while (nextIndex < due.length) {
+          const record = due[nextIndex++];
+          // Stop if the user changed or we went offline meanwhile.
+          if (!navigator.onLine || (await getImageSessionUserId()) !== userId) {
+            return;
+          }
+          await processImageTask(record, userId);
+        }
+      }
+      const workers = [];
+      for (let i = 0; i < MAX_CONCURRENT_IMAGE_TASKS; i++) {
+        workers.push(worker());
+      }
+      await Promise.all(workers);
+
+      // Once per page session, after the runner has finished.
+      if (!imageCatchUpScanDone && navigator.onLine &&
+          (await getImageSessionUserId()) === userId) {
+        imageCatchUpScanDone = true;
+        if ((await runImageCatchUpScan(userId)) > 0) {
+          imageRetryRerunRequested = true;
+        }
+      }
+    } catch (error) {
+      console.error('Could not retry pending image tasks:', error);
+    } finally {
+      imageRetryRunPromise = null;
+      updatePendingIndicator();
+      scheduleImageRetryTimer();
+      if (imageRetryRerunRequested) {
+        imageRetryRerunRequested = false;
+        retryPendingImageTasks();
+      }
+    }
+  })();
+  return imageRetryRunPromise;
+}
+window.retryPendingImageTasks = retryPendingImageTasks;
+
+// One timer for the earliest FUTURE nextAttemptAt of this user's tasks,
+// so backoff retries happen even with no online/foreground event. Tasks
+// already due (e.g. queued while offline) wait for the next event
+// instead, so this never fires in a tight loop.
+async function scheduleImageRetryTimer() {
+  clearTimeout(imageRetryTimer);
+  imageRetryTimer = null;
+  try {
+    const userId = await getImageSessionUserId();
+    if (!userId) {
+      return;
+    }
+    const now = Date.now();
+    let earliest = Infinity;
+    (await getPendingImageTasks()).forEach(function (record) {
+      if (record.userId === userId && (record.nextAttemptAt || 0) > now) {
+        earliest = Math.min(earliest, record.nextAttemptAt);
+      }
+    });
+    if (earliest === Infinity) {
+      return;
+    }
+    clearTimeout(imageRetryTimer);
+    imageRetryTimer = setTimeout(function () {
+      imageRetryTimer = null;
+      retryPendingImageTasks();
+    }, Math.min(earliest - now + 1000, IMAGE_RETRY_DAILY_MS));
+  } catch (error) {
+    console.error('Could not schedule image retry:', error);
+  }
+}
+
+// Queues up to 5 images (per page session) that have hasImage true and
+// a local copy but no cloud version - covers/character images whose
+// upload failed before this retry queue existed. Skips images that
+// already have a task. Returns how many it queued.
+async function runImageCatchUpScan(userId) {
+  let queued = 0;
+  try {
+    const existingKeys = new Set((await getPendingImageTasks()).map(function (record) {
+      return record.entry_id;
+    }));
+    const candidates = [];
+    manhwaEntries.forEach(function (entry) {
+      if (entry && entry.id && entry.hasImage && !isValidCoverVersion(entry.coverVersion) &&
+          !existingKeys.has(getImageQueueKey('cover', entry.id))) {
+        candidates.push({ kind: 'cover', id: entry.id, entryId: entry.id });
+      }
+      ((entry && entry.characters) || []).forEach(function (character) {
+        if (character && character.id && character.hasImage &&
+            !isValidCoverVersion(character.imageVersion) &&
+            !existingKeys.has(getImageQueueKey('character', character.id))) {
+          candidates.push({ kind: 'character', id: character.id, entryId: entry.id });
+        }
+      });
+    });
+
+    for (let i = 0; i < candidates.length && queued < IMAGE_CATCH_UP_LIMIT; i++) {
+      const candidate = candidates[i];
+      if (manhwaEntriesOwnerId !== userId) {
+        break;
+      }
+      const status = candidate.kind === 'cover'
+        ? await getLocalCoverStatus(candidate.id)
+        : await getLocalCharacterImageStatus(candidate.id);
+      if (!status.hasLocal) {
+        continue;
+      }
+      // requestedAt 0: "upload only if there's still no cloud version".
+      await enqueueImageTask(candidate.kind, candidate.id, candidate.entryId, userId, 0, null);
+      queued++;
+    }
+  } catch (error) {
+    console.error('Image catch-up scan failed:', error);
+  }
+  return queued;
+}
+
 // Builds the small "pencil" (edit) + "trash" (delete) icon button row.
 // Shared by the normal card display, the private-mode list row, and
 // the private-mode Quick Note row below.
@@ -4779,7 +5525,7 @@ function buildEntryActions(entry, onEditClick) {
       });
       forgetCachedCharacterImageUrl(character.id);
       if (character.hasImage || character.imageVersion) {
-        deleteCharacterImageFromCloudInBackground(character.id);
+        deleteCharacterImageFromCloudInBackground(character.id, entry.id);
       }
     });
 
@@ -5689,7 +6435,7 @@ saveCharacterButton.addEventListener('click', function () {
         finishSavingCharacter(entry);
 
         // Background cloud delete - not awaited, failures only logged.
-        deleteCharacterImageFromCloudInBackground(character.id);
+        deleteCharacterImageFromCloudInBackground(character.id, entry.id);
       })
       .catch(function (error) {
         console.error('Could not remove character image:', error);
@@ -5732,7 +6478,7 @@ function deleteCharacter(entry, character) {
   });
   forgetCachedCharacterImageUrl(character.id);
   if (character.hasImage || character.imageVersion) {
-    deleteCharacterImageFromCloudInBackground(character.id);
+    deleteCharacterImageFromCloudInBackground(character.id, entry.id);
   }
 
   touchEntry(entry);
@@ -9220,6 +9966,9 @@ async function showAuthOrApp(session) {
     // Supabase. If we're still offline this fails quickly and the
     // records stay queued.
     await retryPendingWrites();
+    // Image tasks need this user's library loaded (reconcile re-reads
+    // live entries), so this call returns at once here...
+    retryPendingImageTasks();
     await loadFromSupabase();
     // Entries were reset for a different user: don't leave the old
     // user's detail page open.
@@ -9233,6 +9982,8 @@ async function showAuthOrApp(session) {
     // Fetch covers chosen on other devices in the background - not
     // awaited, so the library shows immediately.
     if (libraryLoadState === 'loaded') {
+      // ...and runs for real here, once the library is loaded.
+      retryPendingImageTasks();
       syncCoversFromCloud();
       syncCharacterImagesFromCloud();
       // Automatic video thumbnails for existing entries (once per session).
@@ -9502,6 +10253,8 @@ async function runForegroundRefresh() {
     }
 
     await retryPendingWrites();
+    // Background; never holds up the refresh.
+    retryPendingImageTasks();
     const pending = await getPendingWriteKinds(userId);
     if (pending.entry && pending.list) {
       foregroundRefreshOwed = true;
