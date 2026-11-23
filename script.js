@@ -10409,3 +10409,655 @@ window.addEventListener('online', function () {
 });
 
 checkSession();
+
+// --- Settings view ---
+// Opened from the gear button (#settingsGearLaptop next to the Add Entry
+// buttons on laptop/tablet, #settingsGearPhone at the end of the filter
+// row on phone - only one of the two is ever visible, see style.css).
+//
+// Same view swap as the detail page (see "Detail view" above): hide
+// #libraryView, show #settingsView, and swap back on the way out. The
+// library's DOM, currentFilter, currentSearchTerm and displayMode are
+// never touched, so the tab, search text and filters come back as they
+// were; the scroll position is saved on the way in and restored on the
+// way out. Nothing here loads, renders or saves entries or lists.
+//
+// Unlike the detail page, Settings also adds browser history entries,
+// so phone/browser Back returns to the library (and, on phone, from a
+// section's page to the section list first). Each open gets its own
+// openId; a history entry left over from an earlier open is never
+// treated as "still in Settings".
+//
+// SETTINGS_SECTIONS drives both the sidebar (laptop) and the section
+// list (phone). To add a section later: add { id, label, build } here
+// (build returns the page element, called once), plus optional onShow
+// (each time the page is shown) and onLeave (each time it's left).
+const settingsView = document.getElementById('settingsView');
+const settingsBackButton = document.getElementById('settingsBackButton');
+const settingsHeading = document.getElementById('settingsHeading');
+const settingsSectionList = document.getElementById('settingsSectionList');
+const settingsContent = document.getElementById('settingsContent');
+const settingsGearLaptop = document.getElementById('settingsGearLaptop');
+const settingsGearPhone = document.getElementById('settingsGearPhone');
+
+// Same phone breakpoint as style.css and the rest of this file.
+const settingsPhoneQuery = window.matchMedia('(max-width: 600px)');
+
+const SETTINGS_HISTORY_KEY = 'manhwaNotesSettings';
+
+const SETTINGS_SECTIONS = [
+  {
+    id: 'account',
+    label: 'Account',
+    build: buildAccountSettingsPage,
+    onShow: refreshAccountSettingsEmail,
+    onLeave: resetAccountPasswordForm
+  }
+];
+
+// The section shown in the laptop content pane / opened on phone.
+let settingsSelectedSectionId = SETTINGS_SECTIONS[0].id;
+// Phone only: true while a section's page is open instead of the list.
+let settingsPhonePageOpen = false;
+// The section page currently on screen (for onLeave), or null.
+let settingsShownSectionId = null;
+// Library scroll position when Settings was opened.
+let settingsLibraryScrollY = 0;
+// Identifies the current open in history.state (see the comment above).
+let settingsOpenId = 0;
+// Built once, on first use.
+const settingsSectionButtons = {};
+const settingsSectionPages = {};
+
+function isSettingsViewOpen() {
+  return settingsView.style.display === 'block';
+}
+
+function findSettingsSection(id) {
+  return SETTINGS_SECTIONS.find(function (section) {
+    return section.id === id;
+  }) || null;
+}
+
+function getSettingsHistoryState() {
+  const state = history.state;
+  return state && state[SETTINGS_HISTORY_KEY] ? state[SETTINGS_HISTORY_KEY] : null;
+}
+
+function pushSettingsHistoryState(section, depth) {
+  const state = {};
+  state[SETTINGS_HISTORY_KEY] = { openId: settingsOpenId, section: section, depth: depth };
+  history.pushState(state, '');
+}
+
+function buildSettingsSectionList() {
+  if (settingsSectionList.firstChild) {
+    return;
+  }
+  SETTINGS_SECTIONS.forEach(function (section) {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'settings-section-button';
+
+    const label = document.createElement('span');
+    label.textContent = section.label;
+    button.appendChild(label);
+
+    const chevron = document.createElement('span');
+    chevron.className = 'settings-section-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.textContent = '›';
+    button.appendChild(chevron);
+
+    button.addEventListener('click', function () {
+      selectSettingsSection(section.id);
+    });
+
+    item.appendChild(button);
+    settingsSectionList.appendChild(item);
+    settingsSectionButtons[section.id] = button;
+  });
+}
+
+function getSettingsSectionPage(section) {
+  if (!settingsSectionPages[section.id]) {
+    const page = section.build();
+    page.hidden = true;
+    settingsContent.appendChild(page);
+    settingsSectionPages[section.id] = page;
+  }
+  return settingsSectionPages[section.id];
+}
+
+// Runs the outgoing section's onLeave (e.g. clearing password fields).
+function leaveShownSettingsSection() {
+  if (settingsShownSectionId === null) {
+    return;
+  }
+  const section = findSettingsSection(settingsShownSectionId);
+  const page = settingsSectionPages[settingsShownSectionId];
+  settingsShownSectionId = null;
+  if (page) {
+    page.hidden = true;
+  }
+  if (section && section.onLeave) {
+    section.onLeave();
+  }
+}
+
+// Draws the list/sidebar and the content pane for the current width.
+function renderSettingsView() {
+  buildSettingsSectionList();
+  const isPhone = settingsPhoneQuery.matches;
+  const showPage = !isPhone || settingsPhonePageOpen;
+  settingsView.classList.toggle('settings-phone-page-open', isPhone && settingsPhonePageOpen);
+
+  SETTINGS_SECTIONS.forEach(function (section) {
+    const button = settingsSectionButtons[section.id];
+    // Highlight = laptop sidebar only; on phone the list is just a menu.
+    if (!isPhone && section.id === settingsSelectedSectionId) {
+      button.setAttribute('aria-current', 'true');
+    } else {
+      button.removeAttribute('aria-current');
+    }
+  });
+
+  const wantedId = showPage ? settingsSelectedSectionId : null;
+  if (settingsShownSectionId !== wantedId) {
+    leaveShownSettingsSection();
+    if (wantedId !== null) {
+      const section = findSettingsSection(wantedId);
+      getSettingsSectionPage(section).hidden = false;
+      settingsShownSectionId = wantedId;
+      if (section.onShow) {
+        section.onShow();
+      }
+    }
+  }
+}
+
+function selectSettingsSection(id) {
+  if (settingsPhoneQuery.matches) {
+    // Phone: open this section's page on top of the list.
+    settingsSelectedSectionId = id;
+    settingsPhonePageOpen = true;
+    pushSettingsHistoryState(id, 2);
+    renderSettingsView();
+    window.scrollTo(0, 0);
+    const heading = settingsSectionPages[id] &&
+      settingsSectionPages[id].querySelector('.settings-page-heading');
+    if (heading) {
+      heading.focus({ preventScroll: true });
+    }
+    return;
+  }
+  // Laptop: just switch the content pane.
+  if (id !== settingsSelectedSectionId) {
+    settingsSelectedSectionId = id;
+    renderSettingsView();
+  }
+}
+
+function showSettingsView() {
+  if (isSettingsViewOpen() || detailView.style.display === 'block') {
+    return;
+  }
+  settingsLibraryScrollY = window.scrollY;
+  settingsOpenId++;
+  settingsPhonePageOpen = false;
+
+  libraryView.style.display = 'none';
+  settingsView.style.display = 'block';
+  renderSettingsView();
+  pushSettingsHistoryState(null, 1);
+
+  window.scrollTo(0, 0);
+  settingsHeading.focus({ preventScroll: true });
+}
+
+// Back to the library exactly as it was left. Does no history change
+// itself - callers that came from a Back press have already moved it.
+function closeSettingsView() {
+  if (!isSettingsViewOpen()) {
+    return;
+  }
+  leaveShownSettingsSection();
+  settingsPhonePageOpen = false;
+  settingsView.classList.remove('settings-phone-page-open');
+  settingsView.style.display = 'none';
+  libraryView.style.display = 'block';
+
+  window.scrollTo(0, settingsLibraryScrollY);
+  // Back to whichever gear is visible at this width.
+  const gear = settingsPhoneQuery.matches ? settingsGearPhone : settingsGearLaptop;
+  gear.focus({ preventScroll: true });
+}
+
+// Phone: from a section's page back to the section list.
+function closeSettingsPhonePage() {
+  settingsPhonePageOpen = false;
+  renderSettingsView();
+  window.scrollTo(0, 0);
+  const button = settingsSectionButtons[settingsSelectedSectionId];
+  if (button) {
+    button.focus({ preventScroll: true });
+  }
+}
+
+// The on-page Back button goes through history when our entries are on
+// top, so it and the browser/phone Back button always agree.
+settingsBackButton.addEventListener('click', function () {
+  const state = getSettingsHistoryState();
+  const ours = state && state.openId === settingsOpenId;
+  if (settingsPhoneQuery.matches && settingsPhonePageOpen) {
+    if (ours && state.depth === 2) {
+      history.back();
+    } else {
+      closeSettingsPhonePage();
+    }
+    return;
+  }
+  if (ours) {
+    history.go(-state.depth);
+  } else {
+    closeSettingsView();
+  }
+});
+
+window.addEventListener('popstate', function () {
+  if (!isSettingsViewOpen()) {
+    // Forward into an old Settings entry: ignored, the library stays.
+    return;
+  }
+  const state = getSettingsHistoryState();
+  if (!state || state.openId !== settingsOpenId) {
+    closeSettingsView();
+    return;
+  }
+  if (state.section === null && settingsPhonePageOpen) {
+    closeSettingsPhonePage();
+  } else if (state.section !== null && !settingsPhonePageOpen) {
+    settingsSelectedSectionId = state.section;
+    settingsPhonePageOpen = true;
+    renderSettingsView();
+  }
+});
+
+// Crossing the phone breakpoint while open: redraw for the new layout.
+settingsPhoneQuery.addEventListener('change', function () {
+  if (isSettingsViewOpen()) {
+    renderSettingsView();
+  }
+});
+
+// A refresh while in Settings reloads onto the library; drop the
+// now-meaningless Settings marker from the current history entry.
+if (getSettingsHistoryState()) {
+  history.replaceState(null, '');
+}
+
+settingsGearLaptop.addEventListener('click', showSettingsView);
+settingsGearPhone.addEventListener('click', showSettingsView);
+
+// Logging out (here or in another tab) while Settings is open: leave it
+// so the next login starts on the library, and clear the password form.
+// Separate from the main auth listener above, which is unchanged.
+supabaseClient.auth.onAuthStateChange(function (event) {
+  if (event === 'SIGNED_OUT') {
+    closeSettingsView();
+  }
+});
+
+// --- Settings: Account page ---
+// All text is set with textContent. Passwords are only ever read out of
+// the inputs inside submitPasswordChange(), sent to Supabase, and
+// cleared from the inputs afterwards - never logged or stored.
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_OFFLINE_MESSAGE = 'You need to be online to change your password.';
+
+let accountEmailValue = null;
+let accountUsernameInput = null;
+let changePasswordButton = null;
+let passwordOuterMessage = null;
+let passwordForm = null;
+let passwordFormMessage = null;
+let passwordSubmitButton = null;
+let passwordCancelButton = null;
+let passwordFields = [];
+let passwordChangeBusy = false;
+// Bumped on every reset, so a request that finishes after the form was
+// closed doesn't write messages into it.
+let passwordAttemptToken = 0;
+
+function makeSettingsElement(tag, className, text) {
+  const element = document.createElement(tag);
+  if (className) {
+    element.className = className;
+  }
+  if (text !== undefined) {
+    element.textContent = text;
+  }
+  return element;
+}
+
+function setSettingsMessage(element, text, kind) {
+  element.textContent = text;
+  element.classList.toggle('settings-message-error', kind === 'error');
+  element.classList.toggle('settings-message-success', kind === 'success');
+}
+
+// One labelled password input with a Show/Hide toggle.
+function buildPasswordField(id, labelText, autocomplete) {
+  const wrapper = makeSettingsElement('div');
+  const label = makeSettingsElement('label', 'settings-input-label', labelText);
+  label.htmlFor = id;
+
+  const row = makeSettingsElement('div', 'settings-input-row');
+  const input = makeSettingsElement('input', 'settings-input');
+  input.type = 'password';
+  input.id = id;
+  input.name = id;
+  input.autocomplete = autocomplete;
+  input.setAttribute('autocapitalize', 'none');
+  input.spellcheck = false;
+
+  const reveal = makeSettingsElement('button', 'settings-reveal-button', 'Show');
+  reveal.type = 'button';
+  reveal.setAttribute('aria-pressed', 'false');
+  reveal.setAttribute('aria-controls', id);
+  reveal.setAttribute('aria-label', 'Show ' + labelText.toLowerCase());
+  reveal.addEventListener('click', function () {
+    setPasswordVisible(field, input.type === 'password');
+  });
+
+  row.appendChild(input);
+  row.appendChild(reveal);
+  wrapper.appendChild(label);
+  wrapper.appendChild(row);
+
+  const field = { wrapper: wrapper, input: input, reveal: reveal, labelText: labelText };
+  return field;
+}
+
+function setPasswordVisible(field, visible) {
+  field.input.type = visible ? 'text' : 'password';
+  field.reveal.textContent = visible ? 'Hide' : 'Show';
+  field.reveal.setAttribute('aria-pressed', visible ? 'true' : 'false');
+  field.reveal.setAttribute('aria-label', (visible ? 'Hide ' : 'Show ') + field.labelText.toLowerCase());
+}
+
+function buildAccountSettingsPage() {
+  const page = makeSettingsElement('section', 'settings-page');
+  page.setAttribute('aria-labelledby', 'settingsAccountHeading');
+
+  const heading = makeSettingsElement('h3', 'settings-page-heading', 'Account');
+  heading.id = 'settingsAccountHeading';
+  heading.tabIndex = -1;
+  page.appendChild(heading);
+
+  // Email (read only)
+  const emailField = makeSettingsElement('div', 'settings-field');
+  const emailLabel = makeSettingsElement('p', 'settings-field-label', 'Email');
+  emailLabel.id = 'settingsEmailLabel';
+  accountEmailValue = makeSettingsElement('p', 'settings-field-value', '');
+  accountEmailValue.setAttribute('aria-labelledby', 'settingsEmailLabel');
+  emailField.appendChild(emailLabel);
+  emailField.appendChild(accountEmailValue);
+  emailField.appendChild(makeSettingsElement('p', 'settings-field-note', 'To change your email, contact support.'));
+  page.appendChild(emailField);
+
+  // Password
+  const passwordField = makeSettingsElement('div', 'settings-field');
+  passwordField.appendChild(makeSettingsElement('p', 'settings-field-label', 'Password'));
+  const dots = makeSettingsElement('p', 'settings-field-value');
+  const dotsText = makeSettingsElement('span', '', '••••••••');
+  dotsText.setAttribute('aria-hidden', 'true');
+  dots.appendChild(dotsText);
+  dots.appendChild(makeSettingsElement('span', 'visually-hidden', 'Hidden'));
+  passwordField.appendChild(dots);
+
+  changePasswordButton = makeSettingsElement('button', 'settings-button', 'Change password');
+  changePasswordButton.type = 'button';
+  changePasswordButton.setAttribute('aria-expanded', 'false');
+  changePasswordButton.setAttribute('aria-controls', 'settingsPasswordForm');
+  changePasswordButton.addEventListener('click', openPasswordForm);
+  passwordField.appendChild(changePasswordButton);
+
+  passwordOuterMessage = makeSettingsElement('p', 'settings-message');
+  passwordOuterMessage.setAttribute('role', 'status');
+  passwordOuterMessage.setAttribute('aria-live', 'polite');
+  passwordField.appendChild(passwordOuterMessage);
+
+  // The inline form. A real <form> so Enter submits and password
+  // managers recognise it; novalidate because the checks below give
+  // clearer messages than the browser's.
+  passwordForm = makeSettingsElement('form', 'settings-password-form');
+  passwordForm.id = 'settingsPasswordForm';
+  passwordForm.noValidate = true;
+  passwordForm.hidden = true;
+  passwordForm.setAttribute('aria-label', 'Change password');
+
+  // Lets password managers tie the new password to this account. Its
+  // value is set through defaultValue (see refreshAccountSettingsEmail),
+  // so it never counts as "typed text" anywhere else in this file.
+  accountUsernameInput = makeSettingsElement('input', 'visually-hidden');
+  accountUsernameInput.type = 'email';
+  accountUsernameInput.name = 'username';
+  accountUsernameInput.autocomplete = 'username';
+  accountUsernameInput.readOnly = true;
+  accountUsernameInput.tabIndex = -1;
+  accountUsernameInput.setAttribute('aria-hidden', 'true');
+  passwordForm.appendChild(accountUsernameInput);
+
+  passwordFields = [
+    buildPasswordField('settingsCurrentPassword', 'Current password', 'current-password'),
+    buildPasswordField('settingsNewPassword', 'New password', 'new-password'),
+    buildPasswordField('settingsConfirmPassword', 'Confirm new password', 'new-password')
+  ];
+  passwordFields.forEach(function (field) {
+    passwordForm.appendChild(field.wrapper);
+  });
+  const hint = makeSettingsElement('p', 'settings-hint',
+    'At least ' + PASSWORD_MIN_LENGTH + ' characters, and different from your current password.');
+  hint.id = 'settingsPasswordHint';
+  passwordFields[1].input.setAttribute('aria-describedby', 'settingsPasswordHint');
+  passwordForm.appendChild(hint);
+
+  passwordFormMessage = makeSettingsElement('p', 'settings-message');
+  passwordFormMessage.setAttribute('role', 'status');
+  passwordFormMessage.setAttribute('aria-live', 'polite');
+  passwordForm.appendChild(passwordFormMessage);
+
+  const actions = makeSettingsElement('div', 'settings-form-actions');
+  passwordSubmitButton = makeSettingsElement('button', 'settings-button', 'Save new password');
+  passwordSubmitButton.type = 'submit';
+  passwordCancelButton = makeSettingsElement('button', 'settings-button', 'Cancel');
+  passwordCancelButton.type = 'button';
+  passwordCancelButton.addEventListener('click', function () {
+    resetAccountPasswordForm();
+    changePasswordButton.focus();
+  });
+  actions.appendChild(passwordSubmitButton);
+  actions.appendChild(passwordCancelButton);
+  passwordForm.appendChild(actions);
+
+  passwordForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    submitPasswordChange();
+  });
+  passwordField.appendChild(passwordForm);
+  page.appendChild(passwordField);
+
+  // Reserved for "Delete my account" - intentionally empty for now.
+  const dangerZone = makeSettingsElement('div', 'settings-danger-zone');
+  dangerZone.id = 'settingsAccountDangerZone';
+  page.appendChild(dangerZone);
+
+  return page;
+}
+
+// Reads the email from the locally stored session, so it works offline.
+async function refreshAccountSettingsEmail() {
+  let email = '';
+  try {
+    const { data } = await supabaseClient.auth.getSession();
+    email = (data && data.session && data.session.user && data.session.user.email) || '';
+  } catch (err) {
+    email = '';
+  }
+  accountEmailValue.textContent = email || 'Not available';
+  accountUsernameInput.defaultValue = email;
+}
+
+function openPasswordForm() {
+  if (passwordChangeBusy) {
+    return;
+  }
+  if (!navigator.onLine) {
+    setSettingsMessage(passwordOuterMessage, PASSWORD_OFFLINE_MESSAGE, 'error');
+    return;
+  }
+  setSettingsMessage(passwordOuterMessage, '', null);
+  passwordForm.hidden = false;
+  changePasswordButton.setAttribute('aria-expanded', 'true');
+  passwordFields[0].input.focus();
+}
+
+// Clears and hides the form. Also runs whenever the Account page is
+// left or Settings is closed (see SETTINGS_SECTIONS' onLeave).
+function resetAccountPasswordForm() {
+  if (!passwordForm) {
+    return;
+  }
+  passwordAttemptToken++;
+  passwordFields.forEach(function (field) {
+    field.input.value = '';
+    setPasswordVisible(field, false);
+  });
+  setSettingsMessage(passwordFormMessage, '', null);
+  setSettingsMessage(passwordOuterMessage, '', null);
+  passwordForm.hidden = true;
+  changePasswordButton.setAttribute('aria-expanded', 'false');
+  setPasswordFormBusy(false);
+}
+
+function setPasswordFormBusy(busy) {
+  passwordChangeBusy = busy;
+  passwordSubmitButton.disabled = busy;
+  passwordCancelButton.disabled = busy;
+  changePasswordButton.disabled = busy;
+  passwordSubmitButton.textContent = busy ? 'Saving…' : 'Save new password';
+}
+
+// Supabase reports "couldn't reach the server" as AuthRetryableFetchError
+// (status 0) rather than a normal auth error.
+function isAuthNetworkError(error) {
+  return !navigator.onLine || !!(error && (error.name === 'AuthRetryableFetchError' || error.status === 0));
+}
+
+function showPasswordFormError(text, focusField) {
+  setSettingsMessage(passwordFormMessage, text, 'error');
+  if (focusField) {
+    focusField.input.focus();
+  }
+}
+
+async function submitPasswordChange() {
+  if (passwordChangeBusy) {
+    return;
+  }
+  const currentField = passwordFields[0];
+  const newField = passwordFields[1];
+  const confirmField = passwordFields[2];
+
+  if (!navigator.onLine) {
+    showPasswordFormError(PASSWORD_OFFLINE_MESSAGE, null);
+    return;
+  }
+  if (currentField.input.value === '') {
+    showPasswordFormError('Enter your current password.', currentField);
+    return;
+  }
+  if (newField.input.value.length < PASSWORD_MIN_LENGTH) {
+    showPasswordFormError('Your new password must be at least ' + PASSWORD_MIN_LENGTH + ' characters.', newField);
+    return;
+  }
+  if (newField.input.value !== confirmField.input.value) {
+    showPasswordFormError('The new passwords don’t match.', confirmField);
+    return;
+  }
+  if (newField.input.value === currentField.input.value) {
+    showPasswordFormError('Your new password must be different from your current password.', newField);
+    return;
+  }
+
+  const token = passwordAttemptToken;
+  setPasswordFormBusy(true);
+  setSettingsMessage(passwordFormMessage, 'Changing your password…', null);
+
+  try {
+    const { data } = await supabaseClient.auth.getSession();
+    const email = data && data.session && data.session.user && data.session.user.email;
+    if (token !== passwordAttemptToken) {
+      return;
+    }
+    if (!email) {
+      showPasswordFormError('You’re not signed in. Please log in again.', null);
+      return;
+    }
+
+    // Re-authenticate first. For the same user this fires SIGNED_IN,
+    // which the main auth listener ignores (session.user.id ===
+    // appSessionUserId), so nothing reloads.
+    const { error: reauthError } = await supabaseClient.auth.signInWithPassword({
+      email: email,
+      password: currentField.input.value
+    });
+    if (token !== passwordAttemptToken) {
+      return;
+    }
+    if (reauthError) {
+      if (isAuthNetworkError(reauthError)) {
+        showPasswordFormError(PASSWORD_OFFLINE_MESSAGE, null);
+      } else if (reauthError.status === 429) {
+        showPasswordFormError('Too many attempts. Please wait a moment and try again.', null);
+      } else {
+        showPasswordFormError('Current password is incorrect.', currentField);
+      }
+      return;
+    }
+
+    const { error: updateError } = await supabaseClient.auth.updateUser({
+      password: newField.input.value
+    });
+    if (token !== passwordAttemptToken) {
+      return;
+    }
+    if (updateError) {
+      if (isAuthNetworkError(updateError)) {
+        showPasswordFormError(PASSWORD_OFFLINE_MESSAGE, null);
+      } else {
+        showPasswordFormError('Couldn’t change your password: ' + updateError.message, null);
+      }
+      return;
+    }
+
+    // Success: clear and close the form, then confirm outside it.
+    resetAccountPasswordForm();
+    setSettingsMessage(passwordOuterMessage, 'Your password has been changed.', 'success');
+    changePasswordButton.focus();
+  } catch (err) {
+    // Deliberately not logged: keep anything near the passwords out of
+    // the console.
+    if (token === passwordAttemptToken) {
+      showPasswordFormError(navigator.onLine
+        ? 'Couldn’t change your password. Please try again.'
+        : PASSWORD_OFFLINE_MESSAGE, null);
+    }
+  } finally {
+    if (token === passwordAttemptToken) {
+      setPasswordFormBusy(false);
+    }
+  }
+}

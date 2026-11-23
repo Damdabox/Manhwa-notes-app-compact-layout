@@ -3465,3 +3465,323 @@ body.private-mode #manhwaList {
     align-self: stretch;
   }
 }
+
+/* ===========================================================================
+   Settings
+   ===========================================================================
+   The gear buttons that open Settings, and #settingsView itself (see the
+   "Settings view" section in script.js). Uses the same 600px phone
+   breakpoint as the rest of this file. */
+
+/* Gear button: a 44x44 touch target with a muted icon that brightens on
+   hover/focus, like the other icon-only controls. There are two copies
+   in index.html; exactly one is visible at any width (see below). */
+.settings-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.settings-gear:hover {
+  background: #2b2b2b;
+  color: #fff;
+}
+
+.settings-gear:focus-visible {
+  outline: 2px solid #4169e1;
+  outline-offset: 2px;
+  color: #fff;
+}
+
+/* Phone copy: hidden unless the phone media query below turns it on. */
+.settings-gear-phone {
+  display: none;
+}
+
+/* Laptop/tablet copy: pinned to the right end of the Add Entry /
+   Bulk Add / Quick Notes row. #addEntrySheetOverlay is a full-width,
+   otherwise unstyled wrapper on these widths, so right: 0 lines the
+   gear up with the search bar's right edge. The buttons are the last
+   line of .form and .form's bottom margin collapses through the
+   wrapper, so the wrapper's bottom edge is that row's bottom edge;
+   bottom: -3px centers the 44px gear on the 38px buttons. Absolute
+   positioning means nothing in .form moves. */
+@media (min-width: 601px) {
+  #addEntrySheetOverlay {
+    position: relative;
+  }
+
+  .settings-gear-laptop {
+    position: absolute;
+    right: 0;
+    bottom: -3px;
+  }
+}
+
+@media (max-width: 600px) {
+  .settings-gear-laptop {
+    display: none;
+  }
+
+  /* Right after "Lists" (same order, later in the page), pushed to the
+     right end of the filter row's first line. The negative vertical
+     margins keep the row's line height what it was (the tallest item
+     there is 36px) while the touch target stays 44px. */
+  .settings-gear-phone {
+    display: inline-flex;
+    order: 3;
+    margin: -4px 0 -4px auto;
+  }
+}
+
+/* --- Settings view --- */
+.settings-heading {
+  margin: 0 0 20px;
+}
+
+.settings-heading:focus {
+  outline: none;
+}
+
+/* Laptop/tablet: sidebar on the left, the selected section's page on
+   the right. */
+.settings-layout {
+  display: flex;
+  gap: 30px;
+  align-items: flex-start;
+}
+
+.settings-sidebar {
+  flex: 0 0 200px;
+}
+
+.settings-section-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-section-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  font-size: 15px;
+  text-align: left;
+  background: none;
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.settings-section-button:hover {
+  background: #2b2b2b;
+}
+
+.settings-section-button:focus-visible {
+  outline: 2px solid #4169e1;
+  outline-offset: 1px;
+}
+
+/* The selected section (laptop sidebar only). */
+.settings-section-button[aria-current="true"] {
+  background: #2b2b2b;
+  border-color: #666;
+  font-weight: bold;
+}
+
+/* The ">" hint only makes sense on phone, where tapping opens a page. */
+.settings-section-chevron {
+  display: none;
+  color: #aaa;
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  max-width: 560px;
+}
+
+.settings-page-heading {
+  margin: 0 0 20px;
+  font-size: 20px;
+}
+
+.settings-field {
+  margin-bottom: 24px;
+}
+
+.settings-field-label {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: bold;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings-field-value {
+  margin: 0 0 6px;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.settings-field-note {
+  margin: 0;
+  font-size: 13px;
+  color: #aaa;
+}
+
+.settings-button {
+  padding: 8px 16px;
+  font-size: 15px;
+  cursor: pointer;
+  min-height: 38px;
+}
+
+.settings-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Status line under the password controls. Empty = takes no space. */
+.settings-message {
+  margin: 10px 0 0;
+  font-size: 14px;
+}
+
+.settings-message:empty {
+  display: none;
+}
+
+.settings-message-error {
+  color: #ff8a80;
+}
+
+.settings-message-success {
+  color: #7bd88f;
+}
+
+.settings-password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px;
+  background: #242424;
+  border: 1px solid #444;
+  border-radius: 8px;
+}
+
+.settings-password-form[hidden] {
+  display: none;
+}
+
+.settings-input-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.settings-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* Same white field / navy text as the search box and Add Entry form. */
+.settings-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px;
+  font-size: 16px;
+  background: #fff;
+  color: navy;
+  border: 1px solid #666;
+  border-radius: 4px;
+}
+
+.settings-reveal-button {
+  flex: 0 0 auto;
+  min-width: 64px;
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 4px;
+}
+
+.settings-reveal-button:hover {
+  background: #444;
+}
+
+.settings-hint {
+  margin: 0;
+  font-size: 13px;
+  color: #aaa;
+}
+
+.settings-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Reserved for "Delete my account" (not built yet): a divider and an
+   empty, clearly separate area at the bottom of the Account page. */
+.settings-danger-zone {
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid #444;
+  min-height: 60px;
+}
+
+@media (max-width: 600px) {
+  /* Phone: one column, and only one of the list / the page at a time.
+     script.js adds .settings-phone-page-open while a section's page is
+     open. */
+  .settings-layout {
+    display: block;
+  }
+
+  .settings-content {
+    display: none;
+    max-width: none;
+  }
+
+  .settings-view.settings-phone-page-open .settings-sidebar {
+    display: none;
+  }
+
+  .settings-view.settings-phone-page-open .settings-content {
+    display: block;
+  }
+
+  /* No "selected" highlight on phone - the list is just a menu. */
+  .settings-section-button,
+  .settings-section-button[aria-current="true"] {
+    background: #242424;
+    border-color: #444;
+    font-weight: normal;
+    min-height: 52px;
+  }
+
+  .settings-section-chevron {
+    display: inline;
+  }
+}
