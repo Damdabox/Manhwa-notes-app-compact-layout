@@ -807,6 +807,13 @@ let manhwaEntriesOwnerId = null;
 // null when signed out. Used to skip repeat auth events for that user.
 let appSessionUserId = null;
 
+// true only while "Delete my account" (Settings > Account) is running.
+// Every background process that could write, sync, upload, queue or
+// download checks it and does nothing while it's true, so nothing tries
+// to write to an account that is about to disappear. Reset if the
+// deletion fails. See the "Settings: Delete my account" section.
+let accountDeletionInProgress = false;
+
 // The logged-in user's Lists (see the "--- Lists ---" section further
 // down). One object per list, shaped like:
 //   { listId, name, description, visibility, items, updatedAt }
@@ -1460,6 +1467,9 @@ function updateImageTaskRecord(key, change) {
 // entry is safely saved on this device, 'error' if it isn't saved
 // anywhere.
 function queueFailedSync(entry) {
+  if (accountDeletionInProgress) {
+    return;
+  }
   queuePendingWrite(entry).then(function () {
     showSyncBanner('queued');
     updatePendingIndicator();
@@ -1542,6 +1552,9 @@ function removeListPendingWriteIfSynced(listId, updatedAt) {
 // List version of queueFailedSync(). Unlike entry deletes, list deletes
 // ARE queued (as a deletion marker), so both cases show 'queued'.
 function queueFailedListSync(listId, listSnapshot, deleted, updatedAt) {
+  if (accountDeletionInProgress) {
+    return;
+  }
   queueListPendingWrite(listId, listSnapshot, deleted, updatedAt).then(function () {
     showSyncBanner('queued');
     updatePendingIndicator();
@@ -1636,6 +1649,9 @@ async function retryPendingEntryWrite(record, userId) {
 // second one that would send every entry twice.
 let retryPendingWritesPromise = null;
 function retryPendingWrites() {
+  if (accountDeletionInProgress) {
+    return retryPendingWritesPromise || Promise.resolve();
+  }
   if (retryPendingWritesPromise) {
     return retryPendingWritesPromise;
   }
@@ -1651,6 +1667,9 @@ function retryPendingWrites() {
       let syncedCount = 0;
       let failedCount = 0;
       for (const record of records) {
+        if (accountDeletionInProgress) {
+          break;
+        }
         if (record.user_id !== session.user.id) {
           continue;
         }
@@ -1705,6 +1724,9 @@ window.addEventListener('offline', function () {
 // a newer count.
 let pendingIndicatorRequestId = 0;
 async function updatePendingIndicator() {
+  if (accountDeletionInProgress) {
+    return;
+  }
   const requestId = ++pendingIndicatorRequestId;
   const badge = document.getElementById('pendingSyncBadge');
   if (!badge) {
@@ -1787,6 +1809,9 @@ function syncEntryToSupabase(entry) {
 // at the moment the body is built; null/undefined means "skip". Follow-ups
 // always read the live entry.
 function requestEntrySync(entryId, readEntry) {
+  if (accountDeletionInProgress) {
+    return Promise.resolve(false);
+  }
   let state = entrySyncStates.get(entryId);
   if (!state) {
     state = { inFlight: false, followUp: null };
@@ -1873,13 +1898,19 @@ async function sendEntrySync(readEntry, attempt) {
     return false;
   }
 
+  // Account deletion: send nothing and queue nothing (a follow-up from
+  // finishEntrySync() comes straight here, not through requestEntrySync()).
+  if (accountDeletionInProgress) {
+    return false;
+  }
+
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
       console.error('Could not get current user for syncEntryToSupabase:', userError && userError.message);
       return fail();
     }
-    if (attempt.timedOut) {
+    if (attempt.timedOut || accountDeletionInProgress) {
       return false;
     }
 
@@ -1944,6 +1975,9 @@ async function sendEntrySync(readEntry, attempt) {
 // show the 'error' sync banner (deletes aren't queued offline, so the
 // delete really didn't happen).
 async function deleteEntryFromSupabase(entryId) {
+  if (accountDeletionInProgress) {
+    return;
+  }
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
@@ -2008,6 +2042,9 @@ function findList(listId) {
 // logged and queued offline, success drops any older queued copy, and
 // it returns true (synced) / false (failed) for retryPendingWrites().
 async function syncListToSupabase(list) {
+  if (accountDeletionInProgress) {
+    return false;
+  }
   const snapshot = snapshotList(list);
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
@@ -2058,6 +2095,9 @@ async function syncListToSupabase(list) {
 // successful delete removes that older upsert so it can't bring the
 // list back on the next retry.
 async function deleteListFromSupabase(listId, deletedAt) {
+  if (accountDeletionInProgress) {
+    return false;
+  }
   try {
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     if (userError || !user) {
@@ -3204,6 +3244,9 @@ async function uploadImageToCloud(kind, id, blob, version) {
 // unless that is still the signed-in user, so a task queued for one
 // account can never write into another account's folder. Never throws.
 async function uploadImageToCloudResult(kind, id, blob, version, expectedUserId) {
+  if (accountDeletionInProgress) {
+    return { ok: false, error: 'account deletion in progress', permanent: false };
+  }
   try {
     if (!(blob instanceof Blob)) {
       console.error('uploadImageToCloud: expected a Blob, got:', blob);
@@ -3492,7 +3535,7 @@ function uploadCoverInBackground(entry, pickedFile) {
 
   queueCoverCloudTask(entryId, async function () {
     // A newer pick (or a remove) is queued behind this one - skip.
-    if (!isCurrent()) {
+    if (!isCurrent() || accountDeletionInProgress) {
       return;
     }
 
@@ -3626,6 +3669,9 @@ function deleteCoverFromCloudInBackground(entryId) {
   const requestedAt = Date.now();
   const ownerUserId = manhwaEntriesOwnerId;
   queueCoverCloudTask(entryId, async function () {
+    if (accountDeletionInProgress) {
+      return;
+    }
     const userId = await getImageSessionUserId();
     if (!userId || !navigator.onLine || (ownerUserId && userId !== ownerUserId)) {
       console.warn('Cloud cover delete for entry ' + entryId + ' postponed (offline or not signed in); queued.');
@@ -3924,7 +3970,7 @@ const thumbnailLookupsInFlight = new Map();
 // Safe to call any time; it does nothing if the entry is already
 // resolved or already marked "no thumbnail" for its current link.
 async function resolveThumbnailForEntry(entry) {
-  if (!entry || !entry.id) {
+  if (!entry || !entry.id || accountDeletionInProgress) {
     return;
   }
   const entryId = entry.id;
@@ -3964,7 +4010,7 @@ async function resolveThumbnailForEntry(entry) {
     if (!current || current.type !== 'Videos' || getValidVideoLink(current.link) !== link) {
       return;
     }
-    if (!result.definitive) {
+    if (!result.definitive || accountDeletionInProgress) {
       return;
     }
 
@@ -4023,7 +4069,7 @@ let thumbnailBackfillStarted = false;
 const thumbnailBackfillAttempted = new Set();
 
 async function backfillVideoThumbnails() {
-  if (thumbnailBackfillStarted || !navigator.onLine) {
+  if (thumbnailBackfillStarted || !navigator.onLine || accountDeletionInProgress) {
     return;
   }
   try {
@@ -4047,6 +4093,9 @@ async function backfillVideoThumbnails() {
 
     let functionCalls = 0;
     for (const candidate of candidates) {
+      if (accountDeletionInProgress) {
+        break;
+      }
       // Re-read: a foreground refresh may have swapped the object.
       const entry = findEntryById(candidate.id);
       const link = entry && entry.type === 'Videos' ? getValidVideoLink(entry.link) : '';
@@ -4256,7 +4305,8 @@ function downloadCoverIfNeeded(entryId) {
 
   const attempt = (async function () {
     const entry = findEntryById(entryId);
-    if (!entry || !entry.coverVersion || !coverSyncUserId || !navigator.onLine) {
+    if (!entry || !entry.coverVersion || !coverSyncUserId || !navigator.onLine ||
+        accountDeletionInProgress) {
       return false;
     }
     const version = entry.coverVersion;
@@ -4309,7 +4359,8 @@ function downloadCoverIfNeeded(entryId) {
     // Re-check: the comic may have been deleted, its cover changed or
     // removed, or a new cover picked here while we were downloading.
     const current = findEntryById(entryId);
-    if (!current || current.coverVersion !== version || cloudState.latest !== turnAtStart) {
+    if (!current || current.coverVersion !== version || cloudState.latest !== turnAtStart ||
+        accountDeletionInProgress) {
       return false;
     }
 
@@ -4393,7 +4444,7 @@ function refreshShownCovers(entryIds) {
 let coverSyncRunning = false;
 let coverSyncRerunRequested = false;
 async function syncCoversFromCloud() {
-  if (!coverSyncUserId || !navigator.onLine) {
+  if (!coverSyncUserId || !navigator.onLine || accountDeletionInProgress) {
     return;
   }
   if (coverSyncRunning) {
@@ -4593,7 +4644,7 @@ function uploadCharacterImageInBackground(characterId, pickedFile) {
   }
 
   queueCharacterImageCloudTask(characterId, async function () {
-    if (!isCurrent()) {
+    if (!isCurrent() || accountDeletionInProgress) {
       return; // a newer pick / remove / delete is queued behind this one
     }
 
@@ -4712,6 +4763,9 @@ function deleteCharacterImageFromCloudInBackground(characterId, entryId) {
   const requestedAt = Date.now();
   const ownerUserId = manhwaEntriesOwnerId;
   queueCharacterImageCloudTask(characterId, async function () {
+    if (accountDeletionInProgress) {
+      return;
+    }
     const userId = await getImageSessionUserId();
     if (!userId || !navigator.onLine || (ownerUserId && userId !== ownerUserId)) {
       console.warn('Cloud delete for character ' + characterId + ' postponed (offline or not signed in); queued.');
@@ -4786,7 +4840,7 @@ function downloadCharacterImageIfNeeded(characterId) {
   const attempt = (async function () {
     const found = findCharacterById(characterId);
     if (!found || !isValidCoverVersion(found.character.imageVersion) ||
-        !coverSyncUserId || !navigator.onLine) {
+        !coverSyncUserId || !navigator.onLine || accountDeletionInProgress) {
       return false;
     }
     const version = found.character.imageVersion;
@@ -4888,7 +4942,7 @@ function refreshShownCharacterImages(characterIds) {
 let characterImageSyncRunning = false;
 let characterImageSyncRerunRequested = false;
 async function syncCharacterImagesFromCloud() {
-  if (!coverSyncUserId || !navigator.onLine) {
+  if (!coverSyncUserId || !navigator.onLine || accountDeletionInProgress) {
     return;
   }
   if (characterImageSyncRunning) {
@@ -5001,6 +5055,9 @@ function notifyImageNotSynced() {
 // couldn't be made at all (due right away, e.g. on the next 'online'),
 // or { error } after a failed attempt (counts as attempt 1, 30 s wait).
 function enqueueImageTask(kind, id, entryId, userId, requestedAt, failure) {
+  if (accountDeletionInProgress) {
+    return Promise.resolve();
+  }
   if (!userId || !isValidCloudImageId(id)) {
     console.error('Image task not queued for ' + kind + ' ' + id + ': no user or bad id.');
     return Promise.resolve();
@@ -5305,6 +5362,9 @@ async function processImageTask(record, userId) {
 let imageRetryRunPromise = null;
 let imageRetryRerunRequested = false;
 function retryPendingImageTasks() {
+  if (accountDeletionInProgress) {
+    return imageRetryRunPromise || Promise.resolve();
+  }
   if (imageRetryRunPromise) {
     imageRetryRerunRequested = true;
     return imageRetryRunPromise;
@@ -5326,7 +5386,8 @@ function retryPendingImageTasks() {
         while (nextIndex < due.length) {
           const record = due[nextIndex++];
           // Stop if the user changed or we went offline meanwhile.
-          if (!navigator.onLine || (await getImageSessionUserId()) !== userId) {
+          if (accountDeletionInProgress || !navigator.onLine ||
+              (await getImageSessionUserId()) !== userId) {
             return;
           }
           await processImageTask(record, userId);
@@ -5339,7 +5400,7 @@ function retryPendingImageTasks() {
       await Promise.all(workers);
 
       // Once per page session, after the runner has finished.
-      if (!imageCatchUpScanDone && navigator.onLine &&
+      if (!imageCatchUpScanDone && navigator.onLine && !accountDeletionInProgress &&
           (await getImageSessionUserId()) === userId) {
         imageCatchUpScanDone = true;
         if ((await runImageCatchUpScan(userId)) > 0) {
@@ -5369,9 +5430,12 @@ window.retryPendingImageTasks = retryPendingImageTasks;
 async function scheduleImageRetryTimer() {
   clearTimeout(imageRetryTimer);
   imageRetryTimer = null;
+  if (accountDeletionInProgress) {
+    return;
+  }
   try {
     const userId = await getImageSessionUserId();
-    if (!userId) {
+    if (!userId || accountDeletionInProgress) {
       return;
     }
     const now = Date.now();
@@ -5400,6 +5464,9 @@ async function scheduleImageRetryTimer() {
 // already have a task. Returns how many it queued.
 async function runImageCatchUpScan(userId) {
   let queued = 0;
+  if (accountDeletionInProgress) {
+    return queued;
+  }
   try {
     const existingKeys = new Set((await getPendingImageTasks()).map(function (record) {
       return record.entry_id;
@@ -5911,7 +5978,7 @@ function setDetailNotesStatus(text) {
 function saveDetailNotes(force) {
   clearTimeout(notesAutosaveTimer);
   notesAutosaveTimer = null;
-  if (detailNotesEntryId === null) {
+  if (accountDeletionInProgress || detailNotesEntryId === null) {
     return false;
   }
   const entry = findEntryById(detailNotesEntryId);
@@ -10012,6 +10079,9 @@ async function showAuthOrApp(session) {
 // so it can be triggered manually (e.g. from the console) if needed.
 // It checks Supabase first and bails out if this user already has rows.
 async function migrateLocalDataToSupabase() {
+  if (accountDeletionInProgress) {
+    return;
+  }
   const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
   if (userError || !user) {
     console.error('Could not get current user for migration:', userError && userError.message);
@@ -10235,7 +10305,7 @@ async function getPendingWriteKinds(userId) {
 }
 
 async function runForegroundRefresh() {
-  if (foregroundRefreshRunning) {
+  if (foregroundRefreshRunning || accountDeletionInProgress) {
     return;
   }
   foregroundRefreshRunning = true;
@@ -10450,8 +10520,14 @@ const SETTINGS_SECTIONS = [
     id: 'account',
     label: 'Account',
     build: buildAccountSettingsPage,
-    onShow: refreshAccountSettingsEmail,
-    onLeave: resetAccountPasswordForm
+    onShow: function () {
+      refreshAccountSettingsEmail();
+      deleteAccountUi.refreshZone();
+    },
+    onLeave: function () {
+      resetAccountPasswordForm();
+      deleteAccountUi.onLeave();
+    }
   }
 ];
 
@@ -10889,9 +10965,11 @@ function buildAccountSettingsPage() {
   passwordField.appendChild(passwordForm);
   page.appendChild(passwordField);
 
-  // Reserved for "Delete my account" - intentionally empty for now.
+  // "Delete my account", below a divider (see "Settings: Delete my
+  // account" at the end of this file).
   const dangerZone = makeSettingsElement('div', 'settings-danger-zone');
   dangerZone.id = 'settingsAccountDangerZone';
+  deleteAccountUi.buildZone(dangerZone);
   page.appendChild(dangerZone);
 
   return page;
@@ -11061,3 +11139,774 @@ async function submitPasswordChange() {
     }
   }
 }
+
+// --- Settings: Delete my account ---
+// A muted "Delete my account…" control at the bottom of the Account
+// page opens a confirmation dialog. Only that dialog's confirm button
+// (password entered AND "DELETE" typed) can start a deletion; nothing
+// here runs on load, on a timer, or from the console. All text is set
+// with textContent. The password is only read out of its input inside
+// runAccountDeletion(), sent to Supabase for re-authentication, and
+// cleared afterwards - never logged, stored or shown.
+//
+// Order on confirm:
+//   a. accountDeletionInProgress = true, so every background process
+//      (sync, queue, retries, foreground refresh, backfills, uploads,
+//      downloads) stands down. Reset if anything fails.
+//   b. Re-authenticate with signInWithPassword(). For the same user the
+//      main auth listener ignores this SIGNED_IN (session.user.id ===
+//      appSessionUserId, and showAuthOrApp() checks the same thing), so
+//      nothing reloads and the UI doesn't change.
+//   c. Invoke the "delete-account" Edge Function (no body). The server
+//      deletes images, then the login, then any leftover rows.
+//   d/e. Success -> clean up this device. Failure -> message, dialog
+//      re-enabled, and NOTHING local is deleted.
+// The returned object only builds/refreshes the Account page area; it
+// doesn't expose the deletion itself.
+const deleteAccountUi = (function () {
+  const CONFIRM_WORD = 'DELETE';
+  const OFFLINE_MESSAGE = 'You need to be online to delete your account.';
+  const DELETED_NOTICE = 'Your account has been deleted.';
+  // Longest we wait for in-flight syncs to settle before cleaning up
+  // (an entry sync gives up on its own after ENTRY_SYNC_TIMEOUT_MS).
+  const DRAIN_TIMEOUT_MS = ENTRY_SYNC_TIMEOUT_MS + 2000;
+
+  let zone = null;
+  let openButton = null;
+
+  let overlay = null;
+  let dialog = null;
+  let emailText = null;
+  let usernameInput = null;
+  let passwordField = null;
+  let confirmInput = null;
+  let messageArea = null;
+  let cancelButton = null;
+  let deleteButton = null;
+  let busy = false;
+
+  function getSessionEmail() {
+    return supabaseClient.auth.getSession().then(function (result) {
+      const session = result && result.data && result.data.session;
+      return (session && session.user && session.user.email) || '';
+    }).catch(function () {
+      return '';
+    });
+  }
+
+  // --- The control on the Account page ---
+  function buildZone(container) {
+    zone = container;
+    const caption = makeSettingsElement('p', 'delete-account-caption',
+      'Permanently delete your account and all of its data.');
+    openButton = makeSettingsElement('button', 'delete-account-open-button', 'Delete my account…');
+    openButton.type = 'button';
+    openButton.setAttribute('aria-haspopup', 'dialog');
+    openButton.addEventListener('click', openDialog);
+    zone.appendChild(caption);
+    zone.appendChild(openButton);
+    zone.hidden = true; // shown by refreshZone() once a session is confirmed
+  }
+
+  // Hidden whenever nobody is signed in.
+  function refreshZone() {
+    if (!zone) {
+      return;
+    }
+    getSessionEmail().then(function (email) {
+      zone.hidden = !email;
+    });
+  }
+
+  // --- The dialog ---
+  function buildDialog() {
+    if (overlay) {
+      return;
+    }
+    overlay = makeSettingsElement('div', 'modal-overlay delete-account-overlay');
+    overlay.style.display = 'none';
+
+    dialog = makeSettingsElement('div', 'modal-box delete-account-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'deleteAccountTitle');
+    dialog.setAttribute('aria-describedby', 'deleteAccountWho');
+
+    const title = makeSettingsElement('h3', 'delete-account-title', 'Delete your account?');
+    title.id = 'deleteAccountTitle';
+    dialog.appendChild(title);
+
+    const who = makeSettingsElement('p', 'delete-account-text');
+    who.id = 'deleteAccountWho';
+    who.appendChild(document.createTextNode('This will permanently delete the account for '));
+    emailText = makeSettingsElement('strong', 'delete-account-email', '');
+    who.appendChild(emailText);
+    who.appendChild(document.createTextNode('.'));
+    dialog.appendChild(who);
+
+    dialog.appendChild(makeSettingsElement('p', 'delete-account-text', 'This will delete:'));
+    const list = makeSettingsElement('ul', 'delete-account-list');
+    ['Your entries, notes and tags', 'Your lists', 'Your cover and character images', 'Your login']
+      .forEach(function (text) {
+        list.appendChild(makeSettingsElement('li', '', text));
+      });
+    dialog.appendChild(list);
+    dialog.appendChild(makeSettingsElement('p', 'delete-account-text delete-account-warning',
+      'This can’t be undone.'));
+
+    // A real <form> so Enter works and password managers recognise the
+    // field; novalidate, the checks below decide.
+    const form = makeSettingsElement('form', 'delete-account-form');
+    form.noValidate = true;
+    form.setAttribute('aria-label', 'Confirm account deletion');
+
+    // Same hidden username field as the change-password form, so a
+    // password manager offers the right saved password. Set through
+    // defaultValue only.
+    usernameInput = makeSettingsElement('input', 'visually-hidden');
+    usernameInput.type = 'email';
+    usernameInput.name = 'username';
+    usernameInput.autocomplete = 'username';
+    usernameInput.readOnly = true;
+    usernameInput.tabIndex = -1;
+    usernameInput.setAttribute('aria-hidden', 'true');
+    form.appendChild(usernameInput);
+
+    // Same field + Show/Hide toggle as the change-password form.
+    passwordField = buildPasswordField('deleteAccountPassword', 'Your password', 'current-password');
+    form.appendChild(passwordField.wrapper);
+
+    const confirmWrapper = makeSettingsElement('div');
+    const confirmLabel = makeSettingsElement('label', 'settings-input-label', 'Type DELETE to confirm');
+    confirmLabel.htmlFor = 'deleteAccountConfirm';
+    confirmInput = makeSettingsElement('input', 'settings-input delete-account-confirm-input');
+    confirmInput.type = 'text';
+    confirmInput.id = 'deleteAccountConfirm';
+    confirmInput.name = 'deleteAccountConfirm';
+    confirmInput.autocomplete = 'off';
+    confirmInput.setAttribute('autocapitalize', 'off');
+    confirmInput.setAttribute('autocorrect', 'off');
+    confirmInput.spellcheck = false;
+    confirmWrapper.appendChild(confirmLabel);
+    confirmWrapper.appendChild(confirmInput);
+    form.appendChild(confirmWrapper);
+
+    messageArea = makeSettingsElement('p', 'settings-message delete-account-message');
+    messageArea.setAttribute('role', 'status');
+    messageArea.setAttribute('aria-live', 'polite');
+    form.appendChild(messageArea);
+
+    const actions = makeSettingsElement('div', 'delete-account-actions');
+    cancelButton = makeSettingsElement('button', 'delete-account-cancel-button', 'Cancel');
+    cancelButton.type = 'button';
+    cancelButton.addEventListener('click', function () {
+      closeDialog();
+    });
+    deleteButton = makeSettingsElement('button', 'delete-account-confirm-button', 'Delete my account');
+    deleteButton.type = 'submit';
+    deleteButton.disabled = true;
+    actions.appendChild(deleteButton);
+    actions.appendChild(cancelButton);
+    form.appendChild(actions);
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (canConfirm()) {
+        runAccountDeletion();
+      }
+    });
+    passwordField.input.addEventListener('input', updateDeleteButton);
+    confirmInput.addEventListener('input', updateDeleteButton);
+
+    dialog.appendChild(form);
+    overlay.appendChild(dialog);
+
+    // Outside click closes (not while deleting).
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) {
+        closeDialog();
+      }
+    });
+    // Escape closes (not while deleting); Tab stays inside the dialog.
+    overlay.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeDialog();
+        return;
+      }
+      if (event.key === 'Tab') {
+        trapFocus(event);
+      }
+    });
+
+    document.body.appendChild(overlay);
+  }
+
+  function isDialogOpen() {
+    return !!overlay && overlay.style.display !== 'none';
+  }
+
+  function getFocusable() {
+    return Array.prototype.filter.call(
+      dialog.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])'),
+      function (element) {
+        return !element.disabled && element.tabIndex !== -1 && isElementShown(element);
+      }
+    );
+  }
+
+  function trapFocus(event) {
+    const focusable = getFocusable();
+    if (focusable.length === 0) {
+      // Everything is disabled while deleting: keep focus on the dialog.
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  // Focus that wanders outside (e.g. a click on the page behind on some
+  // browsers) is pulled back in.
+  document.addEventListener('focusin', function (event) {
+    if (isDialogOpen() && !dialog.contains(event.target)) {
+      const focusable = getFocusable();
+      (focusable[0] || dialog).focus();
+    }
+  });
+
+  function canConfirm() {
+    return !busy && navigator.onLine &&
+      passwordField.input.value !== '' &&
+      confirmInput.value === CONFIRM_WORD; // exact, case-sensitive
+  }
+
+  function setMessage(text, isError) {
+    setSettingsMessage(messageArea, text, isError ? 'error' : null);
+  }
+
+  // Enables Delete only when allowed; shows/clears the offline line.
+  function updateDeleteButton() {
+    if (!overlay) {
+      return;
+    }
+    if (!busy) {
+      if (!navigator.onLine) {
+        setMessage(OFFLINE_MESSAGE, true);
+      } else if (messageArea.textContent === OFFLINE_MESSAGE) {
+        setMessage('', false);
+      }
+    }
+    deleteButton.disabled = !canConfirm();
+  }
+  window.addEventListener('online', updateDeleteButton);
+  window.addEventListener('offline', updateDeleteButton);
+
+  function setBusy(isBusy) {
+    busy = isBusy;
+    passwordField.input.disabled = isBusy;
+    passwordField.reveal.disabled = isBusy;
+    confirmInput.disabled = isBusy;
+    cancelButton.disabled = isBusy;
+    deleteButton.textContent = isBusy ? 'Deleting…' : 'Delete my account';
+    dialog.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+    if (isBusy) {
+      deleteButton.disabled = true;
+      // Every control is disabled now: keep focus inside the dialog.
+      dialog.focus();
+    } else {
+      updateDeleteButton();
+    }
+  }
+
+  function clearPassword() {
+    passwordField.input.value = '';
+    setPasswordVisible(passwordField, false);
+  }
+
+  function openDialog() {
+    if (busy) {
+      return;
+    }
+    buildDialog();
+    getSessionEmail().then(function (email) {
+      if (!email) {
+        refreshZone();
+        return;
+      }
+      emailText.textContent = email;
+      usernameInput.defaultValue = email;
+      clearPassword();
+      confirmInput.value = '';
+      setMessage('', false);
+      setBusy(false);
+      dialog.tabIndex = -1;
+      overlay.style.display = 'flex';
+      updateDeleteButton();
+      passwordField.input.focus();
+    });
+  }
+
+  // Closes and clears the dialog. Refused while a deletion is running,
+  // unless force is true (only used after a successful deletion).
+  function closeDialog(force) {
+    if (!overlay || (busy && !force)) {
+      return;
+    }
+    const wasOpen = isDialogOpen();
+    clearPassword();
+    confirmInput.value = '';
+    setMessage('', false);
+    overlay.style.display = 'none';
+    if (force) {
+      setBusy(false);
+    }
+    deleteButton.disabled = true;
+    if (wasOpen && !force && openButton && isElementShown(openButton)) {
+      openButton.focus();
+    }
+  }
+
+  // The Account page was left / Settings closed (e.g. phone Back).
+  function onLeave() {
+    closeDialog();
+  }
+
+  // Logged out (here or in another tab): hide the control and close the
+  // dialog, unless a deletion is running (it finishes on its own).
+  supabaseClient.auth.onAuthStateChange(function (event) {
+    if (event === 'SIGNED_OUT') {
+      if (zone) {
+        zone.hidden = true;
+      }
+      closeDialog();
+    }
+  });
+
+  // --- Error helpers ---
+  async function readFunctionErrorBody(error) {
+    const context = error && error.context;
+    if (!context || typeof context.json !== 'function') {
+      return null;
+    }
+    try {
+      const source = typeof context.clone === 'function' ? context.clone() : context;
+      const body = await source.json();
+      return body && typeof body === 'object' ? body : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // After an unexpected failure: true only if the server says this
+  // account no longer exists (or its session is no longer valid there).
+  // A network error is never treated as "gone".
+  async function accountAppearsDeleted() {
+    try {
+      const { data, error } = await supabaseClient.auth.getUser();
+      if (!error) {
+        return !(data && data.user);
+      }
+      if (isAuthNetworkError(error)) {
+        return false;
+      }
+      const status = error.status;
+      const code = typeof error.code === 'string' ? error.code : '';
+      const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+      return status === 403 || status === 404 ||
+        code === 'user_not_found' || code === 'session_not_found' ||
+        /user[^.]*(not found|does not exist|doesn't exist)/.test(message);
+    } catch (err) {
+      return false;
+    }
+  }
+
+  // --- The deletion ---
+  async function runAccountDeletion() {
+    if (busy || !canConfirm()) {
+      return;
+    }
+    // Read once; the input is cleared in finally below.
+    const password = passwordField.input.value;
+    setBusy(true);
+    setMessage('Deleting…', false);
+
+    // a. Stop every background process.
+    accountDeletionInProgress = true;
+    let succeeded = false;
+
+    try {
+      const email = await getSessionEmail();
+      if (!email) {
+        setMessage('You’re not signed in. Please log in again.', true);
+        return;
+      }
+
+      // b. Re-authenticate. Same-user SIGNED_IN: ignored by the auth
+      // listener, so no reload and no UI change.
+      let reauthError = null;
+      try {
+        const result = await supabaseClient.auth.signInWithPassword({ email: email, password: password });
+        reauthError = result.error;
+      } catch (err) {
+        reauthError = err || new Error('sign-in failed');
+      }
+      if (reauthError) {
+        if (isAuthNetworkError(reauthError)) {
+          setMessage('Couldn’t reach the server. Please check your connection and try again.', true);
+        } else if (reauthError.status === 429) {
+          setMessage('Too many attempts. Please wait a moment and try again.', true);
+        } else {
+          setMessage('Password is incorrect.', true);
+        }
+        return;
+      }
+
+      // c. The only place an account is ever deleted.
+      let outcome = 'unknown';
+      try {
+        const result = await supabaseClient.functions.invoke('delete-account');
+        if (!result.error) {
+          const status = result.response ? result.response.status : 200;
+          if (status === 200 && result.data && result.data.ok === true) {
+            outcome = 'ok';
+          }
+        } else {
+          const status = result.error.context && typeof result.error.context.status === 'number'
+            ? result.error.context.status
+            : 0;
+          const body = await readFunctionErrorBody(result.error);
+          const code = body && typeof body.error === 'string' ? body.error : '';
+          if (status === 401 || code === 'reauth_required' || code === 'unauthorized') {
+            outcome = 'reauth';
+          } else if (status === 500 && code === 'storage_cleanup_failed') {
+            outcome = 'storage';
+          } else if (status === 500 && code === 'user_delete_failed') {
+            outcome = 'user';
+          }
+        }
+      } catch (err) {
+        outcome = 'unknown';
+      }
+
+      // e. Anything unexpected (including network errors): the account
+      // may already be gone. Only the server saying so counts.
+      if (outcome === 'unknown' && (await accountAppearsDeleted())) {
+        outcome = 'ok';
+      }
+
+      if (outcome === 'ok') {
+        succeeded = true;
+      } else if (outcome === 'reauth') {
+        setMessage('Please try again. We couldn’t confirm it’s you.', true);
+      } else if (outcome === 'storage') {
+        setMessage('We couldn’t delete your images, so nothing was deleted. Please try again.', true);
+      } else if (outcome === 'user') {
+        setMessage('We couldn’t delete your account. Please try again.', true);
+      } else {
+        setMessage('Something went wrong and your account may not have been deleted. Please check your connection and try again.', true);
+      }
+    } catch (err) {
+      // Deliberately not logged: keep anything near the password out of
+      // the console.
+      setMessage('Something went wrong and your account may not have been deleted. Please check your connection and try again.', true);
+    } finally {
+      clearPassword();
+      if (!succeeded) {
+        // Nothing local is touched on failure; background work resumes.
+        accountDeletionInProgress = false;
+        setBusy(false);
+        if (isDialogOpen()) {
+          passwordField.input.focus();
+        }
+      }
+    }
+
+    if (succeeded) {
+      // d. -> step 4.
+      await cleanUpDeviceAfterAccountDeletion();
+    }
+  }
+
+  // --- Step 4: wipe this device ---
+  function waitWithTimeout(promise, ms) {
+    return Promise.race([
+      Promise.resolve(promise).catch(function () {}),
+      new Promise(function (resolve) { setTimeout(resolve, ms); })
+    ]);
+  }
+
+  // Lets syncs that were already in flight before the flag was set
+  // finish (they fail against the deleted account and, with the flag
+  // set, queue nothing), so none of them writes after the wipe.
+  async function drainInFlightWork() {
+    const deadline = Date.now() + DRAIN_TIMEOUT_MS;
+    await waitWithTimeout(Promise.all([
+      retryPendingWritesPromise,
+      imageRetryRunPromise
+    ]), DRAIN_TIMEOUT_MS);
+    while (Date.now() < deadline) {
+      let anyInFlight = false;
+      entrySyncStates.forEach(function (state) {
+        if (state.inFlight) {
+          anyInFlight = true;
+        }
+      });
+      if (!anyInFlight) {
+        break;
+      }
+      await new Promise(function (resolve) { setTimeout(resolve, 200); });
+    }
+  }
+
+  function revokeAll(map) {
+    map.forEach(function (url) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        // ignore
+      }
+    });
+    map.clear();
+  }
+
+  function clearInMemoryData() {
+    clearTimeout(notesAutosaveTimer);
+    notesAutosaveTimer = null;
+    clearTimeout(imageRetryTimer);
+    imageRetryTimer = null;
+
+    manhwaEntries.length = 0;
+    manhwaEntriesOwnerId = null;
+    clearUserLists();
+    newComicTags.length = 0;
+    detailEditTags = [];
+
+    currentDetailEntry = null;
+    detailNotesEntryId = null;
+    detailNotesTextarea.value = '';
+    entryBeingEdited = null;
+    listBeingRenamedId = null;
+    currentOpenListId = null;
+    listPickerEntry = null;
+    listPickerReturnFocus = null;
+    editingQuickNoteEntry = null;
+    editingCharacterId = null;
+    if (pickedCharacterImagePreviewUrl) {
+      URL.revokeObjectURL(pickedCharacterImagePreviewUrl);
+      pickedCharacterImagePreviewUrl = null;
+    }
+    pickedCharacterImageBlob = null;
+    pickedCharacterImageFile = null;
+    characterImageWasRemoved = false;
+    searchInput.value = '';
+    currentSearchTerm = '';
+
+    // Caches and per-item state.
+    revokeAll(imageObjectUrlCache);
+    revokeAll(characterImageObjectUrlCache);
+    revokeListCollageUrls();
+    listCollageRenderToken++;
+    coverCloudStates.clear();
+    characterImageCloudStates.clear();
+    coverDownloadFailures.clear();
+    coverDownloadsInFlight.clear();
+    characterImageDownloadFailures.clear();
+    characterImageDownloadsInFlight.clear();
+    thumbnailLookupsInFlight.clear();
+    thumbnailBackfillAttempted.clear();
+    failedThumbnailUrls.clear();
+    imageTasksInFlight.clear();
+    // entrySyncStates is cleared after drainInFlightWork(), which reads it.
+    // Per-page-session "once" flags start fresh for whoever logs in next.
+    thumbnailBackfillStarted = false;
+    imageCatchUpScanDone = false;
+    imageNotSyncedMessageShown = false;
+    setCoverSyncUser(null); // also discards any download still finishing
+    libraryLoadState = 'idle';
+    lastDataRefreshAt = 0;
+    foregroundRefreshOwed = false;
+
+    // Pending counter and badge.
+    pendingIndicatorRequestId++;
+    const badge = document.getElementById('pendingSyncBadge');
+    if (badge) {
+      badge.textContent = '';
+      badge.hidden = true;
+    }
+    hideSyncErrorBanner();
+  }
+
+  // Closes a cached IndexedDB connection (if any), then deletes the
+  // database. Resolves either way; "blocked" (another open tab) still
+  // completes on its own once that tab lets go.
+  async function deleteDatabase(name, connectionPromise) {
+    if (connectionPromise) {
+      try {
+        (await connectionPromise).close();
+      } catch (err) {
+        // never opened / already closed
+      }
+    }
+    await new Promise(function (resolve) {
+      let request;
+      try {
+        request = indexedDB.deleteDatabase(name);
+      } catch (err) {
+        resolve();
+        return;
+      }
+      request.onsuccess = function () { resolve(); };
+      request.onerror = function () { resolve(); };
+      request.onblocked = function () { resolve(); };
+    });
+  }
+
+  function getAuthStorageKey() {
+    const key = supabaseClient.auth && supabaseClient.auth.storageKey;
+    return typeof key === 'string' && key
+      ? key
+      : 'sb-' + new URL(SUPABASE_URL).hostname.split('.')[0] + '-auth-token';
+  }
+
+  // Only this app's own keys: the legacy entries copy, Card Size, Cover
+  // dimming, and Supabase's auth keys (the session plus its
+  // "-code-verifier" / "-user" companions).
+  function removeAppStorageKeys() {
+    const authKey = getAuthStorageKey();
+    const appKeys = [STORAGE_KEY, CARD_SIZE_STORAGE_KEY, COVER_DIMMING_STORAGE_KEY];
+    [window.localStorage, window.sessionStorage].forEach(function (storage) {
+      try {
+        appKeys.forEach(function (key) {
+          storage.removeItem(key);
+        });
+        const authKeys = [];
+        for (let i = 0; i < storage.length; i++) {
+          const key = storage.key(i);
+          if (key && key.indexOf(authKey) === 0) {
+            authKeys.push(key);
+          }
+        }
+        authKeys.forEach(function (key) {
+          storage.removeItem(key);
+        });
+      } catch (err) {
+        // Storage unavailable (private mode etc.): nothing to remove.
+      }
+    });
+  }
+
+  // Hides every popup/modal without running their save paths.
+  function closeAllPopups() {
+    closeLinkPopup();
+    listPickerOverlay.style.display = 'none';
+    if (quickNoteModalOverlay.style.display !== 'none') {
+      quickNoteModalOverlay.style.display = 'none';
+      unlockPageScrollForQuickNote();
+    }
+    addEntrySheetOverlay.classList.remove('sheet-open');
+    privacyModalOverlay.style.display = 'none';
+    closeDialog(true);
+  }
+
+  async function cleanUpDeviceAfterAccountDeletion() {
+    // Everything here runs with accountDeletionInProgress still true.
+    try {
+      clearInMemoryData();
+      await drainInFlightWork();
+      entrySyncStates.clear();
+
+      const queueConnection = pendingWritesDatabasePromise;
+      pendingWritesDatabasePromise = null;
+      const imageConnection = imageDatabasePromise;
+      imageDatabasePromise = null;
+      await deleteDatabase(PENDING_WRITES_DB_NAME, queueConnection);
+      await deleteDatabase(IMAGE_DB_NAME, imageConnection);
+      // A late open while deleting would have cached a new connection.
+      pendingWritesDatabasePromise = null;
+      imageDatabasePromise = null;
+
+      removeAppStorageKeys();
+      closeAllPopups();
+
+      // Empty the shelf/detail page so nothing from this account stays
+      // in the page.
+      detailView.style.display = 'none';
+      libraryView.style.display = 'block';
+      try {
+        renderList();
+      } catch (err) {
+        // The login screen covers it anyway.
+      }
+    } catch (err) {
+      console.error('Account deleted, but cleaning up this device hit an error.');
+    }
+
+    // Local sign-out (the user no longer exists on the server). Fires
+    // SIGNED_OUT, which shows the login screen and closes Settings.
+    try {
+      await supabaseClient.auth.signOut({ scope: 'local' });
+    } catch (err) {
+      // ignored
+    }
+    removeAppStorageKeys();
+
+    // Make sure Settings is closed and the login screen is showing even
+    // if no event fired.
+    closeSettingsView();
+    showAuthOrApp(null);
+    if (zone) {
+      zone.hidden = true;
+    }
+    if (accountEmailValue) {
+      accountEmailValue.textContent = '';
+    }
+    showDeletedNotice();
+    accountDeletionInProgress = false;
+  }
+
+  // One-time message on the login screen; cleared once the person starts
+  // signing in or up again.
+  function showDeletedNotice() {
+    const notice = document.getElementById('authNotice');
+    if (!notice) {
+      return;
+    }
+    notice.textContent = DELETED_NOTICE;
+    notice.hidden = false;
+    const email = document.getElementById('authEmail');
+    if (email) {
+      email.value = '';
+      email.focus();
+    }
+    const password = document.getElementById('authPassword');
+    if (password) {
+      password.value = '';
+    }
+  }
+
+  function clearDeletedNotice() {
+    const notice = document.getElementById('authNotice');
+    if (notice && !notice.hidden) {
+      notice.textContent = '';
+      notice.hidden = true;
+    }
+  }
+  signInBtn.addEventListener('click', clearDeletedNotice);
+  signUpBtn.addEventListener('click', clearDeletedNotice);
+
+  return {
+    buildZone: buildZone,
+    refreshZone: refreshZone,
+    onLeave: onLeave
+  };
+})();

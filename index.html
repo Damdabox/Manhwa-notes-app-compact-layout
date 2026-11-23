@@ -34,6 +34,9 @@
     <button id="signUpBtn" type="button">Sign Up</button>
     <button id="signInBtn" type="button">Log In</button>
     <div id="authError"></div>
+    <!-- authNotice: one-time "Your account has been deleted." after
+         Settings > Account > Delete my account. Filled in by script.js. -->
+    <p id="authNotice" class="auth-notice" role="status" aria-live="polite" hidden></p>
   </div>
 
   <!-- appScreen: wraps the entire existing app (everything that used to
@@ -974,7 +977,7 @@ The End"></textarea>
 
         <p><strong>What I don't do:</strong> I don't sell your data, I don't share it with advertisers, and I don't use analytics, advertising or tracking tools. If that ever changes, I'll update this page before it does.</p>
 
-        <p><strong>Deleting your data:</strong> deleting an entry also deletes its cover and character images from cloud storage. To delete your whole account and everything in it, email me and I'll do it for you.</p>
+        <p><strong>Deleting your data:</strong> deleting an entry also deletes its cover and character images from cloud storage. You can delete your whole account yourself in Settings, under Account, with Delete my account. That permanently deletes your login, entries, lists, notes and images, and it can't be undone. If you have any trouble, email me and I'll help.</p>
 
         <p><strong>Contact:</strong> questions, bugs or feedback? Email me at <a id="privacyContactEmailLink" class="privacy-contact-link"></a>.</p>
       </div>

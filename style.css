@@ -3742,13 +3742,191 @@ body.private-mode #manhwaList {
   gap: 10px;
 }
 
-/* Reserved for "Delete my account" (not built yet): a divider and an
-   empty, clearly separate area at the bottom of the Account page. */
+/* "Delete my account": a divider and a clearly separate area at the
+   bottom of the Account page. Deliberately low-emphasis: grey,
+   underlined text, not a red button. */
 .settings-danger-zone {
   margin-top: 40px;
   padding-top: 20px;
   border-top: 1px solid #444;
   min-height: 60px;
+}
+
+.settings-danger-zone[hidden] {
+  display: none;
+}
+
+.delete-account-caption {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: #aaa;
+}
+
+.delete-account-open-button {
+  background: none;
+  border: none;
+  padding: 10px 0;
+  min-height: 44px;
+  font-size: 14px;
+  color: #aaa;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.delete-account-open-button:hover {
+  color: #ddd;
+}
+
+.delete-account-open-button:focus-visible {
+  outline: 2px solid #4169e1;
+  outline-offset: 2px;
+}
+
+/* Delete-account dialog: a centered modal (reuses .modal-overlay /
+   .modal-box), a near-full-screen sheet on phone (below). */
+.delete-account-dialog {
+  max-width: 460px;
+  color: #eee;
+  gap: 12px;
+}
+
+.delete-account-dialog:focus {
+  outline: none;
+}
+
+.delete-account-title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.delete-account-text {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.delete-account-email {
+  overflow-wrap: anywhere;
+}
+
+.delete-account-list {
+  margin: 0;
+  padding-left: 22px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.delete-account-warning {
+  font-weight: bold;
+}
+
+.delete-account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.delete-account-confirm-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.delete-account-message {
+  margin: 0;
+}
+
+.delete-account-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.delete-account-cancel-button,
+.delete-account-confirm-button {
+  min-height: 44px;
+  padding: 8px 20px;
+  font-size: 15px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* Cancel: the clearly primary button. */
+.delete-account-cancel-button {
+  background: #4169e1;
+  color: #fff;
+  border: 1px solid #4169e1;
+  font-weight: bold;
+}
+
+.delete-account-cancel-button:hover:not(:disabled) {
+  background: #5a7ff0;
+}
+
+/* Delete: muted and outlined. */
+.delete-account-confirm-button {
+  background: transparent;
+  color: #bbb;
+  border: 1px solid #666;
+}
+
+.delete-account-confirm-button:hover:not(:disabled) {
+  color: #fff;
+  border-color: #888;
+}
+
+.delete-account-cancel-button:disabled,
+.delete-account-confirm-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.delete-account-cancel-button:focus-visible,
+.delete-account-confirm-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* One-time "Your account has been deleted." on the login screen. */
+.auth-notice {
+  margin: 12px 0 0;
+  font-size: 15px;
+  color: #7bd88f;
+}
+
+.auth-notice[hidden] {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .delete-account-overlay {
+    align-items: stretch;
+    padding: 24px 0 0;
+  }
+
+  .delete-account-dialog {
+    max-width: none;
+    max-height: none;
+    height: 100%;
+    border-radius: 12px 12px 0 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .delete-account-form {
+    flex: 1 0 auto;
+  }
+
+  /* Cancel on top, both full width, pinned to the bottom of the sheet. */
+  .delete-account-actions {
+    flex-direction: column-reverse;
+    margin-top: auto;
+  }
+
+  .delete-account-cancel-button,
+  .delete-account-confirm-button {
+    width: 100%;
+  }
 }
 
 @media (max-width: 600px) {
