@@ -969,17 +969,37 @@ The End"></textarea>
       </div>
 
       <div class="privacy-modal-body">
-        <p>This app is a personal tool for keeping track of your own reading and watching: your titles, notes, links, tags and lists. It doesn't host, provide or recommend any content.</p>
+        <p><em>Last updated: November 22, 2026</em></p>
 
-        <p><strong>What I store:</strong> your email address and password (handled by my login provider, so I never see your password), and the entries and lists you create: titles, authors, chapters, links, tags, ratings, notes, scenes and character names. Cover and character images you choose are resized and stored in private cloud storage so they appear on all your devices; only your account can access them.</p>
+        <p><strong>What this app is</strong><br>
+        This app is a personal tool for keeping track of your own reading and watching: your titles, notes, links, tags and lists. It doesn't host, provide or recommend any content.</p>
 
-        <p><strong>Where it lives:</strong> your data and cover images are stored with Supabase, a hosted database and storage service. The app itself is served from GitHub Pages. Your entries, lists and images are private to your account, and other users can't see them.</p>
+        <p><strong>What I store</strong><br>
+        Your account: your email address and password. Your password is handled by my login provider, so I never see it.<br>
+        Your library: the entries and lists you create, including titles, authors, chapters, links, tags, ratings, notes, scenes and character names.<br>
+        Your images: cover and character images you choose. They are resized and stored in private cloud storage so they appear on all your devices. Only your account can access them.<br>
+        Video thumbnails: for video links, the web address of a preview picture (see "Video thumbnails" below).</p>
 
-        <p><strong>What I don't do:</strong> I don't sell your data, I don't share it with advertisers, and I don't use analytics, advertising or tracking tools. If that ever changes, I'll update this page before it does.</p>
+        <p><strong>What's saved on your device</strong><br>
+        To make the app fast and usable offline, your browser keeps copies of your images, changes that are waiting to upload, your login session and your display settings (like card size and cover dimming). This stays on your device. Deleting your account clears it on the device you delete it from.</p>
 
-        <p><strong>Deleting your data:</strong> deleting an entry also deletes its cover and character images from cloud storage. You can delete your whole account yourself in Settings, under Account, with Delete my account. That permanently deletes your login, entries, lists, notes and images, and it can't be undone. If you have any trouble, email me and I'll help.</p>
+        <p><strong>Where it lives and who handles it</strong><br>
+        Your data and images are stored with Supabase, a hosted database and storage service, which also handles logins and sends account emails such as sign-up confirmations. The app itself is served by GitHub Pages. Like most hosting providers, these services may keep their own technical logs, such as IP addresses.</p>
 
-        <p><strong>Contact:</strong> questions, bugs or feedback? Email me at <a id="privacyContactEmailLink" class="privacy-contact-link"></a>.</p>
+        <p><strong>Video thumbnails</strong><br>
+        When you save a link to a video, the app tries to find a preview picture for it. For YouTube links, the app builds the picture's address itself. For other sites, it sends the link to a small function of mine, which reads that page to find its preview picture. The function doesn't record your link or the site's name. Only the picture's address is saved in your entry, and I don't keep copies of the pictures. Thumbnails load directly from the website you saved, which can see that your browser asked for the picture.</p>
+
+        <p><strong>Who can see your data</strong><br>
+        Other users can't. As the person running the app, I can technically see what is stored in the database. I don't browse people's libraries, and I would only look at an account's data if you ask me to help with a problem.</p>
+
+        <p><strong>What I don't do</strong><br>
+        I don't sell your data, I don't share it with advertisers, and I don't use analytics, advertising or tracking tools. If that ever changes, I'll update this page before it does.</p>
+
+        <p><strong>Deleting your data</strong><br>
+        Deleting an entry also deletes its cover and character images from cloud storage. You can delete your whole account yourself in Settings, under Account, with Delete my account. That permanently deletes your login, entries, lists, notes and images, and it can't be undone. If you have any trouble, email me and I'll help.</p>
+
+        <p><strong>Contact</strong><br>
+        Questions, bugs or feedback? Email me at <a id="privacyContactEmailLink" class="privacy-contact-link"></a>.</p>
       </div>
 
       <button id="privacyModalCloseButton" type="button" class="privacy-modal-close-button">Close</button>
