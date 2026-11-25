@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Manhwa Notes App</title>
   <link rel="stylesheet" href="style.css">
 
@@ -23,7 +24,33 @@
 </head>
 <body>
 
+  <!-- authScreen: email/password login gate, shown before the app itself.
+       No functionality wired up yet (see script.js) - just the markup for
+       the email/password fields, Sign Up / Log In buttons, and a spot to
+       show auth errors. -->
+  <div id="authScreen">
+    <input type="email" id="authEmail" placeholder="Email" aria-label="Email">
+    <input type="password" id="authPassword" placeholder="Password" aria-label="Password">
+    <button id="signUpBtn" type="button">Sign Up</button>
+    <button id="signInBtn" type="button">Log In</button>
+    <div id="authError"></div>
+    <!-- authNotice: one-time "Your account has been deleted." after
+         Settings > Account > Delete my account. Filled in by script.js. -->
+    <p id="authNotice" class="auth-notice" role="status" aria-live="polite" hidden></p>
+  </div>
+
+  <!-- appScreen: wraps the entire existing app (everything that used to
+       sit directly in <body>) so it can be shown/hidden as one unit once
+       auth is wired up, the same way #libraryView/#detailView already
+       get swapped elsewhere in this file. -->
+  <div id="appScreen">
+
   <h1>Manhwa Notes App</h1>
+  <button id="logoutBtn" type="button">Log Out</button>
+  <!-- pendingSyncBadge: small "N changes waiting to sync" pill next to
+       Log Out. Filled in and shown/hidden by updatePendingIndicator() in
+       script.js; hidden whenever this user's offline queue is empty. -->
+  <span id="pendingSyncBadge" class="pending-sync-badge" role="status" hidden></span>
 
   <!-- libraryView wraps EVERYTHING that makes up the normal shelf page
        (the add form, bulk add, search, tabs, zoom controls, and the
@@ -34,8 +61,34 @@
        together with #detailView below. -->
   <div id="libraryView">
 
+  <!-- addEntrySheetOverlay: on normal (laptop/tablet) widths this is just
+       a plain, unstyled wrapper div around .form - it has NO CSS rules
+       outside the phone-width media query in style.css, so .form renders
+       exactly like it always has and this div is invisible to the
+       layout.
+
+       On phone widths only, style.css turns this same div into a dimmed,
+       full-screen backdrop (the exact same trick #quickNoteModalOverlay
+       uses for Quick Notes - see that div further down this file) and
+       turns .form itself into the sheet box that slides up from the
+       bottom. Because it's the SAME .form element either way (same ids,
+       same fields), script.js's Add Entry logic doesn't need to know or
+       care whether the form is showing inline or inside a popup sheet.
+
+       #addEntrySheetOverlay starts WITHOUT the "sheet-open" class, so on
+       phone widths the sheet starts closed - see the "Add Entry sheet"
+       section in script.js for what adds/removes that class. -->
+  <div id="addEntrySheetOverlay" class="add-entry-sheet-overlay">
   <div class="form">
-    <input type="text" id="titleInput" placeholder="Enter title">
+    <!-- Sheet header: only shown on phone widths (see
+         .add-entry-sheet-header in style.css, hidden by default). Gives
+         the popup sheet a title and a close ("X") button, same idea as
+         .modal-header on the Quick Note popup. Clicking the "X" just
+         closes the sheet - see addEntrySheetCloseButton in script.js. -->
+    <div class="add-entry-sheet-header">
+      <h3>Add entry</h3>
+      <button id="addEntrySheetCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
+    </div>
 
     <!-- Type: picks which kind of entry this is, which in turn decides
          which progress field(s) below actually apply. Manhwa is the
@@ -43,35 +96,66 @@
          progress fields start in the right state (Chapter # visible,
          Volume/Page/Episode hidden) even before script.js runs a
          single line - see the "Type" section in script.js for how
-         changing this dropdown swaps which field(s) are shown. -->
-    <select id="typeInput">
+         changing this dropdown swaps which field(s) are shown.
+
+         On phone widths, this real <select> is hidden (see style.css)
+         and the three buttons in .type-pill-row just below take over
+         as the visible control - but this select is still what
+         actually HOLDS the type value everywhere else in the code
+         (addButton's click handler reads typeInput.value, exactly like
+         before). The pill buttons work by setting this select's value
+         and firing a "change" event on it, so from script.js's point
+         of view a pill tap looks identical to picking an option from a
+         normal dropdown - see the "Type pills" section in script.js. -->
+    <select id="typeInput" aria-label="Type" title="What kind of title this is">
       <option value="Manhwa">Manhwa</option>
       <option value="Other Comics">Other Comics</option>
       <option value="Videos">Videos</option>
     </select>
 
-    <!-- Author: only makes sense for Manhwa / Other Comics (a "Videos"
-         entry doesn't really have an "author" in the same sense), so
-         this is shown/hidden based on the Type dropdown above, the
-         same way the progress fields below are - see
-         updateAuthorFieldVisibility() in script.js. Manhwa is the
-         default Type (see the <select> just above), so this starts
-         visible with no inline style="display: none" needed here. -->
-    <input type="text" id="authorInput" placeholder="Author">
+    <!-- Type pills: phone-only restyle of the #typeInput select above as
+         three equal-width segmented buttons. Hidden on laptop/tablet
+         (see .type-pill-row in style.css) since the real dropdown
+         already shows there. data-type on each button matches one of
+         the <option value="..."> above exactly - script.js uses that to
+         know which type was tapped. -->
+    <div class="type-pill-row">
+      <button type="button" class="type-pill" data-type="Manhwa">Manhwa</button>
+      <button type="button" class="type-pill" data-type="Other Comics">Other Comics</button>
+      <button type="button" class="type-pill" data-type="Videos">Videos</button>
+    </div>
 
-    <!-- Progress fields: exactly ONE of these groups is visible at a
-         time, based on whichever type is picked above. All four still
-         exist in the page at all times (just hidden with style="display:
-         none") - script.js only ever toggles which are shown, it never
-         adds/removes them, which keeps the show/hide logic simple. See
-         updateProgressFieldsVisibility() in script.js. -->
-    <input type="text" id="chapterInput" placeholder="Chapter #">
-    <input type="text" id="volumeInput" placeholder="Volume #" style="display: none;">
-    <input type="text" id="pageInput" placeholder="Page #" style="display: none;">
-    <input type="text" id="episodeInput" placeholder="Episode # (optional)" style="display: none;">
+    <input type="text" id="titleInput" placeholder="Enter title" aria-label="Title">
 
-    <input type="text" id="linkInput" placeholder="Link (URL)">
-    <select id="statusInput">
+    <!-- Author + progress row: on phone widths these sit side by side in
+         one row (see .author-progress-row in style.css) - on
+         laptop/tablet this wrapper div has no visual effect at all
+         (display: contents), so the fields flow exactly like they did
+         before this wrapper was added. -->
+    <div class="author-progress-row">
+      <!-- Author: only makes sense for Manhwa / Other Comics (a "Videos"
+           entry doesn't really have an "author" in the same sense), so
+           this is shown/hidden based on the Type dropdown above, the
+           same way the progress fields below are - see
+           updateAuthorFieldVisibility() in script.js. Manhwa is the
+           default Type (see the <select> above), so this starts
+           visible with no inline style="display: none" needed here. -->
+      <input type="text" id="authorInput" placeholder="Author">
+
+      <!-- Progress fields: exactly ONE of these groups is visible at a
+           time, based on whichever type is picked above. All four still
+           exist in the page at all times (just hidden with style="display:
+           none") - script.js only ever toggles which are shown, it never
+           adds/removes them, which keeps the show/hide logic simple. See
+           updateProgressFieldsVisibility() in script.js. -->
+      <input type="text" id="chapterInput" placeholder="Chapter #">
+      <input type="text" id="volumeInput" placeholder="Volume #" style="display: none;">
+      <input type="text" id="pageInput" placeholder="Page #" style="display: none;">
+      <input type="text" id="episodeInput" placeholder="Episode # (optional)" style="display: none;">
+    </div>
+
+    <input type="text" id="linkInput" placeholder="Link (URL)" aria-label="Link" title="Where you read or watch it (optional)">
+    <select id="statusInput" aria-label="Status">
       <option value="Reading">Reading</option>
       <option value="Ongoing">Ongoing</option>
       <option value="Completed">Completed</option>
@@ -88,13 +172,13 @@
          strictly required, but it's the correct/expected type for a
          button that isn't meant to submit anything). -->
     <div class="tag-input-row">
-      <input type="text" id="tagInput" placeholder="Add a tag (e.g. isekai)">
+      <input type="text" id="tagInput" placeholder="Add a tag (e.g. isekai)" aria-label="Tag">
       <button id="addTagButton" type="button">Add Tag</button>
     </div>
     <div id="tagsPreview" class="tags-preview"></div>
 
     <button id="addButton" type="button">Add Entry</button>
-    <button id="bulkAddButton" type="button">Bulk Add</button>
+    <button id="bulkAddButton" type="button" title="Add many titles at once">Bulk Add</button>
 
     <!-- Quick Notes: a completely separate feature from the Manhwa/Other
          Comics/Videos entries above - just a title + a block of
@@ -111,8 +195,48 @@
          the big comment down there for how a "popup" is actually built
          out of plain HTML/CSS, and the "Quick Notes" section in
          script.js for how Save/Delete work inside it). -->
-    <button id="quickNotesButton" type="button" class="quick-notes-button">Quick Notes</button>
+    <button id="quickNotesButton" type="button" class="quick-notes-button" title="Save a quick note or link without a full entry">Quick Notes</button>
+
+    <!-- Phone-only secondary links: hidden by default (see
+         .add-entry-sheet-secondary-row in style.css) so laptop/tablet
+         never sees them - #bulkAddButton and #quickNotesButton above
+         already do their jobs there. On phone widths only, those two
+         buttons are hidden instead (see style.css) and these two plain
+         text links take over as the way into the same two features,
+         styled much less prominently than "Add entry" so that button
+         still reads as the main action. "Bulk add" switches this same
+         sheet over to the bulk-add fields near the bottom of this file
+         (see #bulkAddPanel) instead of opening a new screen; "Quick
+         note" just opens the existing #quickNoteModalOverlay popup,
+         exactly like #quickNotesButton above already does - see the
+         "Add Entry sheet" section in script.js for both click
+         handlers. -->
+    <div class="add-entry-sheet-secondary-row">
+      <button type="button" id="sheetBulkAddLink" class="add-entry-sheet-secondary-link" title="Add many titles at once">Bulk add</button>
+      <button type="button" id="sheetQuickNoteLink" class="add-entry-sheet-secondary-link" title="Save a quick note or link without a full entry">Quick note</button>
+    </div>
   </div>
+
+  <!-- Settings gear (laptop/tablet only): absolutely positioned at the
+       right end of the Add Entry / Bulk Add / Quick Notes row, so it
+       lines up with the search bar's right edge without moving anything
+       in .form. Hidden on phone widths, where #settingsGearPhone in the
+       filter row takes over - see ".settings-gear" in style.css. Opens
+       #settingsView - see the "Settings view" section in script.js. -->
+  <button id="settingsGearLaptop" type="button" class="settings-gear settings-gear-laptop" aria-label="Settings" title="Settings">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.73 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.04.31-.08.63-.08.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+  </button>
+  </div><!-- /#addEntrySheetOverlay -->
+
+  <!-- Floating "+" button: only shown on phone widths (see
+       .open-add-entry-sheet-button in style.css, hidden by default on
+       laptop/tablet since the form is already visible there and this
+       button would be redundant). "position: fixed" in that CSS rule is
+       what keeps it pinned to the bottom-right corner of the screen
+       while scrolling, instead of scrolling away with the page.
+       Clicking it adds the "sheet-open" class to #addEntrySheetOverlay
+       above - see the "Add Entry sheet" section in script.js. -->
+  <button id="openAddEntrySheetButton" type="button" class="open-add-entry-sheet-button" aria-label="Add entry" title="Add entry">+</button>
 
   <!-- Bulk Add panel: hidden until "Bulk Add" above is clicked. Paste a
        whole list of titles into the textarea, pick ONE status that will
@@ -120,6 +244,24 @@
        Add" section in script.js for how the pasted text gets split up
        into individual titles, and how duplicates are detected. -->
   <div id="bulkAddPanel" class="bulk-add-panel" style="display: none;">
+    <!-- Sheet-mode header: hidden by default (see .bulk-add-sheet-header
+         in style.css), same "invisible outside the phone media query"
+         trick as .add-entry-sheet-header up near the top of this file.
+         On phone widths, this only ever appears once "Bulk add" (see
+         #sheetBulkAddLink above) has swapped this whole panel in as the
+         Add Entry sheet's content - it gives that reused content the
+         exact same title-plus-X look as the rest of the sheet, even
+         though this panel itself has no such header on laptop/tablet,
+         where it's just a plain panel with a "Cancel" button at the
+         bottom like it's always had. Tapping the "X" here does the
+         exact same thing as "Cancel" below (see bulkAddSheetCloseButton
+         in script.js) - it's just a second, sheet-style way to get
+         there. -->
+    <div class="bulk-add-sheet-header">
+      <h3>Bulk add</h3>
+      <button id="bulkAddSheetCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
+    </div>
+
     <textarea id="bulkAddTextarea" class="bulk-add-textarea" rows="8" placeholder="Paste titles here - one blank line between each comic. If a title wraps onto a second line with no blank line after it, both lines get joined into one title.
 
 Example:
@@ -132,7 +274,7 @@ The Beginning After
 The End"></textarea>
 
     <div class="bulk-add-controls">
-      <select id="bulkAddStatusInput">
+      <select id="bulkAddStatusInput" aria-label="Status for all pasted titles" title="Status given to every pasted title">
         <option value="Reading">Reading</option>
         <option value="Ongoing">Ongoing</option>
         <option value="Completed">Completed</option>
@@ -152,7 +294,7 @@ The End"></textarea>
        back to showing everything; see the "Search bar" section in
        script.js for how both pieces work. -->
   <div class="search-bar">
-    <input type="text" id="searchInput" placeholder="Search by title or tag...">
+    <input type="text" id="searchInput" placeholder="Search by title or tag..." aria-label="Search by title or tag">
     <button id="clearSearchButton" class="clear-search-button" type="button" aria-label="Clear search">&times;</button>
   </div>
 
@@ -189,24 +331,89 @@ The End"></textarea>
            with buildStarSVG() like a rating star, since this one icon
            is always the same full/solid star and never needs to
            switch between full/half/empty. -->
-      <button class="filter-tab" data-filter="Characters">
+      <button class="filter-tab" data-filter="Characters" title="Favorite characters from all your titles" aria-label="Characters">
         <svg viewBox="0 0 24 24" width="14" height="14" class="star-svg tab-star-icon"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" fill="#ffd700" stroke="#c9a400" stroke-width="1"></path></svg>
-        Characters
+        <!-- Wrapped in its own span (instead of being bare text like the
+             other tabs) purely so the phone media query below can hide
+             just this word and leave the star icon above showing on its
+             own - see ".filter-tab-label" in style.css. Laptop/tablet
+             never hides it, so this looks identical to before there. -->
+        <span class="filter-tab-label">Characters</span>
       </button>
+
+      <!-- Lists tab: like Characters, this swaps the shelf out for
+           #listsView below instead of filtering it. See the "Lists tab"
+           section in script.js. -->
+      <button class="filter-tab" data-filter="Lists" title="Your own collections of titles">Lists</button>
     </div>
+
+    <!-- Phone-only compact filter pills: on phone widths, these two
+         dropdown buttons REPLACE the full-width Status/Type tabs above
+         as the visible way to change those filters (see style.css's
+         phone media query, which hides the originals and shows these
+         instead). Both reuse the exact same ".status-dropdown" /
+         ".status-dropdown-button" / ".status-dropdown-menu" look already
+         built for the status dropdown just below in #statusFilterRow -
+         same dark pill, same chevron, same menu styling, just applied to
+         two new elements - so no new CSS "look" had to be invented here.
+
+         They don't hold any filtering logic themselves: clicking either
+         one just calls the exact same selectTypeFilter()/selectStatus()/
+         selectStatusAll() functions in script.js that the original
+         controls already use, so the shelf filters exactly like it
+         always did - see the "Phone filter pills" section in script.js.
+
+         Hidden by default (like .type-pill-row above) so laptop/tablet
+         never renders them at all. -->
+    <div id="phoneStatusDropdown" class="status-dropdown phone-filter-pill">
+      <button id="phoneStatusDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" title="Filter by status">
+        <span id="phoneStatusDropdownLabel">All</span>
+        <span class="status-dropdown-arrow">&#9662;</span>
+      </button>
+
+      <!-- Filled in by buildPhoneStatusDropdownMenu() in script.js: one
+           "All" button plus one button per STATUS_OPTIONS entry, so
+           this never drifts out of sync with the desktop status
+           dropdown's own list. Starts hidden; script.js toggles it. -->
+      <div id="phoneStatusDropdownMenu" class="status-dropdown-menu" style="display: none;"></div>
+    </div>
+
+    <div id="typeFilterDropdown" class="status-dropdown phone-filter-pill">
+      <button id="typeFilterDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" title="Filter by type">
+        <span id="typeFilterDropdownLabel">All</span>
+        <span class="status-dropdown-arrow">&#9662;</span>
+      </button>
+
+      <!-- Filled in by buildTypeFilterDropdownMenu() in script.js: one
+           button per TYPE_FILTER_OPTIONS entry (All/Manhwa/Other
+           Comics/Videos/Notes) - the same four choices as the
+           full-width tabs above, plus "Notes" tacked onto the end
+           (phone-width only - there's no matching full-width Notes
+           tab). Starts hidden; script.js toggles it. -->
+      <div id="typeFilterDropdownMenu" class="status-dropdown-menu" style="display: none;"></div>
+    </div>
+
+    <!-- Settings gear (phone only): sits right after "Lists" at the end
+         of the filter row's first line (see ".settings-gear-phone" in
+         style.css's phone filter-row section). Hidden on laptop/tablet,
+         where #settingsGearLaptop next to the Add Entry buttons is used
+         instead. -->
+    <button id="settingsGearPhone" type="button" class="settings-gear settings-gear-phone" aria-label="Settings" title="Settings">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false"><path fill="currentColor" d="M19.14 12.94c.04-.31.06-.62.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.73 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.04.31-.08.63-.08.94s.02.63.06.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg>
+    </button>
 
     <!-- Privacy toggle: a checkbox styled to look like a slider switch
          (see ".switch" / ".switch-slider" in style.css - this is a
          common CSS trick, not a special HTML element). Unchecked =
          "Cover" mode (blue, shelf looks normal). Checked = "Private"
          mode (red, every comic becomes a plain text row). -->
-    <div class="privacy-toggle">
-      <span class="privacy-toggle-label privacy-toggle-label-cover">Cover</span>
+    <div class="privacy-toggle" title="Cover: show titles as cards with cover images. Private: show plain text rows with no covers.">
+      <span class="privacy-toggle-label privacy-toggle-label-cover" title="Cover: show titles as cards with cover images">Cover</span>
       <label class="switch">
-        <input type="checkbox" id="privacyToggleInput" aria-label="Toggle private display mode">
+        <input type="checkbox" id="privacyToggleInput" aria-label="Private view: show plain text rows with no covers">
         <span class="switch-slider"></span>
       </label>
-      <span class="privacy-toggle-label privacy-toggle-label-private">Private</span>
+      <span class="privacy-toggle-label privacy-toggle-label-private" title="Private: show plain text rows with no covers">Private</span>
     </div>
   </div>
 
@@ -229,10 +436,10 @@ The End"></textarea>
            choices; picking one filters the shelf to just that status
            and becomes the new label. -->
   <div id="statusFilterRow" class="status-filter-row" style="display: none;">
-    <button id="statusAllButton" class="status-all-button" type="button">All</button>
+    <button id="statusAllButton" class="status-all-button" type="button" title="Show every status">All</button>
 
     <div id="statusDropdown" class="status-dropdown">
-      <button id="statusDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false">
+      <button id="statusDropdownButton" class="status-dropdown-button" type="button" aria-haspopup="true" aria-expanded="false" title="Filter by status">
         <span id="statusDropdownLabel">Reading</span>
         <span class="status-dropdown-arrow">&#9662;</span>
       </button>
@@ -251,13 +458,39 @@ The End"></textarea>
        (change one number), they're just two different ways to change it -
        see the "Zoom controls" section in script.js for how that number
        turns into an actual size change. -->
+  <!-- display-controls: holds Card Size and Cover dimming side by side
+       (wrapping onto two lines on narrow screens). Hidden as a whole in
+       Private mode and on the Characters tab, where neither applies. -->
+  <div class="display-controls">
   <div class="zoom-controls">
     <label for="zoomSlider">Card Size:</label>
-    <button id="zoomOutButton" class="zoom-button" type="button" aria-label="Zoom out">&minus;</button>
-    <input type="range" id="zoomSlider" min="0.6" max="1.8" step="0.1" value="1">
-    <button id="zoomInButton" class="zoom-button" type="button" aria-label="Zoom in">+</button>
+    <button id="zoomOutButton" class="zoom-button" type="button" aria-label="Smaller cards" title="Smaller cards">&minus;</button>
+    <input type="range" id="zoomSlider" aria-label="Card size" min="0.6" max="1.8" step="0.1" value="1">
+    <button id="zoomInButton" class="zoom-button" type="button" aria-label="Larger cards" title="Larger cards">+</button>
     <span id="zoomValueLabel">100%</span>
   </div>
+
+  <!-- Cover dimming: 0% (off) to 60%. See "Cover dimming" in script.js. -->
+  <div class="cover-dimming-controls">
+    <label for="coverDimmingSlider">Cover dimming:</label>
+    <input type="range" id="coverDimmingSlider" min="0" max="60" step="5" value="25">
+    <span id="coverDimmingValueLabel">25%</span>
+  </div>
+  </div>
+
+  <!-- libraryEmptyState: first-run card for a signed-in user whose
+       library loaded successfully and has zero entries. Shown/hidden by
+       updateEmptyStates() in script.js - never while loading, after a
+       failed load, or once any entry exists. -->
+  <div id="libraryEmptyState" class="library-empty-state" hidden>
+    <h2 class="library-empty-state-heading">Your library is empty</h2>
+    <p class="library-empty-state-text">Add your first title with the form above. Pick a type, enter a title, and tap Add Entry. You can add a link to wherever you read or watch it.</p>
+    <button id="libraryEmptyStateAddButton" type="button" class="library-empty-state-button">Add my first title</button>
+  </div>
+
+  <!-- tabEmptyState: shown when the library has entries but the active
+       type tab (Manhwa / Other Comics / Videos) has none of that type. -->
+  <p id="tabEmptyState" class="tab-empty-state" hidden>Nothing here yet. Entries of this type will show up here.</p>
 
   <ul id="manhwaList"></ul>
 
@@ -272,6 +505,12 @@ The End"></textarea>
        elsewhere in this file) since the shelf above is what should
        show first. -->
   <ul id="charactersList" class="characters-list" style="display: none;"></ul>
+
+  <!-- listsView: shown instead of manhwaList only while the "Lists" tab
+       is active. Built entirely by renderListsView() in script.js - it
+       shows either the overview of every list, or one open list's
+       comics. Starts hidden like #charactersList. -->
+  <div id="listsView" class="lists-view" style="display: none;"></div>
 
   </div><!-- /#libraryView -->
 
@@ -359,10 +598,16 @@ The End"></textarea>
                now. -->
           <div id="detailTags" class="tags-preview detail-tags"></div>
 
-          <!-- Star rating row. Only shown for Completed comics that
-               already have a rating - see showDetailView() in
-               script.js, which sets this div's display to "none" for
-               every other comic. -->
+          <!-- Star rating row. Shown for every Completed comic (rated
+               or not yet), hidden entirely for every other status -
+               see showDetailView() in script.js, which sets this div's
+               display to "none" for every other comic. Unlike the
+               read-only stars on the shelf card, these stars are real
+               tappable buttons: tapping one sets a new rating
+               immediately, no Edit/Save step needed - see
+               renderDetailRatingStars() in script.js for how tapping a
+               star's left vs right half is turned into a .5 vs whole
+               number rating. -->
           <div id="detailRating" class="entry-rating detail-rating"></div>
 
           <!-- Opens #detailEditForm below in place of this whole
@@ -374,6 +619,10 @@ The End"></textarea>
                write onto the exact same entry object, so either one
                keeps the other in sync automatically. -->
           <button id="editEntryButton" type="button">Edit</button>
+
+          <!-- Opens the "Add to list" picker for this comic - see the
+               "--- Add to list picker ---" section in script.js. -->
+          <button id="detailAddToListButton" type="button" class="detail-add-to-list-button">Add to list</button>
         </div>
 
         <!-- detailEditForm: hidden until "Edit" above is clicked.
@@ -415,10 +664,15 @@ The End"></textarea>
             <option value="Recommended">Recommended</option>
           </select>
 
-          <!-- Rating: only relevant once Status is "Completed" -
-               script.js shows/hides this live as Status above is
-               changed, same as the card's edit mode. -->
-          <input type="number" id="editEntryRating" class="edit-input rating-edit-input" min="0" max="5" step="0.5" placeholder="Rating (0-5)">
+          <!-- There is deliberately no Rating field in this form
+               anymore. Rating is now set by tapping directly on the
+               star row on the detail page itself (see #detailRating
+               above and renderDetailRatingStars() in script.js) -
+               that tap saves instantly, so there's nothing left for
+               this Edit form to do for rating. Changing Status away
+               from "Completed" here still clears any existing rating
+               though - see saveEntryEditButton's click handler in
+               script.js. -->
 
           <!-- Tag editor: same chips-plus-input-box idea as the
                Add-comic form and the card's edit mode - see
@@ -457,7 +711,12 @@ The End"></textarea>
     <div class="detail-notes-section">
       <label for="detailNotesTextarea" class="detail-notes-label">My Notes</label>
       <textarea id="detailNotesTextarea" class="detail-notes-textarea" rows="6"></textarea>
-      <button id="saveNotesButton" type="button">Save Notes</button>
+      <div class="detail-notes-actions">
+        <button id="saveNotesButton" type="button">Save Notes</button>
+        <!-- Quiet autosave status ("Saving..." / "Saved"), filled in by
+             saveDetailNotes() in script.js. Empty when nothing changed. -->
+        <span id="detailNotesStatus" class="detail-notes-status" aria-live="polite"></span>
+      </div>
     </div>
 
     <!-- Favorite Scenes section: sits below the notes section, same
@@ -558,6 +817,29 @@ The End"></textarea>
     </div>
   </div>
 
+  <!-- settingsView: the Settings page. Works exactly like #detailView
+       above - a full replacement for #libraryView, swapped in by
+       showSettingsView() and back out by closeSettingsView() in the
+       "Settings view" section of script.js. Everything inside
+       #settingsSectionList and #settingsContent is built by script.js
+       from SETTINGS_SECTIONS (with textContent, never innerHTML).
+
+       Laptop/tablet: the section list is a left sidebar and the
+       selected section's page shows in the pane to its right. Phone:
+       only one of the two shows at a time - the list first, then the
+       section's page once one is tapped (see .settings-phone-page-open
+       in style.css). -->
+  <div id="settingsView" class="settings-view" style="display: none;">
+    <button id="settingsBackButton" type="button" class="back-button">&larr; Back</button>
+    <h2 id="settingsHeading" class="settings-heading" tabindex="-1">Settings</h2>
+    <div class="settings-layout">
+      <nav class="settings-sidebar" aria-label="Settings sections">
+        <ul id="settingsSectionList" class="settings-section-list"></ul>
+      </nav>
+      <div id="settingsContent" class="settings-content"></div>
+    </div>
+  </div>
+
   <!-- Quick Note modal: a POPUP, not a page. The key difference from
        #detailView above is where it sits and what it covers. #detailView
        is a full replacement for #libraryView - showDetailView() hides
@@ -591,16 +873,27 @@ The End"></textarea>
       <div class="modal-header">
         <h3 id="quickNoteModalHeading">Quick Note</h3>
 
-        <!-- The "X" close button: just hides the overlay again, same as
-             clicking outside the box or pressing Escape (see script.js) -
-             none of the three save anything, they just close the popup
-             and leave the note (new or existing) exactly as it was
-             before you opened it. -->
-        <button id="quickNoteModalCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
+        <div class="modal-header-actions">
+          <!-- Only shown in reading mode (see setQuickNoteMode() in
+               script.js): switches to the plain textarea for editing. -->
+          <button id="quickNoteModalEditButton" type="button" class="quick-note-edit-button" style="display: none;">Edit</button>
+
+          <!-- The "X" close button: just hides the overlay again, same as
+               clicking outside the box or pressing Escape (see script.js) -
+               none of the three save anything, they just close the popup
+               and leave the note (new or existing) exactly as it was
+               before you opened it. -->
+          <button id="quickNoteModalCloseButton" type="button" class="modal-close-button" aria-label="Close">&times;</button>
+        </div>
       </div>
 
       <input type="text" id="quickNoteModalTitleInput" placeholder="Note title">
       <textarea id="quickNoteModalTextInput" class="bulk-add-textarea" rows="8" placeholder="Write your note here..."></textarea>
+
+      <!-- Reading mode: the note text with tappable links, built by
+           renderNoteTextInto() in script.js from the textarea's value
+           (the textarea stays the one source of truth for Save). -->
+      <div id="quickNoteModalReadView" class="quick-note-read-view" style="display: none;"></div>
 
       <div class="bulk-add-controls">
         <button id="quickNoteModalSaveButton" type="button">Save Note</button>
@@ -611,6 +904,30 @@ The End"></textarea>
              where this gets shown/hidden. -->
         <button id="quickNoteModalDeleteButton" type="button" class="remove-cover-button">Delete Note</button>
       </div>
+    </div>
+  </div>
+
+  <!-- "Add to list" picker: one checkbox per list for a single comic.
+       A centered popup on desktop, a bottom sheet on phones (see
+       ".list-picker-overlay" in style.css). Everything inside
+       #listPickerRows is built by script.js - see the
+       "--- Add to list picker ---" section there. -->
+  <div id="listPickerOverlay" class="modal-overlay list-picker-overlay" style="display: none;">
+    <div id="listPicker" class="modal-box list-picker" role="dialog" aria-modal="true" aria-labelledby="listPickerHeading">
+      <div class="modal-header">
+        <h3 id="listPickerHeading" class="list-picker-heading"></h3>
+        <button id="listPickerCloseButton" type="button" class="modal-close-button list-picker-close" aria-label="Close">&times;</button>
+      </div>
+      <p class="list-picker-subheading">Add to list</p>
+
+      <div id="listPickerRows" class="list-picker-rows"></div>
+
+      <div class="list-picker-create-row">
+        <input type="text" id="listPickerNewInput" class="list-picker-new-input" placeholder="New list name" maxlength="100" aria-label="New list name">
+        <button id="listPickerNewButton" type="button" class="list-picker-new-button">New list</button>
+      </div>
+
+      <button id="listPickerDoneButton" type="button" class="list-picker-done-button">Done</button>
     </div>
   </div>
 
@@ -628,6 +945,92 @@ The End"></textarea>
     <button type="button" id="linkPopupCopyButton" class="link-popup-button">Copy</button>
   </div>
 
+  </div><!-- /#appScreen -->
+
+  <!-- appFooter: sits OUTSIDE both #authScreen and #appScreen so it shows
+       on the login screen and in the app alike. The link opens
+       #privacyModalOverlay below - see the "Privacy & Contact" section at
+       the bottom of script.js. -->
+  <footer id="appFooter" class="app-footer">
+    <button type="button" id="privacyLinkButton" class="app-footer-link">Privacy &amp; Contact</button>
+  </footer>
+
+  <!-- Privacy & Contact modal: a centered popup on desktop, a bottom
+       sheet on phones (see ".privacy-modal-overlay" in style.css). Also
+       outside #appScreen so it can open from the login screen. The
+       contact link is empty here on purpose - script.js fills in its
+       href and text from CONTACT_EMAIL, so the address lives in one
+       place only. -->
+  <div id="privacyModalOverlay" class="modal-overlay privacy-modal-overlay" style="display: none;">
+    <div id="privacyModal" class="modal-box privacy-modal" role="dialog" aria-modal="true" aria-labelledby="privacyModalHeading">
+      <div class="modal-header">
+        <h3 id="privacyModalHeading">Privacy &amp; Contact</h3>
+        <button id="privacyModalCloseX" type="button" class="modal-close-button privacy-modal-close-x" aria-label="Close">&times;</button>
+      </div>
+
+      <div class="privacy-modal-body">
+        <p><em>Last updated: November 22, 2026</em></p>
+
+        <p><strong>What this app is</strong><br>
+        This app is a personal tool for keeping track of your own reading and watching: your titles, notes, links, tags and lists. It doesn't host, provide or recommend any content.</p>
+
+        <p><strong>What I store</strong><br>
+        Your account: your email address and password. Your password is handled by my login provider, so I never see it.<br>
+        Your library: the entries and lists you create, including titles, authors, chapters, links, tags, ratings, notes, scenes and character names.<br>
+        Your images: cover and character images you choose. They are resized and stored in private cloud storage so they appear on all your devices. Only your account can access them.<br>
+        Video thumbnails: for video links, the web address of a preview picture (see "Video thumbnails" below).</p>
+
+        <p><strong>What's saved on your device</strong><br>
+        To make the app fast and usable offline, your browser keeps copies of your images, changes that are waiting to upload, your login session and your display settings (like card size and cover dimming). This stays on your device. Deleting your account clears it on the device you delete it from.</p>
+
+        <p><strong>Where it lives and who handles it</strong><br>
+        Your data and images are stored with Supabase, a hosted database and storage service, which also handles logins and sends account emails such as sign-up confirmations. The app itself is served by GitHub Pages. Like most hosting providers, these services may keep their own technical logs, such as IP addresses.</p>
+
+        <p><strong>Video thumbnails</strong><br>
+        When you save a link to a video, the app tries to find a preview picture for it. For YouTube links, the app builds the picture's address itself. For other sites, it sends the link to a small function of mine, which reads that page to find its preview picture. The function doesn't record your link or the site's name. Only the picture's address is saved in your entry, and I don't keep copies of the pictures. Thumbnails load directly from the website you saved, which can see that your browser asked for the picture.</p>
+
+        <p><strong>Who can see your data</strong><br>
+        Other users can't. As the person running the app, I can technically see what is stored in the database. I don't browse people's libraries, and I would only look at an account's data if you ask me to help with a problem.</p>
+
+        <p><strong>What I don't do</strong><br>
+        I don't sell your data, I don't share it with advertisers, and I don't use analytics, advertising or tracking tools. If that ever changes, I'll update this page before it does.</p>
+
+        <p><strong>Deleting your data</strong><br>
+        Deleting an entry also deletes its cover and character images from cloud storage. You can delete your whole account yourself in Settings, under Account, with Delete my account. That permanently deletes your login, entries, lists, notes and images, and it can't be undone. If you have any trouble, email me and I'll help.</p>
+
+        <p><strong>Contact</strong><br>
+        Questions, bugs or feedback? Email me at <a id="privacyContactEmailLink" class="privacy-contact-link"></a>.</p>
+      </div>
+
+      <button id="privacyModalCloseButton" type="button" class="privacy-modal-close-button">Close</button>
+    </div>
+  </div>
+
+  <!-- syncErrorBanner: small banner pinned to the top of the screen,
+       hidden by default. showSyncBanner() in script.js fills in the
+       message and shows it when a sync fails (saved on this device, or
+       not saved at all) and when queued changes finish syncing. Closes
+       with the X button, or on its own after a few seconds. The role is
+       set by showSyncBanner(): "alert" for real errors, "status" for
+       the rest. -->
+  <div id="syncErrorBanner" class="sync-error-banner" role="alert" hidden>
+    <span id="syncErrorBannerMessage">Couldn't save this change. Please try again.</span>
+    <button type="button" id="syncErrorBannerClose" class="sync-error-banner-close" aria-label="Dismiss">&times;</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" crossorigin="anonymous"></script>
   <script src="script.js"></script>
+
+  <!-- Registers service-worker.js, which forces the installed home-screen
+       app to always re-check the network for fresh files instead of
+       silently replaying whatever it first cached. See the comment at the
+       top of service-worker.js for the full explanation. -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js');
+      });
+    }
+  </script>
 </body>
 </html>

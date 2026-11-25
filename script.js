@@ -1,3 +1,19 @@
+const SUPABASE_URL = 'https://frqqrpqwtuxdwizockzn.supabase.co' ;
+const SUPABASE_ANON_KEY = 'sb_publishable_w4vMi-reeCIjNY95HiWFDw_FnNdaRIc' ;
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Contact address shown in the Privacy & Contact popup. This is the ONLY
+// place it's written - change it here and the mailto: link updates too.
+const CONTACT_EMAIL = 'appdamda@gmail.com';
+
+// These two settings control the size of EVERY image uploaded to the
+// cloud (covers and character pictures). resizeImageForUpload() shrinks
+// any image wider than IMAGE_MAX_WIDTH pixels down to that width
+// (keeping its shape), then saves it as a JPEG at IMAGE_QUALITY
+// (0 = smallest/worst, 1 = largest/best). Change them here only.
+const IMAGE_MAX_WIDTH = 600;
+const IMAGE_QUALITY = 0.8;
+
 // Grab the elements we need from the page
 const titleInput = document.getElementById('titleInput');
 const typeInput = document.getElementById('typeInput');
@@ -19,14 +35,44 @@ const bulkAddStatusInput = document.getElementById('bulkAddStatusInput');
 const bulkAddSubmitButton = document.getElementById('bulkAddSubmitButton');
 const bulkAddCancelButton = document.getElementById('bulkAddCancelButton');
 const quickNotesButton = document.getElementById('quickNotesButton');
+const typePillButtons = document.querySelectorAll('.type-pill');
+const addEntrySheetOverlay = document.getElementById('addEntrySheetOverlay');
+const openAddEntrySheetButton = document.getElementById('openAddEntrySheetButton');
+const addEntrySheetCloseButton = document.getElementById('addEntrySheetCloseButton');
+const sheetBulkAddLink = document.getElementById('sheetBulkAddLink');
+const sheetQuickNoteLink = document.getElementById('sheetQuickNoteLink');
+const bulkAddSheetCloseButton = document.getElementById('bulkAddSheetCloseButton');
 const quickNoteModalOverlay = document.getElementById('quickNoteModalOverlay');
 const quickNoteModalTitleInput = document.getElementById('quickNoteModalTitleInput');
 const quickNoteModalTextInput = document.getElementById('quickNoteModalTextInput');
 const quickNoteModalSaveButton = document.getElementById('quickNoteModalSaveButton');
 const quickNoteModalDeleteButton = document.getElementById('quickNoteModalDeleteButton');
 const quickNoteModalCloseButton = document.getElementById('quickNoteModalCloseButton');
+const quickNoteModalEditButton = document.getElementById('quickNoteModalEditButton');
+const quickNoteModalReadView = document.getElementById('quickNoteModalReadView');
 const manhwaList = document.getElementById('manhwaList');
 const charactersList = document.getElementById('charactersList');
+const listsView = document.getElementById('listsView');
+const libraryEmptyState = document.getElementById('libraryEmptyState');
+const libraryEmptyStateAddButton = document.getElementById('libraryEmptyStateAddButton');
+const tabEmptyState = document.getElementById('tabEmptyState');
+
+// Tracks the most recent loadFromSupabase() call, purely so the UI can
+// tell "loaded successfully and really empty" apart from "still
+// loading" or "load failed / offline". Only updateEmptyStates() reads
+// it; it never affects what data is loaded or synced.
+//   'idle'    - not signed in / no load attempted yet
+//   'loading' - a load is in progress
+//   'loaded'  - the last load succeeded
+//   'error'   - the last load failed (offline, auth error, etc.)
+let libraryLoadState = 'idle';
+
+// When entries were last successfully loaded from Supabase (Date.now()),
+// or 0 if never. Set by loadFromSupabase(); the foreground refresh (see
+// "Foreground refresh" near the bottom of this file) uses it to wait at
+// least a minute between refreshes.
+let lastDataRefreshAt = 0;
+
 const filterTabs = document.querySelectorAll('.filter-tab');
 const statusFilterRow = document.getElementById('statusFilterRow');
 const statusAllButton = document.getElementById('statusAllButton');
@@ -34,6 +80,18 @@ const statusDropdown = document.getElementById('statusDropdown');
 const statusDropdownButton = document.getElementById('statusDropdownButton');
 const statusDropdownLabel = document.getElementById('statusDropdownLabel');
 const statusDropdownMenu = document.getElementById('statusDropdownMenu');
+// Phone-only compact filter pills (see index.html and the "Phone filter
+// pills" section below) - the Status pill mirrors #statusFilterRow's
+// "All" button + dropdown combined into one dropdown, and the Type pill
+// mirrors the four Type tabs (All/Manhwa/Other Comics/Videos).
+const phoneStatusDropdown = document.getElementById('phoneStatusDropdown');
+const phoneStatusDropdownButton = document.getElementById('phoneStatusDropdownButton');
+const phoneStatusDropdownLabel = document.getElementById('phoneStatusDropdownLabel');
+const phoneStatusDropdownMenu = document.getElementById('phoneStatusDropdownMenu');
+const typeFilterDropdown = document.getElementById('typeFilterDropdown');
+const typeFilterDropdownButton = document.getElementById('typeFilterDropdownButton');
+const typeFilterDropdownLabel = document.getElementById('typeFilterDropdownLabel');
+const typeFilterDropdownMenu = document.getElementById('typeFilterDropdownMenu');
 const searchInput = document.getElementById('searchInput');
 const clearSearchButton = document.getElementById('clearSearchButton');
 const zoomSlider = document.getElementById('zoomSlider');
@@ -73,7 +131,6 @@ const editEntryPage = document.getElementById('editEntryPage');
 const editEntryEpisode = document.getElementById('editEntryEpisode');
 const editEntryLink = document.getElementById('editEntryLink');
 const editEntryStatus = document.getElementById('editEntryStatus');
-const editEntryRating = document.getElementById('editEntryRating');
 const editEntryTagsPreview = document.getElementById('editEntryTagsPreview');
 const editEntryTagInput = document.getElementById('editEntryTagInput');
 const editEntryTagAddButton = document.getElementById('editEntryTagAddButton');
@@ -132,6 +189,35 @@ const ICON_LINK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" s
 const ICON_PENCIL = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-svg"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>';
 
 const ICON_TRASH = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-svg"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6"></path><path d="M14 11v6"></path></svg>';
+
+// Cleans up a link the user typed (or one loaded from storage/Supabase)
+// before it's saved or put into an href / window.open(). Only http://
+// and https:// links are allowed through:
+//   - "" (or only spaces)            -> ""
+//   - "https://site.com/x"           -> unchanged
+//   - "www.site.com/x", "site.com/x" -> "https://www.site.com/x" etc.
+//   - "javascript:...", "data:...", "file:..." or any other scheme -> ""
+// A "scheme" is letters/digits/+/./- before a colon at the very start
+// (e.g. "javascript:"). Anything with no scheme just gets "https://"
+// stuck on the front, which is always safe - at worst it makes a
+// broken https link, never a script.
+function safeUrl(value) {
+  const trimmed = String(value || '').trim();
+
+  if (trimmed === '') {
+    return '';
+  }
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+
+  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) {
+    return '';
+  }
+
+  return 'https://' + trimmed;
+}
 
 // --- Star rating ---
 // All three star states (full, half, empty) are drawn from the exact
@@ -203,6 +289,103 @@ function buildStarsHTML(rating) {
   }
 
   return starsHTML;
+}
+
+// --- Tappable star rating (detail page only) ---
+// buildStarsHTML() above draws a plain, read-only row of stars (used
+// on the shelf card, where clicking a star isn't supported). This
+// function draws the SAME 5 stars for the entry currently open on the
+// detail page, but wraps each one in a real clickable element so
+// tapping it sets a new rating immediately - no Edit form, no Save
+// button, just tap and it's saved.
+//
+// Called once when the detail page first opens (see showDetailView()
+// above) and again every time a star is tapped, so the filled-in stars
+// on screen always match whatever entry.rating currently is.
+function renderDetailRatingStars(entry) {
+  // Wipe out whatever was there before (either nothing yet, or the
+  // previous rating's stars) and rebuild from scratch - same
+  // "clear the container, then re-add everything" approach used all
+  // over this file (e.g. renderTagChips()).
+  detailRating.innerHTML = '';
+
+  // entry.rating is null until a comic has actually been rated once.
+  // "entry.rating || 0" turns that null into a plain 0, so a
+  // never-rated Completed comic just starts out showing 5 empty stars
+  // instead of this function breaking on a null value.
+  const currentRating = entry.rating || 0;
+
+  for (let i = 0; i < 5; i++) {
+    // Stars are numbered 1 through 5 for people, even though the loop
+    // itself counts 0 through 4 - starNumber is that human-facing
+    // number, and it's also exactly the rating that tapping this
+    // star's RIGHT half should set (see the click handler below).
+    const starNumber = i + 1;
+
+    let fillType;
+    if (currentRating >= starNumber) {
+      fillType = 'full';
+    } else if (currentRating >= starNumber - 0.5) {
+      fillType = 'half';
+    } else {
+      fillType = 'empty';
+    }
+
+    // One <span> per star, holding that star's SVG. This span - not
+    // the SVG or the shapes drawn inside it - is what the click
+    // handler below measures, so it doesn't matter which exact pixel
+    // inside the star icon the tap actually landed on.
+    const starSlot = document.createElement('span');
+    starSlot.className = 'star-slot';
+    starSlot.innerHTML = buildStarSVG(fillType);
+
+    // This is the new part: tapping/clicking a star sets a rating on
+    // the spot, based on WHICH HALF of that star was tapped.
+    //
+    // getBoundingClientRect() gives this star's real position and
+    // width on screen right now. Comparing the click's x position
+    // (event.clientX) against the left edge of that box tells us how
+    // far into the star (in pixels) the click landed; comparing THAT
+    // to half the box's width is what tells left half from right half.
+    //
+    // Left half of star N -> rating N - 0.5 (e.g. left half of the
+    // 3rd star sets 2.5 stars).
+    // Right half of star N -> rating N, the whole number (e.g. right
+    // half of the 3rd star sets 3 stars).
+    starSlot.addEventListener('click', function (event) {
+      const starBox = starSlot.getBoundingClientRect();
+      const clickXInsideStar = event.clientX - starBox.left;
+      const clickedLeftHalf = clickXInsideStar < starBox.width / 2;
+
+      // "entry" was captured when these stars were drawn - write onto
+      // the live entry with the same id instead. Gone: do nothing.
+      const live = findEntryById(entry.id);
+      if (!live) {
+        return;
+      }
+      live.rating = clickedLeftHalf ? starNumber - 0.5 : starNumber;
+
+      // Same "stamp it as just-edited, then save" pattern every other
+      // edit in this file follows - see touchEntry() near the top of
+      // this file. This is what makes a tapped rating count as an
+      // edit for the shelf's "newest first" sort, exactly like editing
+      // a rating through the old number input used to.
+      touchEntry(live);
+      saveToStorage();
+      syncEntryToSupabase(live);
+
+      // Redraw immediately so the newly tapped star (and every star
+      // before it) fills in right away - this is the whole point of
+      // making the row tappable instead of hiding rating behind Edit.
+      renderDetailRatingStars(live);
+
+      // Also redraw the shelf underneath, so this comic's card already
+      // shows the new rating by the time Back is pressed.
+      renderList();
+    });
+
+    detailRating.appendChild(starSlot);
+  }
 }
 
 // --- Tags ---
@@ -320,8 +503,9 @@ function renderSceneEntries(entry) {
 
     const link = document.createElement('a');
     link.className = 'scene-link';
-    if (scene.link) {
-      link.href = scene.link;
+    const sceneUrl = safeUrl(scene.link);
+    if (sceneUrl) {
+      link.href = sceneUrl;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       link.textContent = 'Open Scene';
@@ -343,9 +527,22 @@ function renderSceneEntries(entry) {
       // this removes just this one scene (by its position in the
       // array) and shifts the rest down, then saves the shorter list
       // and redraws so the deleted row disappears.
-      entry.scenes.splice(index, 1);
+      // Re-read by id: "entry" and "index" were captured when this row
+      // was drawn. If the live object or its scenes array has changed
+      // since, this row is stale - just redraw from the live entry.
+      const live = findEntryById(entry.id);
+      if (!live) {
+        return;
+      }
+      if (live !== entry || !live.scenes || live.scenes[index] !== scene) {
+        renderSceneEntries(live);
+        return;
+      }
+      live.scenes.splice(index, 1);
+      touchEntry(live);
       saveToStorage();
-      renderSceneEntries(entry);
+      syncEntryToSupabase(live);
+      renderSceneEntries(live);
     });
     row.appendChild(deleteButton);
 
@@ -602,6 +799,30 @@ function addTagFromInput(inputElement, tagsArray, container) {
 // Keeping the data separate from the page display makes it easy to
 // redraw the whole list whenever something changes.
 const manhwaEntries = [];
+// Whose entries manhwaEntries holds (a user id), or null before the
+// first Supabase load. loadFromSupabase() merges rows into the existing
+// objects only when it's the same user; a different user starts fresh.
+let manhwaEntriesOwnerId = null;
+// The user showAuthOrApp() has loaded (or is loading) the app for, or
+// null when signed out. Used to skip repeat auth events for that user.
+let appSessionUserId = null;
+
+// true only while "Delete my account" (Settings > Account) is running.
+// Every background process that could write, sync, upload, queue or
+// download checks it and does nothing while it's true, so nothing tries
+// to write to an account that is about to disappear. Reset if the
+// deletion fails. See the "Settings: Delete my account" section.
+let accountDeletionInProgress = false;
+
+// The logged-in user's Lists (see the "--- Lists ---" section further
+// down). One object per list, shaped like:
+//   { listId, name, description, visibility, items, updatedAt }
+// where items is an array of { entry_id, added_at }, newest-added first.
+// Like manhwaEntries this is a const, so it's emptied with .length = 0
+// rather than reassigned. userListsOwnerId remembers whose lists these
+// are, so showAuthOrApp() can clear them on a logout or user switch.
+const userLists = [];
+let userListsOwnerId = null;
 
 // The tags being built up for a new comic in the Add-comic form,
 // before "Add Entry" is clicked. Starts empty, grows/shrinks as tags
@@ -661,6 +882,22 @@ const STATUS_OPTIONS = ['Reading', 'Ongoing', 'Completed', 'Recommended'];
 // before "type" existed at all) get backfilled to match this shape.
 const ENTRY_TYPES = ['Manhwa', 'Other Comics', 'Videos'];
 
+// Same three types, plus "All" in front - this is the full list of
+// choices the Type tabs offer (see .filter-tab in index.html). Built
+// from ENTRY_TYPES instead of typed out separately so the phone Type
+// pill's menu (see buildTypeFilterDropdownMenu() below) can never drift
+// out of sync with the real tabs.
+//
+// "Notes" is tacked on at the very end, after Videos - it's NOT one of
+// ENTRY_TYPES (a Quick Note's entry.type is 'Note', not a real comic
+// type - see the "Quick Notes" section further down), so it's added
+// separately here rather than folded into ENTRY_TYPES itself. This is
+// what makes "Notes" show up as the last option in the phone Type
+// pill's menu, right after Videos - see the matchesFolder check inside
+// renderList() for how picking it actually filters the shelf down to
+// just Quick Notes.
+const TYPE_FILTER_OPTIONS = ['All'].concat(ENTRY_TYPES).concat(['Notes']);
+
 // --- Status filter (nested inside each type tab) ---
 // Each type tab (Manhwa / Other Comics / Videos) gets its OWN status
 // filter - the "All" toggle and status dropdown described in
@@ -698,8 +935,13 @@ const ENTRY_TYPES = ['Manhwa', 'Other Comics', 'Videos'];
 // Every type starts on mode: 'All', matching how the shelf looked
 // before this feature existed - nothing is filtered out by status
 // until you actually pick one.
+// The phone Status pill is reachable from the "All" tab too (see the
+// isTypeTab comment in updateStatusFilterRowUI() below), so "All" gets
+// its own filter state here as well, alongside the three real types -
+// otherwise picking a status while on "All" would have nowhere to save
+// that choice and would silently do nothing.
 const typeStatusFilters = {};
-ENTRY_TYPES.forEach(function (type) {
+['All'].concat(ENTRY_TYPES).forEach(function (type) {
   typeStatusFilters[type] = { mode: 'All', status: STATUS_OPTIONS[0] };
 });
 
@@ -709,6 +951,65 @@ ENTRY_TYPES.forEach(function (type) {
 function closeStatusDropdown() {
   statusDropdownMenu.style.display = 'none';
   statusDropdownButton.setAttribute('aria-expanded', 'false');
+}
+
+// Same idea as closeStatusDropdown() above, just for the phone-only
+// status pill's own menu (see #phoneStatusDropdownMenu in index.html) -
+// kept as a separate function since it's a separate element, but it
+// does the exact same job.
+function closePhoneStatusDropdown() {
+  phoneStatusDropdownMenu.style.display = 'none';
+  phoneStatusDropdownButton.setAttribute('aria-expanded', 'false');
+}
+
+// Switches the CURRENT type tab's own filter state (see
+// typeStatusFilters above) to "show every status". Pulled out into its
+// own function so both the desktop #statusAllButton AND the phone
+// status pill's "All" option (see buildPhoneStatusDropdownMenu() below)
+// can share this one copy of the logic instead of repeating it.
+function selectStatusAll() {
+  const filterState = typeStatusFilters[currentFilter];
+
+  // "All" now has its own filter state (see the comment above
+  // typeStatusFilters), but "Characters"/"Notes" still don't - the phone
+  // Status pill is reachable from those two as well, and there's simply
+  // nothing to switch to "All" in that case, so do nothing instead of
+  // crashing on filterState being undefined.
+  if (!filterState) {
+    return;
+  }
+
+  filterState.mode = 'All';
+
+  updateStatusFilterRowUI();
+  renderList();
+}
+
+// Switches the CURRENT type tab's own filter state to "only show this
+// status". Same sharing reasoning as selectStatusAll() above - both the
+// desktop status-dropdown options (built below) and the phone status
+// pill's options (see buildPhoneStatusDropdownMenu() below) call this
+// same function.
+function selectStatus(status) {
+  // currentFilter (set by selectTypeFilter() further down this file)
+  // tells us which type's filter state to update - so picking
+  // "Completed" while the Videos tab is active only ever touches
+  // typeStatusFilters['Videos'], never Manhwa's or Other Comics' own
+  // filter.
+  const filterState = typeStatusFilters[currentFilter];
+
+  // Same reasoning as the guard in selectStatusAll() just above: the
+  // phone Status pill is reachable from "Characters"/"Notes" too, and
+  // neither one has a filterState to update.
+  if (!filterState) {
+    return;
+  }
+
+  filterState.status = status;
+  filterState.mode = 'Status';
+
+  updateStatusFilterRowUI();
+  renderList();
 }
 
 // Builds the list of status choices inside #statusDropdownMenu, one
@@ -722,47 +1023,92 @@ function buildStatusDropdownMenu() {
     optionButton.className = 'status-dropdown-option';
     optionButton.textContent = status;
     optionButton.addEventListener('click', function () {
-      // currentFilter (set by the type-tab click handler further down
-      // this file) tells us which type's filter state to update - so
-      // picking "Completed" while the Videos tab is active only ever
-      // touches typeStatusFilters['Videos'], never Manhwa's or Other
-      // Comics' own filter.
-      const filterState = typeStatusFilters[currentFilter];
-      filterState.status = status;
-      filterState.mode = 'Status';
-
+      selectStatus(status);
       closeStatusDropdown();
-      updateStatusFilterRowUI();
-      renderList();
     });
     statusDropdownMenu.appendChild(optionButton);
   });
 }
 
-// Redraws #statusFilterRow so it matches whichever type tab is active
-// right now: shows/hides the whole row, and (when shown) updates the
-// "All" button + dropdown label/highlight to reflect THAT type's own
-// remembered filter state from typeStatusFilters above. Called every
-// time the active tab changes, and right after the status filter
-// itself changes (picking a status, or clicking "All").
+// Builds the list of choices inside the phone status pill's menu - the
+// same STATUS_OPTIONS as buildStatusDropdownMenu() above, but with an
+// "All" choice added in front (since the phone pill replaces BOTH
+// #statusAllButton and the desktop status dropdown with this one
+// dropdown, it needs to offer everything both of those did combined).
+function buildPhoneStatusDropdownMenu() {
+  const allOptionButton = document.createElement('button');
+  allOptionButton.type = 'button';
+  allOptionButton.className = 'status-dropdown-option';
+  allOptionButton.textContent = 'All';
+  allOptionButton.addEventListener('click', function () {
+    selectStatusAll();
+    closePhoneStatusDropdown();
+  });
+  phoneStatusDropdownMenu.appendChild(allOptionButton);
+
+  STATUS_OPTIONS.forEach(function (status) {
+    const optionButton = document.createElement('button');
+    optionButton.type = 'button';
+    optionButton.className = 'status-dropdown-option';
+    optionButton.textContent = status;
+    optionButton.addEventListener('click', function () {
+      selectStatus(status);
+      closePhoneStatusDropdown();
+    });
+    phoneStatusDropdownMenu.appendChild(optionButton);
+  });
+}
+
+// Redraws #statusFilterRow (and its phone-pill equivalent,
+// #phoneStatusDropdown) so both reflect whichever type tab is active
+// right now: shows/hides the desktop row, and (when there's a real
+// per-type filter to show) updates both pills' label(s)/highlight to
+// match. Called every time the active tab changes, and right after the
+// status filter itself changes (picking a status, or clicking "All").
 function updateStatusFilterRowUI() {
   const isTypeTab = ENTRY_TYPES.includes(currentFilter);
 
   // The "All" top-level tab and the "Characters" tab don't get a
-  // status dropdown at all - see the big comment above the tabs-row
-  // div in index.html for why. Hiding the whole row for both of those
-  // is simplest: there's nothing useful for it to show either way.
+  // status dropdown on desktop - see the big comment above the
+  // tabs-row div in index.html for why. Hiding the full-width row for
+  // both of those is still correct.
+  //
+  // #phoneStatusDropdown is NOT hidden here anymore. It used to get
+  // this exact same "isTypeTab ? '' : 'none'" treatment, which meant
+  // the phone Status pill stayed invisible until you picked a Manhwa
+  // /Other Comics/Videos tab - i.e. until you'd already interacted
+  // with the Type pill. On phone, Status and Type are two independent
+  // pills sitting side by side, so Status needs to be visible from the
+  // very first page load, not just after Type is touched. Its
+  // visibility is now controlled the exact same way the Type pill's
+  // already was: purely by the ".phone-filter-pill" CSS rule in
+  // style.css, which shows both pills unconditionally on phone widths.
   statusFilterRow.style.display = isTypeTab ? '' : 'none';
 
-  if (!isTypeTab) {
+  // "All" now carries its own filter state too (see the comment above
+  // typeStatusFilters), so the phone pill's label reflects it just like
+  // it does for a real type tab. Only "Characters"/"Notes" still have no
+  // filterState at all - for those, fall back to the static "All" label,
+  // same as it shows on page load.
+  const filterState = typeStatusFilters[currentFilter];
+  if (!filterState) {
+    phoneStatusDropdownLabel.textContent = 'All';
     return;
   }
 
-  const filterState = typeStatusFilters[currentFilter];
+  // The desktop #statusAllButton/#statusDropdownButton pair only exists
+  // inside #statusFilterRow, which stays hidden for "All" (see above) -
+  // so only update their highlight/label while a real type tab is active.
+  if (isTypeTab) {
+    statusAllButton.classList.toggle('active', filterState.mode === 'All');
+    statusDropdownButton.classList.toggle('active', filterState.mode === 'Status');
+    statusDropdownLabel.textContent = filterState.status;
+  }
 
-  statusAllButton.classList.toggle('active', filterState.mode === 'All');
-  statusDropdownButton.classList.toggle('active', filterState.mode === 'Status');
-  statusDropdownLabel.textContent = filterState.status;
+  // The phone pill only has room for ONE label, standing in for both
+  // #statusAllButton and #statusDropdownButton at once - so it shows
+  // "All" while mode is 'All', and the specific status otherwise.
+  phoneStatusDropdownLabel.textContent = filterState.mode === 'All' ? 'All' : filterState.status;
 }
 
 // Figures out which progress field(s) should be visible for a given
@@ -820,19 +1166,1204 @@ function formatProgressText(entry) {
 // can compare it against each entry in the loop below with "===".
 let entryBeingEdited = null;
 
+// Stamps an entry with "right now" as its last-modified time, in
+// entry.updatedAt. Call this any time an entry is created OR edited -
+// status change, rating change, notes/scenes/characters added, etc -
+// right before saveToStorage(). renderList() further down this file
+// sorts the shelf using this timestamp (newest first), so this one
+// function is what keeps that sort order accurate everywhere.
+//
+// Date.now() returns the current time as a plain number (milliseconds
+// since Jan 1 1970) - a bigger number always means a later time, which
+// is exactly what a "sort by newest" comparison needs.
+function touchEntry(entry) {
+  entry.updatedAt = Date.now();
+}
+
 // The name/key we save our data under in localStorage. Using one
 // constant instead of retyping the string means saveToStorage() and
 // loadFromStorage() can never accidentally use different keys.
 const STORAGE_KEY = 'manhwaEntries';
 
-// localStorage can only store text (strings) - it can't store a real
-// JavaScript array of objects. JSON.stringify() converts our
-// manhwaEntries array into one long text string that looks like
-// '[{"title":"Solo Leveling","chapter":"180",...}]' so it's safe to
-// hand to localStorage. We call this any time the data changes so
-// what's saved always matches what's on screen.
+// Intentionally a no-op now. Supabase is the source of truth for
+// entries, and localStorage is shared per-browser rather than
+// per-account - writing entries here could leak one user's data into
+// the next account that logs in on this browser (via
+// migrateLocalDataToSupabase()). The function and its call sites are
+// kept so nothing else has to change.
 function saveToStorage() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(manhwaEntries));
+}
+
+// --- Sync banner ---
+// Shows the #syncErrorBanner (see index.html) with one of three messages:
+//
+//   'queued'  - a sync failed, but the entry was saved to the offline
+//               pending-writes queue, so it will sync on its own later.
+//               Shown by queueFailedSync() once the queue write succeeds.
+//   'error'   - the change isn't safe anywhere: the sync failed AND the
+//               queue write failed, or a delete failed (deletes aren't
+//               queued). Red error styling.
+//   'synced'  - retryPendingWrites() just synced queued entries.
+//               Shorter auto-hide.
+//
+// It auto-hides after a few seconds. If another one comes in while it's
+// already showing (e.g. Bulk Add syncing lots of entries at once), it
+// just swaps the message and restarts the timer instead of stacking up.
+const SYNC_BANNER_MESSAGES = {
+  queued: "Saved on this device. It will sync automatically when you're back online.",
+  error: "Couldn't save this change. Please try again.",
+  synced: 'Back online. Your changes have synced.',
+  // Shown by uploadCoverInBackground() when a cover's cloud upload
+  // fails. The cover itself is still saved locally and showing.
+  coverNotUploaded: "Cover saved on this device. It hasn't been uploaded yet.",
+  // Shown at most once per page session by the image retry runner when
+  // an image task is dropped (permanent error, or out of attempts).
+  imageNotSynced: "An image couldn't be synced. It's saved on this device."
+};
+const SYNC_ERROR_BANNER_MS = 6000;
+const SYNC_SUCCESS_BANNER_MS = 3500;
+let syncErrorBannerTimer = null;
+
+function showSyncBanner(kind) {
+  const banner = document.getElementById('syncErrorBanner');
+  const message = document.getElementById('syncErrorBannerMessage');
+  if (!banner || !message) {
+    return;
+  }
+  message.textContent = SYNC_BANNER_MESSAGES[kind];
+  // coverNotUploaded uses the same calm "queued" styling - nothing is
+  // lost, it's just not in the cloud yet.
+  banner.classList.toggle('sync-banner-queued',
+    kind === 'queued' || kind === 'coverNotUploaded' || kind === 'imageNotSynced');
+  banner.classList.toggle('sync-banner-synced', kind === 'synced');
+  // Only real errors interrupt a screen reader; the others are polite.
+  banner.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+  banner.hidden = false;
+  clearTimeout(syncErrorBannerTimer);
+  syncErrorBannerTimer = setTimeout(
+    hideSyncErrorBanner,
+    kind === 'synced' ? SYNC_SUCCESS_BANNER_MS : SYNC_ERROR_BANNER_MS
+  );
+}
+
+function hideSyncErrorBanner() {
+  clearTimeout(syncErrorBannerTimer);
+  const banner = document.getElementById('syncErrorBanner');
+  if (banner) {
+    banner.hidden = true;
+  }
+}
+
+document.getElementById('syncErrorBannerClose').addEventListener('click', hideSyncErrorBanner);
+
+// --- Offline pending-writes queue ---
+// When syncEntryToSupabase() below fails, the entry is saved here so the
+// edit isn't lost. This is its own IndexedDB database, separate from the
+// image database further down, so changing one never needs a version
+// bump (and upgrade) of the other.
+//
+// The "pendingWrites" store uses entry_id as its keyPath, so if the same
+// entry fails to sync twice, the second record just overwrites the first
+// - there's only ever one pending record per entry, holding its latest
+// version. Each record looks like:
+//   { entry_id, user_id, entry, queuedAt }
+// where queuedAt is a Date.now() number (milliseconds), and user_id is
+// whoever was logged in when it was queued (so retryPendingWrites() never
+// pushes one account's edit into a different account on a shared browser).
+//
+// retryPendingWrites() further down re-sends these when the browser comes
+// back online, and after login.
+const PENDING_WRITES_DB_NAME = 'manhwa-offline-queue';
+const PENDING_WRITES_DB_VERSION = 1;
+const PENDING_WRITES_STORE_NAME = 'pendingWrites';
+
+// Same open-once-and-cache pattern as openImageDatabase() below.
+let pendingWritesDatabasePromise = null;
+function openPendingWritesDatabase() {
+  if (pendingWritesDatabasePromise) {
+    return pendingWritesDatabasePromise;
+  }
+
+  pendingWritesDatabasePromise = new Promise(function (resolve, reject) {
+    const openRequest = indexedDB.open(PENDING_WRITES_DB_NAME, PENDING_WRITES_DB_VERSION);
+
+    openRequest.onupgradeneeded = function () {
+      const db = openRequest.result;
+      if (!db.objectStoreNames.contains(PENDING_WRITES_STORE_NAME)) {
+        db.createObjectStore(PENDING_WRITES_STORE_NAME, { keyPath: 'entry_id' });
+      }
+    };
+
+    openRequest.onsuccess = function () {
+      resolve(openRequest.result);
+    };
+
+    openRequest.onerror = function () {
+      // Clear the cache so a later call can try opening it again.
+      pendingWritesDatabasePromise = null;
+      reject(openRequest.error);
+    };
+  });
+
+  return pendingWritesDatabasePromise;
+}
+
+// Saves (or overwrites) this entry's pending record. .put() replaces
+// any existing record with the same entry_id - UNLESS the record already
+// there holds a newer version of the entry (bigger updatedAt). That can
+// happen when a retry of an old version fails after the user has already
+// made a newer edit that also failed; without this check the old version
+// would overwrite the newer one in the queue.
+//
+// The user id comes from getSession(), which reads the saved login
+// locally, with no network request, so it still works while offline.
+async function queuePendingWrite(entry) {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const userId = session ? session.user.id : null;
+  const db = await openPendingWritesDatabase();
+
+  return new Promise(function (resolve, reject) {
+    const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(PENDING_WRITES_STORE_NAME);
+    const getRequest = store.get(entry.id);
+    getRequest.onsuccess = function () {
+      const existing = getRequest.result;
+      if (existing && (existing.entry.updatedAt || 0) > (entry.updatedAt || 0)) {
+        return;
+      }
+      store.put({
+        entry_id: entry.id,
+        user_id: userId,
+        entry: entry,
+        queuedAt: Date.now()
+      });
+    };
+    transaction.oncomplete = function () { resolve(); };
+    transaction.onerror = function () { reject(transaction.error); };
+  });
+}
+
+// Removes this entry's pending record once a sync of it has succeeded -
+// but only if the synced version is at least as new as the queued one
+// (syncedUpdatedAt >= the record's updatedAt). If the user made another
+// edit (which failed and got queued) while this sync was in flight, that
+// newer record has to stay for the next retry.
+//
+// syncedUpdatedAt must be the updatedAt of the body that was actually
+// SENT, captured when the request was built - not read off the entry
+// afterwards, since a newer edit may have bumped it during the await.
+function removePendingWriteIfSynced(entryId, syncedUpdatedAt) {
+  return openPendingWritesDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(PENDING_WRITES_STORE_NAME);
+      const getRequest = store.get(entryId);
+      getRequest.onsuccess = function () {
+        const existing = getRequest.result;
+        if (existing && (syncedUpdatedAt || 0) >= (existing.entry.updatedAt || 0)) {
+          store.delete(entryId);
+        }
+      };
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// Every record in the store, including image tasks (internal).
+function getAllQueueRecords() {
+  return openPendingWritesDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const request = db
+        .transaction(PENDING_WRITES_STORE_NAME, 'readonly')
+        .objectStore(PENDING_WRITES_STORE_NAME)
+        .getAll();
+      request.onsuccess = function () { resolve(request.result); };
+      request.onerror = function () { reject(request.error); };
+    });
+  });
+}
+
+// Returns an array of every entry and list record currently in the
+// queue (empty array if there are none). Image task records ("img:..."
+// keys, see the "Image retry queue" section) share this store but are
+// left out here, so retryPendingWrites(), loadFromSupabase(),
+// getPendingWriteKinds() and the badge never mistake them for entries.
+function getPendingWrites() {
+  return getAllQueueRecords().then(function (records) {
+    return records.filter(function (record) {
+      return !isImageQueueKey(record.entry_id);
+    });
+  });
+}
+
+// --- Image retry queue (records in the same store) ---
+// One record per image, keyed "img:cover:<entryId>" or
+// "img:char:<characterId>" (stored in the entry_id keyPath field, like
+// lists). Never collides with "comic-..." or "list:..." keys. A record:
+//   { entry_id: <key>, kind: 'cover'|'character', id, entryId, userId,
+//     requestedAt, attempts, nextAttemptAt, lastError }
+// It holds NO image data: reconcileImage() reads the live local state
+// when it runs. Repeated enqueues for the same image overwrite.
+const IMAGE_QUEUE_PREFIX = 'img:';
+
+function isImageQueueKey(key) {
+  return typeof key === 'string' && key.indexOf(IMAGE_QUEUE_PREFIX) === 0;
+}
+
+function getImageQueueKey(kind, id) {
+  return IMAGE_QUEUE_PREFIX + (kind === 'cover' ? 'cover:' : 'char:') + id;
+}
+
+function getPendingImageTasks() {
+  return getAllQueueRecords().then(function (records) {
+    return records.filter(function (record) {
+      return isImageQueueKey(record.entry_id) &&
+        (record.kind === 'cover' || record.kind === 'character');
+    });
+  });
+}
+
+function getImageTaskRecord(key) {
+  return openPendingWritesDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const request = db
+        .transaction(PENDING_WRITES_STORE_NAME, 'readonly')
+        .objectStore(PENDING_WRITES_STORE_NAME)
+        .get(key);
+      request.onsuccess = function () { resolve(request.result); };
+      request.onerror = function () { reject(request.error); };
+    });
+  });
+}
+
+// Runs change(existing) inside one readwrite transaction on this key.
+// change returns the record to put, null to delete, or undefined to
+// leave it alone.
+function updateImageTaskRecord(key, change) {
+  return openPendingWritesDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(PENDING_WRITES_STORE_NAME);
+      const getRequest = store.get(key);
+      getRequest.onsuccess = function () {
+        const next = change(getRequest.result);
+        if (next === null) {
+          store.delete(key);
+        } else if (next) {
+          store.put(next);
+        }
+      };
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// Called from every failure branch of syncEntryToSupabase(). Catches its
+// own errors so a broken queue (e.g. IndexedDB unavailable in a private
+// window) only logs, and never throws out of the sync's error handling.
+// Shows the sync banner once the queue write finishes: 'queued' if the
+// entry is safely saved on this device, 'error' if it isn't saved
+// anywhere.
+function queueFailedSync(entry) {
+  if (accountDeletionInProgress) {
+    return;
+  }
+  queuePendingWrite(entry).then(function () {
+    showSyncBanner('queued');
+    updatePendingIndicator();
+  }).catch(function (err) {
+    console.error('Could not queue pending write for entry ' + entry.id + ':', err);
+    showSyncBanner('error');
+  });
+}
+
+// --- List records in the same queue ---
+// Lists share the "pendingWrites" store with entries. Their key is
+// "list:" + listId (stored in the entry_id keyPath field), which can
+// never collide with a comic's "comic-..." id. A list record looks like:
+//   { entry_id: 'list:<listId>', kind: 'list', user_id, list_id,
+//     list, deleted, updatedAt, queuedAt }
+// "list" is a snapshot of the list to upsert, or null when deleted is
+// true (the deletion marker for a list deleted while offline). Entry
+// records have no "kind" field, which is how retryPendingWrites() tells
+// the two apart. updatedAt is stored on the record itself so the
+// newer-wins checks below work for deletion markers too.
+function getListQueueKey(listId) {
+  return 'list:' + listId;
+}
+
+// Same newer-wins rule as queuePendingWrite(): an older version never
+// overwrites a newer record already in the queue. A deletion marker is
+// stamped with the delete time, so it beats any earlier queued upsert.
+async function queueListPendingWrite(listId, listSnapshot, deleted, updatedAt) {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  const userId = session ? session.user.id : null;
+  const db = await openPendingWritesDatabase();
+  const key = getListQueueKey(listId);
+
+  return new Promise(function (resolve, reject) {
+    const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(PENDING_WRITES_STORE_NAME);
+    const getRequest = store.get(key);
+    getRequest.onsuccess = function () {
+      const existing = getRequest.result;
+      if (existing && (existing.updatedAt || 0) > (updatedAt || 0)) {
+        return;
+      }
+      store.put({
+        entry_id: key,
+        kind: 'list',
+        user_id: userId,
+        list_id: listId,
+        list: deleted ? null : listSnapshot,
+        deleted: deleted,
+        updatedAt: updatedAt,
+        queuedAt: Date.now()
+      });
+    };
+    transaction.oncomplete = function () { resolve(); };
+    transaction.onerror = function () { reject(transaction.error); };
+  });
+}
+
+// List version of removePendingWriteIfSynced(): drops the queued record
+// for this list unless it's newer than what was just synced/deleted.
+function removeListPendingWriteIfSynced(listId, updatedAt) {
+  const key = getListQueueKey(listId);
+  return openPendingWritesDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction(PENDING_WRITES_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(PENDING_WRITES_STORE_NAME);
+      const getRequest = store.get(key);
+      getRequest.onsuccess = function () {
+        const existing = getRequest.result;
+        if (existing && (existing.updatedAt || 0) <= (updatedAt || 0)) {
+          store.delete(key);
+        }
+      };
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// List version of queueFailedSync(). Unlike entry deletes, list deletes
+// ARE queued (as a deletion marker), so both cases show 'queued'.
+function queueFailedListSync(listId, listSnapshot, deleted, updatedAt) {
+  if (accountDeletionInProgress) {
+    return;
+  }
+  queueListPendingWrite(listId, listSnapshot, deleted, updatedAt).then(function () {
+    showSyncBanner('queued');
+    updatePendingIndicator();
+  }).catch(function (err) {
+    console.error('Could not queue pending write for list ' + listId + ':', err);
+    showSyncBanner('error');
+  });
+}
+
+// Re-sends one queued list record. Returns true/false like
+// syncEntryToSupabase() so retryPendingWrites() can count it.
+function retryPendingListWrite(record) {
+  if (record.deleted) {
+    return deleteListFromSupabase(record.list_id, record.updatedAt);
+  }
+  return syncListToSupabase(record.list);
+}
+
+// Re-sends one queued entry record without ever sending an older
+// snapshot over a newer local state. Returns true/false like
+// syncEntryToSupabase(). The record is only ever removed by a successful
+// sync (removePendingWriteIfSynced() inside sendEntrySync()).
+//
+//   - Entries loaded for this user, live entry exists:
+//       live newer or same  -> send the live entry (normal sync path);
+//       snapshot newer      -> copy the snapshot onto the live object
+//                              first (e.g. the page was reloaded and
+//                              the load brought back an older copy),
+//                              then send it.
+//   - Entries loaded for this user, no live entry: the snapshot is put
+//     back into manhwaEntries and synced. (An entry created offline that
+//     a reload dropped; also an entry deleted locally after its edit was
+//     queued - entry deletes don't clear queue records, which is
+//     unchanged, so that entry comes back, as it already did before.)
+//   - Entries NOT loaded for this user yet (login runs this before
+//     loadFromSupabase()): there is no local state to be newer than the
+//     snapshot, so the snapshot itself is sent, through the same
+//     per-entry lock.
+async function retryPendingEntryWrite(record, userId) {
+  const snapshot = record.entry;
+  if (!snapshot || snapshot.id !== record.entry_id) {
+    return false;
+  }
+
+  if (manhwaEntriesOwnerId !== userId) {
+    return requestEntrySync(snapshot.id, function () {
+      return snapshot;
+    });
+  }
+
+  const live = findEntryById(snapshot.id);
+  if (!live) {
+    manhwaEntries.push(snapshot);
+    renderList();
+    return syncEntryToSupabase(snapshot);
+  }
+
+  if ((snapshot.updatedAt || 0) > (live.updatedAt || 0)) {
+    Object.keys(live).forEach(function (key) {
+      if (!Object.prototype.hasOwnProperty.call(snapshot, key)) {
+        delete live[key];
+      }
+    });
+    Object.assign(live, snapshot);
+    // Same guard applyLoadedRowsToEntries() uses for the open entry.
+    if (live === currentDetailEntry) {
+      if (!live.scenes) {
+        live.scenes = [];
+      }
+      if (!live.characters) {
+        live.characters = [];
+      }
+    }
+    renderList();
+  }
+  return syncEntryToSupabase(live);
+}
+
+// Tries to re-send every queued entry that belongs to the logged-in user.
+// List records (kind: 'list', see above) are re-sent here too.
+// Records are removed by syncEntryToSupabase() itself when a sync
+// succeeds (see removePendingWriteIfSynced() above); a record whose retry
+// fails just gets re-queued by that same function, so it's still there
+// for the next attempt.
+//
+// Entries are sent one at a time rather than all at once, so a big queue
+// doesn't fire dozens of requests the moment the connection comes back.
+//
+// Both the 'online' listener and login call this, and they can overlap
+// (e.g. reconnecting also restores the session). If a retry is already
+// running, callers get that same run's promise instead of starting a
+// second one that would send every entry twice.
+let retryPendingWritesPromise = null;
+function retryPendingWrites() {
+  if (accountDeletionInProgress) {
+    return retryPendingWritesPromise || Promise.resolve();
+  }
+  if (retryPendingWritesPromise) {
+    return retryPendingWritesPromise;
+  }
+
+  retryPendingWritesPromise = (async function () {
+    try {
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      if (!session) {
+        return;
+      }
+
+      const records = await getPendingWrites();
+      let syncedCount = 0;
+      let failedCount = 0;
+      for (const record of records) {
+        if (accountDeletionInProgress) {
+          break;
+        }
+        if (record.user_id !== session.user.id) {
+          continue;
+        }
+        const synced = record.kind === 'list'
+          ? await retryPendingListWrite(record)
+          : await retryPendingEntryWrite(record, session.user.id);
+        if (synced) {
+          syncedCount++;
+        } else {
+          failedCount++;
+        }
+      }
+
+      // Only confirm when queued entries actually went up. If some are
+      // still failing, leave the "Saved on this device" banner showing
+      // instead, since not everything has synced yet.
+      if (syncedCount > 0 && failedCount === 0) {
+        showSyncBanner('synced');
+      }
+    } catch (err) {
+      console.error('Could not retry pending writes:', err);
+    } finally {
+      retryPendingWritesPromise = null;
+      updatePendingIndicator();
+    }
+  })();
+
+  return retryPendingWritesPromise;
+}
+
+window.addEventListener('online', function () {
+  updatePendingIndicator();
+  retryPendingWrites().then(retryPendingImageTasks);
+});
+
+window.addEventListener('offline', function () {
+  updatePendingIndicator();
+});
+
+// --- Pending-sync badge ---
+// Shows #pendingSyncBadge (see index.html) with how many queued records
+// belong to the logged-in user, or hides it if there are none (or no one
+// is logged in). Filters by user_id the same way retryPendingWrites()
+// does, so another account's leftover queue on a shared browser isn't
+// counted. Entry records and list records (including list deletion
+// markers) live in the same store, so both are counted here.
+// Read-only: never changes the queue.
+//
+// Several calls can overlap (e.g. a retry finishing while an entry is
+// being queued). Each call takes a number, and only the latest one is
+// allowed to touch the badge, so an older, slower read can't overwrite
+// a newer count.
+let pendingIndicatorRequestId = 0;
+async function updatePendingIndicator() {
+  if (accountDeletionInProgress) {
+    return;
+  }
+  const requestId = ++pendingIndicatorRequestId;
+  const badge = document.getElementById('pendingSyncBadge');
+  if (!badge) {
+    return;
+  }
+
+  let count = 0;
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (session) {
+      const records = await getPendingWrites();
+      count = records.filter(function (record) {
+        return record.user_id === session.user.id;
+      }).length;
+      // Image tasks too, only this user's (they use userId, not user_id).
+      const imageTasks = await getPendingImageTasks();
+      count += imageTasks.filter(function (record) {
+        return record.userId === session.user.id;
+      }).length;
+    }
+  } catch (err) {
+    console.error('Could not read pending writes for the sync badge:', err);
+  }
+
+  if (requestId !== pendingIndicatorRequestId) {
+    return;
+  }
+  badge.textContent = count + (count === 1 ? ' change' : ' changes') + ' waiting to sync';
+  badge.hidden = count === 0;
+}
+
+// Pushes ONE entry up to this user's "Entries" table in Supabase.
+// Supabase is where entries are stored - saveToStorage() no longer
+// writes entry data to localStorage, so this sync is what saves the
+// edit.
+//
+// upsert() means "update if it exists, insert if it doesn't". The
+// onConflict option tells Supabase which columns decide "exists": the
+// (user_id, entry_id) unique constraint on the table. So editing a
+// comic updates its existing row, and a brand-new comic gets a new one.
+//
+// The entry passed in is only used for its id. The body is built from
+// the LIVE entry in manhwaEntries (looked up by id after getUser(), right
+// before the request), so an older captured copy can never overwrite a
+// newer one. If the entry no longer exists locally, nothing is sent.
+//
+// Only one upsert per entry is in flight at a time. A sync requested
+// while one is in flight marks the entry dirty; when the current one
+// finishes, ONE more sync is sent with the then-latest state, however
+// many requests came in meanwhile (they all get that follow-up's
+// result). An attempt that hasn't finished after ENTRY_SYNC_TIMEOUT_MS
+// is treated as failed (queued + banner) and releases the lock; its late
+// response, if any, is ignored and never touches the queue.
+//
+// Callers don't await this - it's fire-and-forget. Any failure is
+// logged to the console, so the app keeps running, and the live entry
+// is saved to the offline pending-writes queue (see queueFailedSync()
+// above, which also shows the sync banner) so the edit survives a
+// reload. On success, any queued copy no newer than what was sent is
+// removed. retryPendingWrites() awaits this so the next entry isn't
+// sent until this one finishes, and uses the returned true (synced) /
+// false (failed or skipped) to decide whether to show the "synced"
+// banner.
+const ENTRY_SYNC_TIMEOUT_MS = 20000;
+// entryId -> { inFlight, followUp } where followUp is null, or
+// { promise, resolve } for the one collapsed sync waiting its turn.
+const entrySyncStates = new Map();
+
+function syncEntryToSupabase(entry) {
+  if (!entry || !entry.id) {
+    return Promise.resolve(false);
+  }
+  const entryId = entry.id;
+  return requestEntrySync(entryId, function () {
+    return findEntryById(entryId);
+  });
+}
+
+// readEntry() returns the object to send (and to queue on failure), read
+// at the moment the body is built; null/undefined means "skip". Follow-ups
+// always read the live entry.
+function requestEntrySync(entryId, readEntry) {
+  if (accountDeletionInProgress) {
+    return Promise.resolve(false);
+  }
+  let state = entrySyncStates.get(entryId);
+  if (!state) {
+    state = { inFlight: false, followUp: null };
+    entrySyncStates.set(entryId, state);
+  }
+  if (state.inFlight) {
+    if (!state.followUp) {
+      let resolveFollowUp;
+      const promise = new Promise(function (resolve) {
+        resolveFollowUp = resolve;
+      });
+      state.followUp = { promise: promise, resolve: resolveFollowUp };
+    }
+    return state.followUp.promise;
+  }
+  return runEntrySync(entryId, state, readEntry);
+}
+
+function runEntrySync(entryId, state, readEntry) {
+  state.inFlight = true;
+  // Per-attempt flag: set once this attempt has timed out, so its late
+  // response knows to leave the queue alone.
+  const attempt = { timedOut: false };
+
+  return new Promise(function (resolve) {
+    let settled = false;
+    function settle(result) {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+      finishEntrySync(entryId, state);
+    }
+
+    const timer = setTimeout(function () {
+      if (settled) {
+        return;
+      }
+      attempt.timedOut = true;
+      console.error('Sync of entry ' + entryId + ' timed out after ' + ENTRY_SYNC_TIMEOUT_MS + 'ms.');
+      const toQueue = readEntry();
+      if (toQueue) {
+        queueFailedSync(toQueue);
+      }
+      settle(false);
+    }, ENTRY_SYNC_TIMEOUT_MS);
+
+    sendEntrySync(readEntry, attempt).then(settle, function () {
+      settle(false);
+    });
+  });
+}
+
+// Releases the lock, then sends the one collapsed follow-up (if any)
+// with the live entry as it is now.
+function finishEntrySync(entryId, state) {
+  state.inFlight = false;
+  const followUp = state.followUp;
+  state.followUp = null;
+  if (followUp) {
+    runEntrySync(entryId, state, function () {
+      return findEntryById(entryId);
+    }).then(followUp.resolve);
+  } else if (entrySyncStates.get(entryId) === state) {
+    entrySyncStates.delete(entryId);
+  }
+}
+
+// One upsert attempt. Never throws.
+async function sendEntrySync(readEntry, attempt) {
+  // Failure path: queue the latest local state (if the entry still
+  // exists) and show the banner - unless this attempt already timed
+  // out, in which case the timeout already did that.
+  function fail() {
+    if (attempt.timedOut) {
+      return false;
+    }
+    const toQueue = readEntry();
+    if (toQueue) {
+      queueFailedSync(toQueue);
+    }
+    return false;
+  }
+
+  // Account deletion: send nothing and queue nothing (a follow-up from
+  // finishEntrySync() comes straight here, not through requestEntrySync()).
+  if (accountDeletionInProgress) {
+    return false;
+  }
+
+  try {
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      console.error('Could not get current user for syncEntryToSupabase:', userError && userError.message);
+      return fail();
+    }
+    if (attempt.timedOut || accountDeletionInProgress) {
+      return false;
+    }
+
+    // Read the entry NOW, after the await. Copied, so what's sent (and
+    // its updatedAt, used for the queue check below) can't change while
+    // the request is going out.
+    const live = readEntry();
+    if (!live) {
+      return false;
+    }
+    const body = JSON.parse(JSON.stringify(live));
+
+    const { error: upsertError } = await supabaseClient
+      .from('Entries')
+      .upsert(
+        {
+          user_id: user.id,
+          entry_id: body.id,
+          // entry.updatedAt is a Date.now() number (milliseconds), but
+          // the updated_at column is a timestamptz, so convert it to an
+          // ISO date string - same as migrateLocalDataToSupabase() does.
+          updated_at: new Date(body.updatedAt || Date.now()).toISOString(),
+          data: body
+        },
+        { onConflict: 'user_id,entry_id' }
+      );
+
+    if (upsertError) {
+      console.error('Could not sync entry to Supabase:', upsertError.message);
+      return fail();
+    }
+
+    // A late answer to an attempt that already timed out: the timeout
+    // queued the entry and a newer attempt may be running, so leave the
+    // queue exactly as it is.
+    if (attempt.timedOut) {
+      return false;
+    }
+
+    // Synced - drop the queued copy if it's no newer than what was sent.
+    // Otherwise an older queued version could get retried later and
+    // overwrite this one in Supabase.
+    await removePendingWriteIfSynced(body.id, body.updatedAt).catch(function (err) {
+      console.error('Could not remove pending write for entry ' + body.id + ':', err);
+    });
+    return true;
+  } catch (err) {
+    console.error('Could not sync entry to Supabase:', err);
+    return fail();
+  }
+}
+
+// The delete counterpart to syncEntryToSupabase() above: removes ONE
+// entry's row from this user's "Entries" table, matched on the same
+// (user_id, entry_id) pair the upsert uses. Only for deleting a whole
+// entry (a comic or a quick note) - scenes and characters live inside
+// an entry's data blob, not their own rows, so deleting one of those
+// is just a normal syncEntryToSupabase() of the parent entry instead.
+//
+// Same fire-and-forget rules as syncEntryToSupabase(): runs after
+// saveToStorage(), callers don't await it, and failures are logged and
+// show the 'error' sync banner (deletes aren't queued offline, so the
+// delete really didn't happen).
+async function deleteEntryFromSupabase(entryId) {
+  if (accountDeletionInProgress) {
+    return;
+  }
+  try {
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      console.error('Could not get current user for deleteEntryFromSupabase:', userError && userError.message);
+      showSyncBanner('error');
+      return;
+    }
+
+    const { error: deleteError } = await supabaseClient
+      .from('Entries')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('entry_id', entryId);
+
+    if (deleteError) {
+      console.error('Could not delete entry from Supabase:', deleteError.message);
+      showSyncBanner('error');
+    }
+  } catch (err) {
+    console.error('Could not delete entry from Supabase:', err);
+    showSyncBanner('error');
+  }
+}
+
+// --- Lists ---
+// Named lists of comics, stored one row per list in the "lists" table
+// (unique on user_id + list_id). Each list's items column is a jsonb
+// array of { entry_id, added_at }, where entry_id is a comic's id (see
+// generateComicId()) and added_at is a Date.now() number. A comic can
+// be in any number of lists. Items are kept newest-added first.
+//
+// Same pattern as entries: userLists (declared next to manhwaEntries)
+// is the in-memory copy, loadListsFromSupabase() fills it after login,
+// every change upserts the whole list, and failed syncs go to the
+// offline pending-writes queue under the key "list:" + listId.
+// The Lists tab UI is in the "--- Lists tab ---" section.
+
+// Copies a list so a sync (or the queue) holds a fixed version, even if
+// the live list in userLists is edited again while the request is in
+// flight.
+function snapshotList(list) {
+  return {
+    listId: list.listId,
+    name: list.name,
+    description: list.description,
+    visibility: list.visibility,
+    items: list.items.map(function (item) {
+      return { entry_id: item.entry_id, added_at: item.added_at };
+    }),
+    updatedAt: list.updatedAt
+  };
+}
+
+function findList(listId) {
+  return userLists.find(function (list) {
+    return list.listId === listId;
+  }) || null;
+}
+
+// Pushes ONE list up to the "lists" table. Same rules as
+// syncEntryToSupabase(): fire-and-forget for callers, failures are
+// logged and queued offline, success drops any older queued copy, and
+// it returns true (synced) / false (failed) for retryPendingWrites().
+async function syncListToSupabase(list) {
+  if (accountDeletionInProgress) {
+    return false;
+  }
+  const snapshot = snapshotList(list);
+  try {
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      console.error('Could not get current user for syncListToSupabase:', userError && userError.message);
+      queueFailedListSync(snapshot.listId, snapshot, false, snapshot.updatedAt);
+      return false;
+    }
+
+    const { error: upsertError } = await supabaseClient
+      .from('lists')
+      .upsert(
+        {
+          user_id: user.id,
+          list_id: snapshot.listId,
+          name: snapshot.name,
+          description: snapshot.description,
+          visibility: snapshot.visibility,
+          items: snapshot.items,
+          // updatedAt is a Date.now() number; the column is timestamptz.
+          updated_at: new Date(snapshot.updatedAt || Date.now()).toISOString()
+        },
+        { onConflict: 'user_id,list_id' }
+      );
+
+    if (upsertError) {
+      console.error('Could not sync list to Supabase:', upsertError.message);
+      queueFailedListSync(snapshot.listId, snapshot, false, snapshot.updatedAt);
+      return false;
+    }
+
+    await removeListPendingWriteIfSynced(snapshot.listId, snapshot.updatedAt).catch(function (err) {
+      console.error('Could not remove pending write for list ' + snapshot.listId + ':', err);
+    });
+    return true;
+  } catch (err) {
+    console.error('Could not sync list to Supabase:', err);
+    queueFailedListSync(snapshot.listId, snapshot, false, snapshot.updatedAt);
+    return false;
+  }
+}
+
+// Deletes ONE list's row, matched on user_id + list_id. Unlike
+// deleteEntryFromSupabase(), a failure is queued as a deletion marker
+// so the delete still happens once the connection is back. deletedAt
+// (a Date.now() number) is the marker's updatedAt, so it outranks any
+// older upsert of this list still sitting in the queue - and a
+// successful delete removes that older upsert so it can't bring the
+// list back on the next retry.
+async function deleteListFromSupabase(listId, deletedAt) {
+  if (accountDeletionInProgress) {
+    return false;
+  }
+  try {
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    if (userError || !user) {
+      console.error('Could not get current user for deleteListFromSupabase:', userError && userError.message);
+      queueFailedListSync(listId, null, true, deletedAt);
+      return false;
+    }
+
+    const { error: deleteError } = await supabaseClient
+      .from('lists')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('list_id', listId);
+
+    if (deleteError) {
+      console.error('Could not delete list from Supabase:', deleteError.message);
+      queueFailedListSync(listId, null, true, deletedAt);
+      return false;
+    }
+
+    await removeListPendingWriteIfSynced(listId, deletedAt).catch(function (err) {
+      console.error('Could not remove pending write for list ' + listId + ':', err);
+    });
+    return true;
+  } catch (err) {
+    console.error('Could not delete list from Supabase:', err);
+    queueFailedListSync(listId, null, true, deletedAt);
+    return false;
+  }
+}
+
+// Reads this user's rows from "lists" into userLists. Called right
+// after loadFromSupabase() in showAuthOrApp(). Clears userLists first so
+// repeated calls don't duplicate. If the fetch fails, the current
+// userLists is left as-is (same as loadFromSupabase()).
+//
+// options.canApply (optional): same as in loadFromSupabase() - checked
+// right before userLists is replaced; false abandons the load.
+// Returns true if userLists was replaced, false otherwise.
+async function loadListsFromSupabase(options) {
+  const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+  if (userError || !user) {
+    console.error('Could not get current user for loadListsFromSupabase:', userError && userError.message);
+    return false;
+  }
+
+  const { data: rows, error: fetchError } = await supabaseClient
+    .from('lists')
+    .select('list_id, name, description, visibility, items, updated_at')
+    .eq('user_id', user.id);
+
+  if (fetchError) {
+    console.error('Could not load lists from Supabase:', fetchError.message);
+    return false;
+  }
+
+  // If someone else logged in while this was loading, these rows are
+  // stale - don't put them in front of the new user.
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session || session.user.id !== user.id) {
+    return false;
+  }
+
+  if (options && options.canApply && !(await options.canApply(user.id))) {
+    return false;
+  }
+
+  userLists.length = 0;
+  userListsOwnerId = user.id;
+
+  rows.forEach(function (row) {
+    const items = Array.isArray(row.items)
+      ? row.items.filter(function (item) {
+          return item && typeof item.entry_id === 'string';
+        })
+      : [];
+    items.sort(function (a, b) {
+      return (b.added_at || 0) - (a.added_at || 0);
+    });
+
+    userLists.push({
+      listId: row.list_id,
+      name: row.name || '',
+      description: row.description || '',
+      visibility: row.visibility || 'private',
+      items: items,
+      updatedAt: row.updated_at ? Date.parse(row.updated_at) : 0
+    });
+  });
+  return true;
+}
+
+// Empties userLists. Called by showAuthOrApp() on logout and when a
+// different user logs in, so one account's lists never show for another.
+function clearUserLists() {
+  userLists.length = 0;
+  userListsOwnerId = null;
+}
+
+// Creates a new, empty, private list. Returns the new list, or null if
+// the name is empty after trimming.
+function createList(name) {
+  const trimmedName = typeof name === 'string' ? name.trim() : '';
+  if (!trimmedName) {
+    return null;
+  }
+
+  const list = {
+    listId: generateListId(),
+    name: trimmedName,
+    description: '',
+    visibility: 'private',
+    items: [],
+    updatedAt: Date.now()
+  };
+  userLists.push(list);
+  syncListToSupabase(list);
+  return list;
+}
+
+// Returns true if renamed, false if the list doesn't exist or the name
+// is empty after trimming.
+function renameList(listId, name) {
+  const list = findList(listId);
+  const trimmedName = typeof name === 'string' ? name.trim() : '';
+  if (!list || !trimmedName) {
+    return false;
+  }
+
+  list.name = trimmedName;
+  list.updatedAt = Date.now();
+  syncListToSupabase(list);
+  return true;
+}
+
+// Removes the list locally and deletes its row. Returns false if no such
+// list exists.
+function deleteList(listId) {
+  const list = findList(listId);
+  if (!list) {
+    return false;
+  }
+
+  userLists.splice(userLists.indexOf(list), 1);
+  deleteListFromSupabase(listId, Date.now());
+  return true;
+}
+
+// Adds a comic to the front of a list (newest-added first). Does
+// nothing and returns false if the list doesn't exist or the comic is
+// already in it.
+function addEntryToList(listId, entryId) {
+  const list = findList(listId);
+  if (!list || !entryId) {
+    return false;
+  }
+  const alreadyInList = list.items.some(function (item) {
+    return item.entry_id === entryId;
+  });
+  if (alreadyInList) {
+    return false;
+  }
+
+  list.items.unshift({ entry_id: entryId, added_at: Date.now() });
+  list.updatedAt = Date.now();
+  syncListToSupabase(list);
+  return true;
+}
+
+// Returns false if the list doesn't exist or the comic wasn't in it.
+function removeEntryFromList(listId, entryId) {
+  const list = findList(listId);
+  if (!list) {
+    return false;
+  }
+  const remainingItems = list.items.filter(function (item) {
+    return item.entry_id !== entryId;
+  });
+  if (remainingItems.length === list.items.length) {
+    return false;
+  }
+
+  list.items = remainingItems;
+  list.updatedAt = Date.now();
+  syncListToSupabase(list);
+  return true;
+}
+
+// Called when a comic (or quick note) is deleted: takes its id out of
+// every list that has it, and syncs only the lists that changed.
+function removeEntryFromAllLists(entryId) {
+  userLists.forEach(function (list) {
+    removeEntryFromList(list.listId, entryId);
+  });
+}
+
+// Comics saved before the cover-image feature existed have no
+// "id" or "hasImage" field yet (those didn't exist when they were
+// first written out). Gives one entry every field the rest of this
+// file assumes is always there (id, hasImage, type, volume, page,
+// episode), filling in defaults for whichever ones are missing.
+// Returns true if anything was actually backfilled, so callers can
+// decide whether they need to persist the change.
+//
+// Shared by loadFromStorage() (below) and loadFromSupabase() (further
+// down), since entries can now arrive from either place and both need
+// the exact same defaults applied.
+function backfillEntryDefaults(entry) {
+  let backfilledSomething = false;
+
+  if (!entry.id) {
+    entry.id = generateComicId();
+    backfilledSomething = true;
+  }
+  if (entry.hasImage === undefined) {
+    entry.hasImage = false;
+    backfilledSomething = true;
+  }
+
+  // Comics saved before the Type feature existed have no "type"
+  // field yet either - give every one of THOSE type: 'Manhwa'.
+  // This is the key piece of the migration: it's exactly what the
+  // task means by "existing comics should automatically be treated
+  // as type Manhwa" - an old entry already has its chapter number
+  // sitting in entry.chapter untouched, so once it's labeled
+  // 'Manhwa' here, formatProgressText() above reads that same
+  // entry.chapter field and displays "Ch. <whatever it already
+  // was>" exactly as before. Nothing about the comic's existing
+  // data is moved, renamed, or rewritten - it just gains one new
+  // label.
+  if (entry.type === undefined) {
+    entry.type = 'Manhwa';
+    backfilledSomething = true;
+  }
+
+  // Likewise, an entry from before Other Comics/Videos existed has
+  // no volume/page/episode fields at all yet. Give it empty ones so
+  // every entry - old or new - has the same four progress fields,
+  // which is what the rest of this file assumes (see the "Type"
+  // section further up).
+  if (entry.volume === undefined) {
+    entry.volume = '';
+    backfilledSomething = true;
+  }
+  if (entry.page === undefined) {
+    entry.page = '';
+    backfilledSomething = true;
+  }
+  if (entry.episode === undefined) {
+    entry.episode = '';
+    backfilledSomething = true;
+  }
+
+  // NOTE: entry.updatedAt (see touchEntry() near the top of this
+  // file) is deliberately NOT backfilled here, unlike every field
+  // above. Every other field gets a default value because the rest
+  // of the code assumes it's always there. updatedAt is different:
+  // renderList()'s sort further down this file treats "no
+  // updatedAt at all" as its own special case meaning "put this at
+  // the bottom, below anything with a real timestamp" - which is
+  // exactly what we want for comics that existed before this
+  // feature shipped. Giving them a fake timestamp here would
+  // defeat that entirely, so we just leave the field missing and
+  // let the sort handle it.
+
+  return backfilledSomething;
 }
 
 // The reverse of saveToStorage(): reads that saved text string back
@@ -853,70 +2384,244 @@ function loadFromStorage() {
     // a time, same as if we'd typed them out individually.
     manhwaEntries.push(...savedEntries);
 
-    // Comics saved before the cover-image feature existed have no
-    // "id" or "hasImage" field yet (those didn't exist when they were
-    // written to localStorage). Give every entry that's missing one a
-    // fresh id and hasImage: false, so the code below can always rely
-    // on both fields being there no matter how old the saved data is.
-    let backfilledSomething = false;
+    // Backfill missing fields in memory only. Nothing is written back
+    // to localStorage - Supabase is the source of truth now, and
+    // loadFromSupabase() replaces this list once the user logs in.
     manhwaEntries.forEach(function (entry) {
-      if (!entry.id) {
-        entry.id = generateComicId();
-        backfilledSomething = true;
-      }
-      if (entry.hasImage === undefined) {
-        entry.hasImage = false;
-        backfilledSomething = true;
-      }
+      backfillEntryDefaults(entry);
+    });
+  }
+}
 
-      // Comics saved before the Type feature existed have no "type"
-      // field yet either - give every one of THOSE type: 'Manhwa'.
-      // This is the key piece of the migration: it's exactly what the
-      // task means by "existing comics should automatically be treated
-      // as type Manhwa" - an old entry already has its chapter number
-      // sitting in entry.chapter untouched, so once it's labeled
-      // 'Manhwa' here, formatProgressText() above reads that same
-      // entry.chapter field and displays "Ch. <whatever it already
-      // was>" exactly as before. Nothing about the comic's existing
-      // data is moved, renamed, or rewritten - it just gains one new
-      // label.
-      if (entry.type === undefined) {
-        entry.type = 'Manhwa';
-        backfilledSomething = true;
-      }
+// The Supabase equivalent of loadFromStorage(): reads this user's rows
+// out of the "Entries" table instead of localStorage. Each row's
+// "data" column holds the full entry object (the same shape that used
+// to be saved to localStorage), so once we have the rows this works
+// just like loadFromStorage() from that point on - same backfill,
+// same renderList() call at the end.
+//
+// options (optional, used by the foreground refresh at the bottom of
+// this file):
+//   background: true - don't change libraryLoadState until the new rows
+//     are actually applied, don't render, and fail silently (the
+//     current entries are left exactly as they are).
+//   canApply: async function returning true/false, checked right
+//     before manhwaEntries is updated. Returning false abandons the
+//     load, e.g. because the user started editing while it was fetching.
+//
+// Rows are merged INTO the existing entry objects (matched by id), so
+// anything already holding an entry - the detail page, an edit form,
+// the list picker, a pending callback - keeps pointing at the live one.
+// See applyLoadedRowsToEntries() below.
+//
+// Returns false if nothing was applied, otherwise
+// { changedIds: Set, removedIds: Set } (both may be empty).
+async function loadFromSupabase(options) {
+  const background = !!(options && options.background);
+  const loadStateBefore = libraryLoadState;
+  if (!background) {
+    libraryLoadState = 'loading';
+  }
+  const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+  if (userError || !user) {
+    console.error('Could not get current user for loadFromSupabase:', userError && userError.message);
+    if (!background) {
+      libraryLoadState = 'error';
+      renderList();
+    }
+    return false;
+  }
 
-      // Likewise, an entry from before Other Comics/Videos existed has
-      // no volume/page/episode fields at all yet. Give it empty ones so
-      // every entry - old or new - has the same four progress fields,
-      // which is what the rest of this file assumes (see the "Type"
-      // section further up).
-      if (entry.volume === undefined) {
-        entry.volume = '';
-        backfilledSomething = true;
-      }
-      if (entry.page === undefined) {
-        entry.page = '';
-        backfilledSomething = true;
-      }
-      if (entry.episode === undefined) {
-        entry.episode = '';
-        backfilledSomething = true;
+  const { data: rows, error: fetchError } = await supabaseClient
+    .from('Entries')
+    .select('id, updated_at, data')
+    .eq('user_id', user.id);
+
+  if (fetchError) {
+    console.error('Could not load entries from Supabase:', fetchError.message);
+    if (!background) {
+      libraryLoadState = 'error';
+      renderList();
+    }
+    return false;
+  }
+
+  if (options && options.canApply && !(await options.canApply(user.id))) {
+    return false;
+  }
+
+  // Reloading a library that's already loaded for this same user: use
+  // the foreground refresh's guards, whoever called this.
+  const isReload = manhwaEntriesOwnerId === user.id && loadStateBefore === 'loaded';
+  if (isReload && !(await isEntryReloadAllowed(user.id))) {
+    if (!background) {
+      libraryLoadState = loadStateBefore;
+    }
+    return false;
+  }
+
+  // Entries with a queued (not yet synced) write for this user. Those
+  // are never overwritten or removed by a load.
+  const pendingEntryIds = new Set();
+  try {
+    (await getPendingWrites()).forEach(function (record) {
+      if (record.user_id === user.id && record.kind !== 'list') {
+        pendingEntryIds.add(record.entry_id);
       }
     });
-
-    // Write the backfilled ids/hasImage back to localStorage right
-    // away (instead of waiting for some other change to trigger a
-    // save). This matters specifically for "id": once a comic gets an
-    // id, that id needs to stay the SAME forever, because it's also
-    // used as the lookup key for that comic's cover image in
-    // IndexedDB (see the "Cover images" section below). If we let a
-    // fresh random id get generated again on every page load instead
-    // of saving it, any image saved under yesterday's id would become
-    // unreachable under today's new one.
-    if (backfilledSomething) {
-      saveToStorage();
-    }
+  } catch (err) {
+    console.error('Could not read pending writes before loading entries:', err);
   }
+
+  // A different account's entries (or the old localStorage copy) are
+  // thrown away; nothing about them should be merged or kept.
+  if (manhwaEntriesOwnerId !== user.id) {
+    manhwaEntries.length = 0;
+  }
+
+  const result = applyLoadedRowsToEntries(rows, pendingEntryIds);
+  manhwaEntriesOwnerId = user.id;
+  repointHeldEntries();
+
+  libraryLoadState = 'loaded';
+  lastDataRefreshAt = Date.now();
+  if (!background) {
+    renderList();
+  }
+  return result;
+}
+
+// true if a reload of the current user's entries may replace local data
+// right now. Same guards as the foreground refresh: nothing open that a
+// reload could clobber (unsaved notes, edit forms, the list picker...,
+// see isForegroundRefreshBlocked()), no retry run in flight, and no
+// queued entry writes for this user.
+async function isEntryReloadAllowed(userId) {
+  if (isForegroundRefreshBlocked() || retryPendingWritesPromise) {
+    return false;
+  }
+  const pending = await getPendingWriteKinds(userId);
+  return !pending.entry;
+}
+
+// true if the detail page's notes box has text that hasn't been saved
+// with "Save Notes" yet.
+function detailNotesHaveUnsavedChanges() {
+  return detailView.style.display === 'block' && !!currentDetailEntry &&
+    detailNotesTextarea.value !== (currentDetailEntry.notes || '');
+}
+
+// Merges loaded rows into manhwaEntries IN PLACE:
+//   - an existing entry (same id) gets the row's fields copied onto the
+//     SAME object, and keys the row no longer has are deleted from it;
+//   - a new id is added; an id missing from the rows is removed.
+// An existing entry is left exactly as it is when its local updatedAt
+// is newer than the row's, when the offline queue holds a write for it,
+// or when it's the detail page's entry and the notes box has unsaved
+// text. A local entry missing from the rows is kept (not removed) in
+// those same cases, e.g. one created offline that hasn't synced yet.
+// Returns { changedIds, removedIds }.
+function applyLoadedRowsToEntries(rows, pendingEntryIds) {
+  const changedIds = new Set();
+  const removedIds = new Set();
+  const unsavedNotesEntry = detailNotesHaveUnsavedChanges() ? currentDetailEntry : null;
+
+  const existingById = new Map();
+  manhwaEntries.forEach(function (entry) {
+    existingById.set(entry.id, entry);
+  });
+
+  function mustKeepLocal(entry, rowData) {
+    if (pendingEntryIds.has(entry.id) || entry === unsavedNotesEntry) {
+      return true;
+    }
+    return !!rowData && (entry.updatedAt || 0) > (rowData.updatedAt || 0);
+  }
+
+  const rowIds = new Set();
+  rows.forEach(function (row) {
+    const fresh = row.data;
+    if (!fresh || typeof fresh !== 'object') {
+      return;
+    }
+    // Same backfill loadFromStorage() does for old entries missing
+    // fields like hasImage/type/volume/page/episode - applied here too
+    // since entries loaded from Supabase can be just as old.
+    backfillEntryDefaults(fresh);
+    rowIds.add(fresh.id);
+
+    const existing = existingById.get(fresh.id);
+    if (!existing) {
+      manhwaEntries.push(fresh);
+      changedIds.add(fresh.id);
+      return;
+    }
+    // Same version as what's here (same updatedAt + coverVersion +
+    // thumbnailUrl): leave the object untouched, as the foreground
+    // refresh always did.
+    if (mustKeepLocal(existing, fresh) ||
+        getEntryRefreshKey(existing) === getEntryRefreshKey(fresh)) {
+      return;
+    }
+    Object.keys(existing).forEach(function (key) {
+      if (!Object.prototype.hasOwnProperty.call(fresh, key)) {
+        delete existing[key];
+      }
+    });
+    Object.assign(existing, fresh);
+    // The detail page's Save Scene / Save Character handlers assume these
+    // arrays exist (showDetailView() creates them), so don't take them
+    // away from the entry it's showing.
+    if (existing === currentDetailEntry) {
+      if (!existing.scenes) {
+        existing.scenes = [];
+      }
+      if (!existing.characters) {
+        existing.characters = [];
+      }
+    }
+    changedIds.add(existing.id);
+  });
+
+  // Remove entries the rows no longer have (deleted on another device),
+  // unless they hold local work that hasn't reached Supabase yet.
+  for (let i = manhwaEntries.length - 1; i >= 0; i--) {
+    const entry = manhwaEntries[i];
+    if (rowIds.has(entry.id) || mustKeepLocal(entry, null)) {
+      continue;
+    }
+    if ((entry.updatedAt || 0) > lastDataRefreshAt && lastDataRefreshAt > 0) {
+      // Created/edited here after the last load; its upsert may simply
+      // not have landed before this fetch ran.
+      continue;
+    }
+    manhwaEntries.splice(i, 1);
+    removedIds.add(entry.id);
+  }
+
+  return { changedIds: changedIds, removedIds: removedIds };
+}
+
+// Safety net after every load: anything holding an entry object (the
+// detail page, the card edit form, the Add to list picker, the Quick
+// Note popup) is pointed at the object now in manhwaEntries with the
+// same id. With the in-place merge above this only matters when the
+// entries were reset for a different user. If the entry is gone, the
+// card edit / picker / popup references are dropped; the detail page's
+// is left for the caller, which goes back to the shelf.
+function repointHeldEntries() {
+  function fresh(entry) {
+    if (!entry || manhwaEntries.indexOf(entry) !== -1) {
+      return entry;
+    }
+    return findEntryById(entry.id);
+  }
+  if (currentDetailEntry) {
+    currentDetailEntry = fresh(currentDetailEntry) || currentDetailEntry;
+  }
+  entryBeingEdited = fresh(entryBeingEdited);
+  listPickerEntry = fresh(listPickerEntry);
+  editingQuickNoteEntry = fresh(editingQuickNoteEntry);
 }
 
 // --- Cover images (IndexedDB) ---
@@ -982,6 +2687,12 @@ function generateComicId() {
 // see saveImageForCharacter() etc. below.
 function generateCharacterId() {
   return 'character-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9);
+}
+
+// Same idea again, for Lists (see the "--- Lists ---" section). Becomes
+// the list_id column in the "lists" table.
+function generateListId() {
+  return 'list-' + Date.now() + '-' + Math.random().toString(36).slice(2, 9);
 }
 
 // How wide (in pixels) a stored cover image is allowed to be. Photos
@@ -1099,8 +2810,16 @@ const IMAGE_DB_NAME = 'manhwaNotesImagesDB';
 // the one moment IndexedDB allows creating a new object store, which is
 // how CHARACTER_STORE_NAME below gets added for everyone, without
 // touching anything already saved in IMAGE_STORE_NAME.
-const IMAGE_DB_VERSION = 2;
+// Bumped again from 2 to 3 to add COVER_VERSION_STORE_NAME (below).
+// Bumped from 3 to 4 to add CHARACTER_IMAGE_VERSION_STORE_NAME (below).
+const IMAGE_DB_VERSION = 4;
 const IMAGE_STORE_NAME = 'coverImages';
+
+// Which cloud coverVersion each local cover matches, keyed by entry id
+// (value is the number from entry.coverVersion). Kept in its own small
+// store because coverImages holds bare Blobs, and changing that shape
+// would affect every reader. See "Cover cloud download" below.
+const COVER_VERSION_STORE_NAME = 'coverVersions';
 
 // A second, separate "table" inside this exact same database, used to
 // store Favorite Character pictures - see the big "How we connect an
@@ -1113,6 +2832,11 @@ const IMAGE_STORE_NAME = 'coverImages';
 // instead of a comic's id, so a character's picture can never
 // accidentally overwrite (or get confused with) a comic's cover image.
 const CHARACTER_IMAGE_STORE_NAME = 'characterImages';
+
+// Which cloud imageVersion each local character image matches
+// ("localImageVersion"), keyed by character id. The character
+// equivalent of COVER_VERSION_STORE_NAME above.
+const CHARACTER_IMAGE_VERSION_STORE_NAME = 'characterImageVersions';
 
 // Opening an IndexedDB database is itself an asynchronous, event-based
 // operation (same reasoning as FileReader above). This function wraps
@@ -1144,10 +2868,26 @@ function openImageDatabase() {
       if (!db.objectStoreNames.contains(CHARACTER_IMAGE_STORE_NAME)) {
         db.createObjectStore(CHARACTER_IMAGE_STORE_NAME);
       }
+      // Added in version 3, guarded the same way.
+      if (!db.objectStoreNames.contains(COVER_VERSION_STORE_NAME)) {
+        db.createObjectStore(COVER_VERSION_STORE_NAME);
+      }
+      // Added in version 4, guarded the same way.
+      if (!db.objectStoreNames.contains(CHARACTER_IMAGE_VERSION_STORE_NAME)) {
+        db.createObjectStore(CHARACTER_IMAGE_VERSION_STORE_NAME);
+      }
     };
 
     openRequest.onsuccess = function () {
-      resolve(openRequest.result);
+      const db = openRequest.result;
+      // If a newer copy of the app (in another tab) needs to upgrade
+      // the database, close ours so we don't block it. The next image
+      // read/write here simply reopens it.
+      db.onversionchange = function () {
+        db.close();
+        imageDatabasePromise = null;
+      };
+      resolve(db);
     };
 
     openRequest.onerror = function () {
@@ -1222,6 +2962,45 @@ function deleteImageForComic(comicId) {
   return deleteImageFromStore(IMAGE_STORE_NAME, comicId);
 }
 
+// Records which cloud coverVersion this device's local cover matches.
+function setLocalCoverVersion(comicId, coverVersion) {
+  return saveImageToStore(COVER_VERSION_STORE_NAME, comicId, coverVersion);
+}
+
+// Resolves to { hasLocal, version } for one comic in a single read:
+// whether a local cover Blob exists (count(), so the Blob itself isn't
+// loaded) and the recorded localCoverVersion (undefined if none).
+function getLocalCoverStatus(comicId) {
+  return openImageDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction([IMAGE_STORE_NAME, COVER_VERSION_STORE_NAME], 'readonly');
+      const countRequest = transaction.objectStore(IMAGE_STORE_NAME).count(comicId);
+      const versionRequest = transaction.objectStore(COVER_VERSION_STORE_NAME).get(comicId);
+      transaction.oncomplete = function () {
+        resolve({ hasLocal: countRequest.result > 0, version: versionRequest.result });
+      };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// Saves a cover DOWNLOADED from the cloud, together with the version it
+// came from, in one transaction (both are written or neither). This is
+// a local-only write: it never uploads and never touches
+// entry.coverVersion. Only the download path uses it; picking a cover
+// still goes through saveImageForComic() + uploadCoverInBackground().
+function saveDownloadedCoverLocally(comicId, imageBlob, coverVersion) {
+  return openImageDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction([IMAGE_STORE_NAME, COVER_VERSION_STORE_NAME], 'readwrite');
+      transaction.objectStore(IMAGE_STORE_NAME).put(imageBlob, comicId);
+      transaction.objectStore(COVER_VERSION_STORE_NAME).put(coverVersion, comicId);
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
 // The character-picture equivalents of the three functions just above -
 // same generic *ToStore() functions, just pointed at
 // CHARACTER_IMAGE_STORE_NAME instead, and keyed by a character's own id
@@ -1233,8 +3012,678 @@ function saveImageForCharacter(characterId, imageBlob) {
 function loadImageForCharacter(characterId) {
   return loadImageFromStore(CHARACTER_IMAGE_STORE_NAME, characterId);
 }
+// Removes the local image AND its recorded localImageVersion together,
+// so a later download check never sees a version without an image.
 function deleteImageForCharacter(characterId) {
-  return deleteImageFromStore(CHARACTER_IMAGE_STORE_NAME, characterId);
+  return openImageDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction([CHARACTER_IMAGE_STORE_NAME, CHARACTER_IMAGE_VERSION_STORE_NAME], 'readwrite');
+      transaction.objectStore(CHARACTER_IMAGE_STORE_NAME).delete(characterId);
+      transaction.objectStore(CHARACTER_IMAGE_VERSION_STORE_NAME).delete(characterId);
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// Records which cloud imageVersion this device's local character image
+// matches. Character equivalent of setLocalCoverVersion().
+function setLocalCharacterImageVersion(characterId, imageVersion) {
+  return saveImageToStore(CHARACTER_IMAGE_VERSION_STORE_NAME, characterId, imageVersion);
+}
+
+// Resolves to { hasLocal, version } for one character in one read.
+// Character equivalent of getLocalCoverStatus().
+function getLocalCharacterImageStatus(characterId) {
+  return openImageDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction([CHARACTER_IMAGE_STORE_NAME, CHARACTER_IMAGE_VERSION_STORE_NAME], 'readonly');
+      const countRequest = transaction.objectStore(CHARACTER_IMAGE_STORE_NAME).count(characterId);
+      const versionRequest = transaction.objectStore(CHARACTER_IMAGE_VERSION_STORE_NAME).get(characterId);
+      transaction.oncomplete = function () {
+        resolve({ hasLocal: countRequest.result > 0, version: versionRequest.result });
+      };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// Saves a character image DOWNLOADED from the cloud together with its
+// version, in one transaction. Local-only: never uploads and never
+// touches character.imageVersion. Character equivalent of
+// saveDownloadedCoverLocally().
+function saveDownloadedCharacterImageLocally(characterId, imageBlob, imageVersion) {
+  return openImageDatabase().then(function (db) {
+    return new Promise(function (resolve, reject) {
+      const transaction = db.transaction([CHARACTER_IMAGE_STORE_NAME, CHARACTER_IMAGE_VERSION_STORE_NAME], 'readwrite');
+      transaction.objectStore(CHARACTER_IMAGE_STORE_NAME).put(imageBlob, characterId);
+      transaction.objectStore(CHARACTER_IMAGE_VERSION_STORE_NAME).put(imageVersion, characterId);
+      transaction.oncomplete = function () { resolve(); };
+      transaction.onerror = function () { reject(transaction.error); };
+    });
+  });
+}
+
+// --- Cloud image helpers (Supabase Storage) ---
+//
+// Building blocks for syncing cover and character images to the
+// private "images" bucket. Comic COVERS are connected (upload on
+// Choose Image, delete on Remove Image / comic delete - see the
+// "Cover cloud sync" section below), and so are character images (see
+// "Character image cloud sync"). The IndexedDB copy is still what the
+// app displays. They are plain top-level functions, so they're global
+// and can be tried from the browser Console.
+//
+// Character images live at "<userId>/characters/<characterId>/<imageVersion>"
+// (legacy single file: "<userId>/characters/<characterId>"). Covers live at
+// "<userId>/covers/<entryId>/<coverVersion>", e.g.
+// "1234-abcd/covers/1699999999999/1700000000123" - one file per uploaded
+// version. Older covers may still sit at the legacy single-file path
+// "<userId>/covers/<entryId>"; downloads fall back to it and cleanup
+// removes it.
+
+// Shrinks an image File/Blob for upload and returns a Promise for a
+// JPEG Blob. Wider than IMAGE_MAX_WIDTH -> scaled down proportionally;
+// smaller images are never scaled up. imageOrientation: 'from-image'
+// applies the photo's EXIF rotation so phone pictures aren't sideways.
+async function resizeImageForUpload(fileOrBlob) {
+  if (!(fileOrBlob instanceof Blob)) {
+    throw new Error('resizeImageForUpload: expected a File or Blob.');
+  }
+  // An empty type is allowed (some pickers leave it blank) - decoding
+  // below is the real test. A non-empty, non-image type is rejected.
+  if (fileOrBlob.type && !fileOrBlob.type.startsWith('image/')) {
+    throw new Error('resizeImageForUpload: file is not an image (type "' + fileOrBlob.type + '").');
+  }
+
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(fileOrBlob, { imageOrientation: 'from-image' });
+  } catch (error) {
+    throw new Error('resizeImageForUpload: could not decode this image. It may be corrupted or an unsupported format.');
+  }
+
+  try {
+    let width = bitmap.width;
+    let height = bitmap.height;
+    if (!width || !height) {
+      throw new Error('resizeImageForUpload: image has no size.');
+    }
+    if (width > IMAGE_MAX_WIDTH) {
+      height = Math.round(height * (IMAGE_MAX_WIDTH / width));
+      width = IMAGE_MAX_WIDTH;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    // JPEG has no transparency - without a white fill first, see-through
+    // parts of a PNG would come out black.
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, width, height);
+    context.drawImage(bitmap, 0, 0, width, height);
+
+    return await new Promise(function (resolve, reject) {
+      canvas.toBlob(function (blob) {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('resizeImageForUpload: the browser could not export the image as JPEG.'));
+        }
+      }, 'image/jpeg', IMAGE_QUALITY);
+    });
+  } finally {
+    bitmap.close();
+  }
+}
+
+// Builds the cloud path for one image, or returns null (after logging
+// why) if anything is wrong. kind must be exactly 'covers' or
+// 'characters', and id must be a non-empty string with no slashes, so a
+// bad value can never point at some other path.
+//   characters: "<userId>/characters/<characterId>/<version>" - version
+//               must be a positive integer (the character's imageVersion).
+//   covers:     "<userId>/covers/<entryId>/<version>" - version must be
+//               a positive integer (the entry's coverVersion). Every
+//               uploaded cover gets its own path, so a browser/CDN can
+//               never serve a stale cached copy of an older cover.
+// The user id comes from getSession(), which reads the saved login
+// locally with no network request, so this works while offline.
+async function buildCloudImagePath(kind, id, version) {
+  if (kind !== 'covers' && kind !== 'characters') {
+    console.error('Cloud image: kind must be "covers" or "characters", got:', kind);
+    return null;
+  }
+  if (!isValidCloudImageId(id)) {
+    console.error('Cloud image: id must be a non-empty string with no slashes, got:', id);
+    return null;
+  }
+  if (kind === 'covers' && !isValidCoverVersion(version)) {
+    console.error('Cloud image: cover version must be a positive integer, got:', version);
+    return null;
+  }
+  if (kind === 'characters' && !isValidCoverVersion(version)) {
+    console.error('Cloud image: character image version must be a positive integer, got:', version);
+    return null;
+  }
+  const userId = await getCloudImageUserId();
+  if (!userId) return null;
+  if (kind === 'covers') {
+    return userId + '/covers/' + id + '/' + version;
+  }
+  return userId + '/characters/' + id + '/' + version;
+}
+
+function isValidCloudImageId(id) {
+  return typeof id === 'string' && id.trim() !== '' && !id.includes('/') && !id.includes('\\');
+}
+
+function isValidCoverVersion(version) {
+  return Number.isSafeInteger(version) && version > 0;
+}
+
+async function getCloudImageUserId() {
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) {
+    console.error('Cloud image: not signed in.');
+    return null;
+  }
+  return session.user.id;
+}
+
+// For one comic's covers: "folder" is "<userId>/covers/<entryId>" (the
+// versioned files live inside it) and "legacy" is the old single-file
+// path from before versioning - the same string, but as a file rather
+// than a folder. Null (after logging) if the id is bad or logged out.
+async function buildCoverCloudPaths(entryId) {
+  if (!isValidCloudImageId(entryId)) {
+    console.error('Cloud cover: id must be a non-empty string with no slashes, got:', entryId);
+    return null;
+  }
+  const userId = await getCloudImageUserId();
+  if (!userId) return null;
+  const base = userId + '/covers/' + entryId;
+  return { folder: base, legacy: base };
+}
+
+// Character equivalent of buildCoverCloudPaths(): "folder" is
+// "<userId>/characters/<characterId>" (versioned files inside it) and
+// "legacy" is the old single-file path at that same string.
+async function buildCharacterCloudPaths(characterId) {
+  if (!isValidCloudImageId(characterId)) {
+    console.error('Cloud character image: id must be a non-empty string with no slashes, got:', characterId);
+    return null;
+  }
+  const userId = await getCloudImageUserId();
+  if (!userId) return null;
+  const base = userId + '/characters/' + characterId;
+  return { folder: base, legacy: base };
+}
+
+// True if a Supabase Storage error means "that file doesn't exist".
+function isStorageNotFoundError(error) {
+  if (!error) return false;
+  const status = String(error.statusCode || error.status || '');
+  const message = String(error.message || '').toLowerCase();
+  const original = error.originalError;
+  return status === '404' || message.includes('not found') ||
+    !!(original && original.status === 404);
+}
+
+// Uploads (or replaces) one image. version is required for both
+// 'covers' and 'characters' (see buildCloudImagePath()). Returns
+// true on success, false on any failure. Never throws.
+async function uploadImageToCloud(kind, id, blob, version) {
+  return (await uploadImageToCloudResult(kind, id, blob, version, null)).ok;
+}
+
+// Same upload, but resolves { ok, error, permanent } so the image retry
+// queue can tell a permanent failure (bad request, auth/RLS, too large)
+// from a retryable one. If expectedUserId is given, it refuses to upload
+// unless that is still the signed-in user, so a task queued for one
+// account can never write into another account's folder. Never throws.
+async function uploadImageToCloudResult(kind, id, blob, version, expectedUserId) {
+  if (accountDeletionInProgress) {
+    return { ok: false, error: 'account deletion in progress', permanent: false };
+  }
+  try {
+    if (!(blob instanceof Blob)) {
+      console.error('uploadImageToCloud: expected a Blob, got:', blob);
+      return { ok: false, error: 'not a Blob', permanent: true };
+    }
+    const signedInUserId = await getCloudImageUserId();
+    if (!signedInUserId) {
+      return { ok: false, error: 'not signed in', permanent: false };
+    }
+    if (expectedUserId && signedInUserId !== expectedUserId) {
+      return { ok: false, error: 'different user signed in', permanent: false };
+    }
+    const path = await buildCloudImagePath(kind, id, version);
+    if (!path) return { ok: false, error: 'invalid cloud path', permanent: true };
+
+    const { error } = await supabaseClient.storage
+      .from('images')
+      .upload(path, blob, { upsert: true, contentType: 'image/jpeg' });
+    if (error) {
+      console.error('uploadImageToCloud failed for', path, error);
+      return { ok: false, error: describeStorageError(error), permanent: isPermanentStorageError(error) };
+    }
+    return { ok: true };
+  } catch (error) {
+    console.error('uploadImageToCloud failed:', error);
+    return { ok: false, error: describeStorageError(error), permanent: false };
+  }
+}
+
+// The HTTP status of a Supabase Storage error, or 0 if there isn't one
+// (network failure, thrown TypeError, ...). Storage sometimes reports
+// the real status in statusCode (e.g. "403" for an RLS denial) with a
+// generic 400 in status, so a numeric statusCode wins.
+function getStorageErrorStatus(error) {
+  if (!error) return 0;
+  const code = Number(error.statusCode);
+  if (Number.isInteger(code) && code >= 100) return code;
+  const status = Number(error.status);
+  if (Number.isInteger(status) && status >= 100) return status;
+  const original = error.originalError;
+  if (original && Number.isInteger(original.status)) return original.status;
+  return 0;
+}
+
+const PERMANENT_STORAGE_STATUSES = [400, 401, 403, 404, 413, 415, 422];
+
+// Permanent: 400/401/403/404/413/415/422. Everything else - network
+// errors (no status), 408, 429, 5xx, unknown - is retryable.
+function isPermanentStorageError(error) {
+  return PERMANENT_STORAGE_STATUSES.indexOf(getStorageErrorStatus(error)) !== -1;
+}
+
+function describeStorageError(error) {
+  if (!error) return 'unknown error';
+  const status = getStorageErrorStatus(error);
+  const message = String(error.message || error);
+  return (status ? status + ' ' : '') + message.slice(0, 200);
+}
+
+// Downloads one image using the signed-in user's credentials (the
+// bucket is private - no public URL). version is required for both
+// kinds. Returns a Blob, or null if it doesn't exist or anything fails.
+// Never throws. (A missing file is not logged as an error; the cover
+// and character download syncs handle that case.)
+async function downloadImageFromCloud(kind, id, version) {
+  try {
+    const path = await buildCloudImagePath(kind, id, version);
+    if (!path) return null;
+
+    const { data, error } = await supabaseClient.storage
+      .from('images')
+      .download(path);
+    if (error) {
+      if (!isStorageNotFoundError(error)) {
+        console.error('downloadImageFromCloud failed for', path, error);
+      }
+      return null;
+    }
+    return data || null;
+  } catch (error) {
+    console.error('downloadImageFromCloud failed:', error);
+    return null;
+  }
+}
+
+// Deletes one image. version is required for both kinds. Returns true on success - including when it was already
+// gone (Supabase's remove() doesn't error on a missing file, and a "not
+// found" error is treated as success too). False on any other failure.
+// Never throws.
+async function deleteImageFromCloud(kind, id, version) {
+  try {
+    const path = await buildCloudImagePath(kind, id, version);
+    if (!path) return false;
+
+    const { error } = await supabaseClient.storage
+      .from('images')
+      .remove([path]);
+    if (error) {
+      if (isStorageNotFoundError(error)) {
+        return true;
+      }
+      console.error('deleteImageFromCloud failed for', path, error);
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('deleteImageFromCloud failed:', error);
+    return false;
+  }
+}
+
+// Downloads one comic's cover for the given coverVersion. If that
+// versioned file doesn't exist, tries the legacy single-file path once.
+// Resolves { blob } on success, { blob: null, missing: true } when
+// neither file exists, or { blob: null, missing: false } on any other
+// failure (logged). Never throws, never uploads.
+async function downloadCoverFromCloud(entryId, version) {
+  try {
+    const versionedPath = await buildCloudImagePath('covers', entryId, version);
+    const paths = await buildCoverCloudPaths(entryId);
+    if (!versionedPath || !paths) {
+      return { blob: null, missing: false };
+    }
+
+    const candidates = [versionedPath, paths.legacy];
+    for (let i = 0; i < candidates.length; i++) {
+      const { data, error } = await supabaseClient.storage
+        .from('images')
+        .download(candidates[i]);
+      if (!error && data instanceof Blob) {
+        return { blob: data, missing: false };
+      }
+      if (error && !isStorageNotFoundError(error)) {
+        console.error('Cover download failed for', candidates[i], error);
+        return { blob: null, missing: false };
+      }
+      // Not found - fall through to the legacy path (once).
+    }
+    return { blob: null, missing: true };
+  } catch (error) {
+    console.error('Cover download failed for entry ' + entryId + ':', error);
+    return { blob: null, missing: false };
+  }
+}
+
+// Removes one comic's cloud cover files: every file under
+// "<userId>/covers/<entryId>/" except keepVersion (pass null to remove
+// them all), plus the legacy "<userId>/covers/<entryId>" file if it
+// exists. Returns true on success, false on any failure (logged).
+// Never throws. Callers run it in the background via the entry's queue.
+async function removeCloudCoverFiles(entryId, keepVersion) {
+  return (await removeCloudCoverFilesResult(entryId, keepVersion, null)).ok;
+}
+
+// removeCloudCoverFiles() returning { ok, error, permanent }. See
+// removeCloudImageFolderResult().
+async function removeCloudCoverFilesResult(entryId, keepVersion, expectedUserId) {
+  if (!isValidCloudImageId(entryId)) {
+    console.error('Cloud cover: id must be a non-empty string with no slashes, got:', entryId);
+    return { ok: false, error: 'invalid id', permanent: true };
+  }
+  return removeCloudImageFolderResult(
+    function () { return buildCoverCloudPaths(entryId); },
+    keepVersion, 'covers for entry ' + entryId, expectedUserId);
+}
+
+// Shared by the cover and character cleanup: removes every file in
+// paths.folder except keepVersion (null removes them all) plus the
+// legacy single-file path. Resolves { ok, error, permanent }. Never
+// throws. With expectedUserId, refuses to run for any other user.
+async function removeCloudImageFolderResult(buildPaths, keepVersion, label, expectedUserId) {
+  try {
+    const signedInUserId = await getCloudImageUserId();
+    if (!signedInUserId) {
+      return { ok: false, error: 'not signed in', permanent: false };
+    }
+    if (expectedUserId && signedInUserId !== expectedUserId) {
+      return { ok: false, error: 'different user signed in', permanent: false };
+    }
+    const paths = await buildPaths();
+    if (!paths) return { ok: false, error: 'invalid cloud path', permanent: true };
+
+    const keepName = keepVersion == null ? null : String(keepVersion);
+    const toRemove = [];
+    const pageSize = 100;
+    let offset = 0;
+    while (true) {
+      const { data, error } = await supabaseClient.storage
+        .from('images')
+        .list(paths.folder, { limit: pageSize, offset: offset });
+      if (error) {
+        console.error('Could not list cloud ' + label + ':', error);
+        return { ok: false, error: describeStorageError(error), permanent: isPermanentStorageError(error) };
+      }
+      const page = data || [];
+      page.forEach(function (item) {
+        // item.id is null for sub-folders; only real files are removed.
+        if (item && item.name && item.id !== null && item.name !== keepName) {
+          toRemove.push(paths.folder + '/' + item.name);
+        }
+      });
+      if (page.length < pageSize) break;
+      offset += pageSize;
+    }
+    // Legacy single file; remove() is a no-op if it's not there.
+    toRemove.push(paths.legacy);
+
+    const { error } = await supabaseClient.storage
+      .from('images')
+      .remove(toRemove);
+    if (error && !isStorageNotFoundError(error)) {
+      console.error('Could not remove cloud ' + label + ':', error);
+      return { ok: false, error: describeStorageError(error), permanent: isPermanentStorageError(error) };
+    }
+    return { ok: true };
+  } catch (error) {
+    console.error('Could not remove cloud ' + label + ':', error);
+    return { ok: false, error: describeStorageError(error), permanent: false };
+  }
+}
+
+// --- Cover cloud sync ---
+// Background upload/delete of comic covers. The local IndexedDB copy
+// is always saved first and is what the app shows; everything here is
+// fire-and-forget and never blocks or undoes that local save.
+//
+// Each entry gets one queue ("chain") so only one cloud task runs per
+// entry at a time, in the order they were requested. "latest" is a
+// counter bumped by every new pick, Remove Image, or comic delete; a
+// task remembers the number it was given and does nothing (or doesn't
+// apply its result) if a newer one has come along since. That's what
+// makes sure the LAST chosen image is the one that gets coverVersion,
+// and an older upload finishing late can't overwrite a newer one or
+// bring back a cover that was removed.
+const coverCloudStates = new Map(); // entryId -> { latest, chain }
+
+function getCoverCloudState(entryId) {
+  let state = coverCloudStates.get(entryId);
+  if (!state) {
+    state = { latest: 0, chain: Promise.resolve() };
+    coverCloudStates.set(entryId, state);
+  }
+  return state;
+}
+
+// Adds task to the end of this entry's queue. Errors are logged, and
+// never break the queue for the tasks after it. Returns a promise for
+// the task's own result (undefined if it threw). Never await this from
+// INSIDE a task on the same chain - it would wait for itself.
+function queueCoverCloudTask(entryId, task) {
+  const state = getCoverCloudState(entryId);
+  const result = state.chain.then(function () { return task(); }).catch(function (error) {
+    console.error('Cover cloud task failed for entry ' + entryId + ':', error);
+    return undefined;
+  });
+  state.chain = result;
+  return result;
+}
+
+// Makes any queued or in-flight upload for this entry stale, so it
+// won't set coverVersion when it finishes.
+function cancelPendingCoverUploads(entryId) {
+  getCoverCloudState(entryId).latest += 1;
+}
+
+// Called (not awaited) after a picked cover has been saved locally.
+// Resizes the original picked file for upload, uploads it, and on
+// success stamps entry.coverVersion and syncs the entry. On any
+// failure (including not being logged in) it logs, leaves coverVersion
+// as it was, and shows the small non-blocking banner.
+// If the upload can't be attempted (offline / not signed in) or fails,
+// an image task is queued (see "Image retry queue") so
+// retryPendingImageTasks() finishes it later from the local copy.
+function uploadCoverInBackground(entry, pickedFile) {
+  const state = getCoverCloudState(entry.id);
+  state.latest += 1;
+  const myTurn = state.latest;
+  const entryId = entry.id;
+  const requestedAt = Date.now();
+  // The account these entries belong to - the only one this cover may
+  // ever be uploaded for.
+  const ownerUserId = manhwaEntriesOwnerId;
+  function isCurrent() {
+    return myTurn === state.latest;
+  }
+
+  queueCoverCloudTask(entryId, async function () {
+    // A newer pick (or a remove) is queued behind this one - skip.
+    if (!isCurrent() || accountDeletionInProgress) {
+      return;
+    }
+
+    const userId = await getImageSessionUserId();
+    if (!userId || !navigator.onLine || (ownerUserId && userId !== ownerUserId)) {
+      console.warn('Cover upload for entry ' + entryId + ' postponed (offline or not signed in); queued.');
+      showSyncBanner('coverNotUploaded');
+      enqueueImageTask('cover', entryId, entryId, ownerUserId || userId, requestedAt, null);
+      return;
+    }
+
+    const result = await runCoverUpload(entryId, pickedFile, isCurrent, userId);
+    if (result.status === 'failed' && isCurrent()) {
+      showSyncBanner('coverNotUploaded');
+    }
+    handleImmediateUploadResult('cover', entryId, entryId, userId, requestedAt, result);
+  });
+}
+
+// The cover upload flow itself, shared by uploadCoverInBackground() (the
+// picked file) and reconcileImage() (the local copy, read at retry
+// time). Must run as a task on this entry's cover chain. isCurrent()
+// says whether a newer pick/remove/delete has superseded this run.
+// Resolves one of:
+//   { status: 'uploaded', version, cleanup }  cleanup: Promise<{ok,...}>
+//   { status: 'stale' }    superseded; the newer task decides
+//   { status: 'gone' }     the entry was deleted meanwhile
+//   { status: 'failed', error, permanent, stage }
+async function runCoverUpload(entryId, sourceBlob, isCurrent, expectedUserId) {
+  let resized;
+  try {
+    resized = await resizeImageForUpload(sourceBlob);
+  } catch (error) {
+    console.error('Could not prepare cover for upload (entry ' + entryId + '):', error);
+    return { status: 'failed', error: describeStorageError(error), permanent: true, stage: 'resize' };
+  }
+  if (!isCurrent()) {
+    return { status: 'stale' };
+  }
+
+  // Decide the new version BEFORE uploading, and upload to its own
+  // path. entry.coverVersion is NOT touched until the upload has
+  // succeeded, so on failure the entry still points at a file that
+  // exists. (Bumped past the current version on the off chance the
+  // clock is behind it.)
+  const before = findEntryById(entryId);
+  if (!before) {
+    return { status: 'gone' };
+  }
+  let newVersion = Date.now();
+  if (isValidCoverVersion(before.coverVersion) && newVersion <= before.coverVersion) {
+    newVersion = before.coverVersion + 1;
+  }
+
+  const uploaded = await uploadImageToCloudResult('covers', entryId, resized, newVersion, expectedUserId);
+  if (!uploaded.ok) {
+    console.error('Cover upload failed for entry ' + entryId + '; coverVersion left unchanged.');
+    return { status: 'failed', error: uploaded.error, permanent: uploaded.permanent, stage: 'upload' };
+  }
+
+  // Uploaded, but something newer was requested while we were
+  // uploading. The newer task runs next and decides coverVersion (and
+  // its cleanup removes the file we just uploaded).
+  if (!isCurrent()) {
+    return { status: 'stale' };
+  }
+
+  // Stamp only coverVersion, on the live entry with that id. If it's
+  // gone (deleted), do nothing; its delete cleans the cloud.
+  const live = findEntryById(entryId);
+  if (!live) {
+    return { status: 'gone' };
+  }
+  live.coverVersion = newVersion;
+  // The local cover IS this version, so the download sync must never
+  // fetch it back. Written right away, before anything else can run.
+  setLocalCoverVersion(entryId, newVersion).catch(function (error) {
+    console.error('Could not record local cover version for entry ' + entryId + ':', error);
+  });
+  touchEntry(live);
+  saveToStorage();
+
+  // Not awaited here, so the chain isn't held up by the entry sync.
+  return {
+    status: 'uploaded',
+    version: newVersion,
+    cleanup: syncEntryThenRemoveOlderCovers(entryId, newVersion, isCurrent, expectedUserId)
+  };
+}
+
+// Only once the entry (pointing at keepVersion) has synced are the
+// older cloud files removed - until then other devices may still need
+// them. Resolves { ok, error, permanent }; ok:false + retryable if the
+// entry didn't sync. The removal runs as its own task on the entry's
+// chain, so it never runs alongside another upload/delete for it.
+function syncEntryThenRemoveOlderCovers(entryId, keepVersion, isCurrent, expectedUserId) {
+  const live = findEntryById(entryId);
+  if (!live) {
+    return Promise.resolve({ ok: true });
+  }
+  return syncEntryToSupabase(live).then(function (synced) {
+    if (!synced) {
+      console.warn('Entry ' + entryId + ' not synced yet; older cloud covers kept for now.');
+      return { ok: false, error: 'entry not synced yet', permanent: false };
+    }
+    return queueCoverCloudTask(entryId, async function () {
+      // A newer pick/remove/delete came along: its own task handles
+      // cleanup, and our keep-version may no longer be the right one.
+      if (!isCurrent()) {
+        return { ok: true };
+      }
+      const cleaned = await removeCloudCoverFilesResult(entryId, keepVersion, expectedUserId);
+      if (!cleaned.ok) {
+        console.error('Could not clean up older cloud covers for entry ' + entryId + '.');
+      }
+      return cleaned;
+    }).then(function (cleaned) {
+      return cleaned || { ok: false, error: 'cleanup task threw', permanent: false };
+    });
+  });
+}
+
+// Called (not awaited) when a cover is removed or its comic is
+// deleted. Cancels any pending upload, then - once any upload already
+// in flight has finished, so it can't put a file back afterwards -
+// removes every cloud file under "<userId>/covers/<entryId>/" plus the
+// legacy "<userId>/covers/<entryId>" file. If that can't be attempted
+// (offline / not signed in) or fails, an image task is queued.
+function deleteCoverFromCloudInBackground(entryId) {
+  cancelPendingCoverUploads(entryId);
+  const requestedAt = Date.now();
+  const ownerUserId = manhwaEntriesOwnerId;
+  queueCoverCloudTask(entryId, async function () {
+    if (accountDeletionInProgress) {
+      return;
+    }
+    const userId = await getImageSessionUserId();
+    if (!userId || !navigator.onLine || (ownerUserId && userId !== ownerUserId)) {
+      console.warn('Cloud cover delete for entry ' + entryId + ' postponed (offline or not signed in); queued.');
+      enqueueImageTask('cover', entryId, entryId, ownerUserId || userId, requestedAt, null);
+      return;
+    }
+    const deleted = await removeCloudCoverFilesResult(entryId, null, userId);
+    if (!deleted.ok) {
+      console.error('Could not delete cover from cloud for entry ' + entryId + '.');
+    }
+    handleImmediateDeleteResult('cover', entryId, entryId, userId, requestedAt, deleted);
+  });
 }
 
 // A Blob on its own can't be used as an <img>/background-image source
@@ -1253,8 +3702,22 @@ const imageObjectUrlCache = new Map();
 // and adds the "has-image" class that tells style.css to hide the "No
 // Cover" text and fill the box with that image (see .cover-placeholder
 // .has-image in style.css).
+//
+// Cover dimming: shelf and open-list card boxes carry the
+// "dimmable-cover" class. On those, the photo goes into the
+// --cover-image custom property instead, and style.css draws it on the
+// box's ::before layer - so the Cover dimming filter can apply to the
+// picture alone, not the status ribbon, text or border that share the
+// box. Every other box (detail page, characters) keeps the plain
+// inline background-image and is never dimmed.
 function setCoverElementImage(coverElement, objectUrl) {
-  coverElement.style.backgroundImage = 'url(' + objectUrl + ')';
+  const imageValue = 'url("' + objectUrl + '")';
+  if (coverElement.classList.contains('dimmable-cover')) {
+    coverElement.style.backgroundImage = '';
+    coverElement.style.setProperty('--cover-image', imageValue);
+  } else {
+    coverElement.style.backgroundImage = imageValue;
+  }
   coverElement.classList.add('has-image');
 }
 
@@ -1263,7 +3726,9 @@ function setCoverElementImage(coverElement, objectUrl) {
 // plain "No Cover" placeholder text again.
 function clearCoverElementImage(coverElement) {
   coverElement.style.backgroundImage = '';
+  coverElement.style.removeProperty('--cover-image');
   coverElement.classList.remove('has-image');
+  delete coverElement.dataset.coverEntryId;
 }
 
 // Shows a comic's saved cover image on one cover box. Only ever called
@@ -1279,6 +3744,10 @@ function clearCoverElementImage(coverElement) {
 // then the photo pops in. Every render after that first one is
 // instant, because imageObjectUrlCache already has the url saved.
 function applyCoverImageToElement(coverElement, comicId) {
+  // Tags the box with its comic, so a cover that finishes downloading
+  // from the cloud later can find and fill it in place (see
+  // refreshShownCovers()).
+  coverElement.dataset.coverEntryId = comicId;
   const cachedUrl = imageObjectUrlCache.get(comicId);
   if (cachedUrl) {
     setCoverElementImage(coverElement, cachedUrl);
@@ -1319,6 +3788,719 @@ function forgetCachedImageUrl(comicId) {
   }
 }
 
+// --- Video thumbnails ---
+// Videos only. A Video entry with a link gets an automatic thumbnail
+// (entry.thumbnailUrl), shown only when the user hasn't picked their own
+// cover (hasImage). YouTube links are worked out locally with no network
+// call; anything else asks the "link-preview" Edge Function. All three
+// fields below are optional, so older entries stay valid:
+//   thumbnailUrl      - the thumbnail image (https)
+//   thumbnailForLink  - the link that thumbnailUrl belongs to
+//   thumbnailTriedFor - a link the function said has no thumbnail, so it
+//                       isn't asked again until the link changes
+// None of this calls touchEntry(), so the shelf order never changes.
+
+const THUMBNAIL_FUNCTION_TIMEOUT_MS = 8000;
+const BLOCKED_THUMBNAIL_HOST_SUFFIXES = ['.local', '.internal', '.localhost', '.lan'];
+
+// true only for an https URL that's safe to put in an <img src>.
+function isSafeThumbnailUrl(u) {
+  if (typeof u !== 'string' || u.length === 0 || u.length > 2048) {
+    return false;
+  }
+  let parsed;
+  try {
+    parsed = new URL(u);
+  } catch (err) {
+    return false;
+  }
+  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, '');
+  if (!host.includes('.') || host === 'localhost') {
+    return false;
+  }
+  // IPv6 literals come back wrapped in [...]; IPv4 literals are all digits/dots.
+  if (host.startsWith('[') || /^[0-9.]+$/.test(host)) {
+    return false;
+  }
+  return !BLOCKED_THUMBNAIL_HOST_SUFFIXES.some(function (suffix) {
+    return host.endsWith(suffix);
+  });
+}
+
+// safeUrl() plus "it actually parses as a URL". Returns '' if not.
+function getValidVideoLink(link) {
+  const cleaned = safeUrl(link);
+  if (!cleaned) {
+    return '';
+  }
+  try {
+    new URL(cleaned);
+    return cleaned;
+  } catch (err) {
+    return '';
+  }
+}
+
+// Pure: no network. Returns the YouTube thumbnail for a YouTube link, or null.
+function getYouTubeThumbnail(link) {
+  const cleaned = safeUrl(link);
+  if (!cleaned) {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = new URL(cleaned);
+  } catch (err) {
+    return null;
+  }
+  const host = parsed.hostname.toLowerCase();
+  const segments = parsed.pathname.split('/').filter(function (part) { return part !== ''; });
+  let id = null;
+
+  if (host === 'youtu.be') {
+    id = segments[0] || null;
+  } else if (host === 'youtube.com' || host === 'www.youtube.com' ||
+             host === 'm.youtube.com' || host === 'music.youtube.com') {
+    if (segments.length === 1 && segments[0] === 'watch') {
+      id = parsed.searchParams.get('v');
+    } else if (segments.length >= 2 &&
+               ['shorts', 'embed', 'live'].indexOf(segments[0]) !== -1) {
+      id = segments[1];
+    }
+  }
+
+  if (!id || !/^[A-Za-z0-9_-]{11}$/.test(id)) {
+    return null;
+  }
+  return 'https://i.ytimg.com/vi/' + id + '/mqdefault.jpg';
+}
+
+async function isLoggedInForThumbnails() {
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    return !!session;
+  } catch (err) {
+    return false;
+  }
+}
+
+// Asks the link-preview Edge Function. Never throws. Returns
+//   { thumbnailUrl: string|null, definitive: boolean }
+// thumbnailUrl is only set if isSafeThumbnailUrl() passes. definitive is
+// true when the answer is final for this link (a thumbnail, or "this
+// page has none"), and false when it should be retried later (offline,
+// not logged in, timeout, the site didn't answer, etc).
+async function fetchThumbnailViaFunction(link) {
+  const retryLater = { thumbnailUrl: null, definitive: false };
+  if (!navigator.onLine || !(await isLoggedInForThumbnails())) {
+    return retryLater;
+  }
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  let timer = null;
+  const timeout = new Promise(function (resolve) {
+    timer = setTimeout(function () {
+      if (controller) {
+        controller.abort();
+      }
+      resolve({ timedOut: true });
+    }, THUMBNAIL_FUNCTION_TIMEOUT_MS);
+  });
+
+  try {
+    const invokeOptions = { body: { url: link } };
+    if (controller) {
+      invokeOptions.signal = controller.signal;
+    }
+    const outcome = await Promise.race([
+      supabaseClient.functions.invoke('link-preview', invokeOptions),
+      timeout
+    ]);
+
+    if (outcome.timedOut) {
+      console.warn('link-preview timed out');
+      return retryLater;
+    }
+
+    const { data, error } = outcome;
+    if (error) {
+      // 400 = the function refused this link (blocked_url). That won't
+      // change until the link does, so it counts as "no thumbnail".
+      const status = error.context && error.context.status;
+      console.warn('link-preview failed:', status || error.message);
+      return status === 400 ? { thumbnailUrl: null, definitive: true } : retryLater;
+    }
+
+    if (data && isSafeThumbnailUrl(data.thumbnailUrl)) {
+      return { thumbnailUrl: data.thumbnailUrl, definitive: true };
+    }
+    const reason = data && data.reason;
+    return {
+      thumbnailUrl: null,
+      definitive: reason === 'no_image' || reason === 'not_html' ||
+        reason === 'blocked_url' || (!!data && !reason)
+    };
+  } catch (err) {
+    console.warn('link-preview failed:', err);
+    return retryLater;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Removes every thumbnail field. Returns true if anything was removed.
+function clearThumbnailFields(entry) {
+  const hadAny = entry.thumbnailUrl !== undefined ||
+    entry.thumbnailForLink !== undefined ||
+    entry.thumbnailTriedFor !== undefined;
+  delete entry.thumbnailUrl;
+  delete entry.thumbnailForLink;
+  delete entry.thumbnailTriedFor;
+  return hadAny;
+}
+
+// One lookup per entry+link at a time, so an edit and the backfill
+// can't both call the function for the same link.
+const thumbnailLookupsInFlight = new Map();
+
+// Works out (or clears) the thumbnail for one entry, then syncs it.
+// Safe to call any time; it does nothing if the entry is already
+// resolved or already marked "no thumbnail" for its current link.
+async function resolveThumbnailForEntry(entry) {
+  if (!entry || !entry.id || accountDeletionInProgress) {
+    return;
+  }
+  const entryId = entry.id;
+  // Callers may hold an object captured earlier (setTimeout, backfill) -
+  // work on the live entry with this id. Gone: do nothing.
+  entry = findEntryById(entryId);
+  if (!entry) {
+    return;
+  }
+  const link = entry.type === 'Videos' ? getValidVideoLink(entry.link) : '';
+
+  if (!link) {
+    if (clearThumbnailFields(entry)) {
+      syncEntryToSupabase(entry);
+      refreshShownThumbnails(entryId);
+    }
+    return;
+  }
+  if (entry.thumbnailForLink === link || entry.thumbnailTriedFor === link) {
+    return;
+  }
+
+  const lookupKey = entryId + '|' + link;
+  if (thumbnailLookupsInFlight.has(lookupKey)) {
+    return thumbnailLookupsInFlight.get(lookupKey);
+  }
+
+  const lookup = (async function () {
+    const youTubeThumbnail = getYouTubeThumbnail(link);
+    const result = youTubeThumbnail
+      ? { thumbnailUrl: youTubeThumbnail, definitive: true }
+      : await fetchThumbnailViaFunction(link);
+
+    // Race guard: the entry may have been deleted, reloaded, or had its
+    // link changed while we were waiting.
+    const current = findEntryById(entryId);
+    if (!current || current.type !== 'Videos' || getValidVideoLink(current.link) !== link) {
+      return;
+    }
+    if (!result.definitive || accountDeletionInProgress) {
+      return;
+    }
+
+    if (result.thumbnailUrl) {
+      current.thumbnailUrl = result.thumbnailUrl;
+      current.thumbnailForLink = link;
+      delete current.thumbnailTriedFor;
+    } else {
+      delete current.thumbnailUrl;
+      delete current.thumbnailForLink;
+      current.thumbnailTriedFor = link;
+    }
+    syncEntryToSupabase(current);
+    refreshShownThumbnails(entryId);
+  })().catch(function (err) {
+    console.warn('Could not resolve thumbnail:', err);
+  }).finally(function () {
+    thumbnailLookupsInFlight.delete(lookupKey);
+  });
+
+  thumbnailLookupsInFlight.set(lookupKey, lookup);
+  return lookup;
+}
+
+// Runs resolveThumbnailForEntry() for several entries, at most
+// "limit" at a time. Fire-and-forget.
+function resolveThumbnailsWithLimit(entries, limit) {
+  const queue = entries.slice();
+  function next() {
+    const entry = queue.shift();
+    if (!entry) {
+      return Promise.resolve();
+    }
+    return resolveThumbnailForEntry(entry).then(next, next);
+  }
+  for (let i = 0; i < Math.min(limit, queue.length); i++) {
+    next();
+  }
+}
+
+// After a Video's link (or type) was saved: look it up in the background.
+function scheduleThumbnailResolve(entry) {
+  setTimeout(function () {
+    resolveThumbnailForEntry(entry);
+  }, 0);
+}
+
+// --- Thumbnail backfill (existing entries) ---
+// Once per page session, after entries load. YouTube links are
+// unlimited (no network); function calls are capped at 10 per run, one
+// at a time ~300ms apart. Skipped entirely if offline, logged out, or
+// there are queued writes that haven't synced yet.
+const THUMBNAIL_BACKFILL_FUNCTION_LIMIT = 10;
+const THUMBNAIL_BACKFILL_DELAY_MS = 300;
+let thumbnailBackfillStarted = false;
+const thumbnailBackfillAttempted = new Set();
+
+async function backfillVideoThumbnails() {
+  if (thumbnailBackfillStarted || !navigator.onLine || accountDeletionInProgress) {
+    return;
+  }
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) {
+      return;
+    }
+    const pending = await getPendingWriteKinds(session.user.id);
+    if (pending.entry || pending.list || thumbnailBackfillStarted) {
+      return;
+    }
+    thumbnailBackfillStarted = true;
+
+    const candidates = manhwaEntries.filter(function (entry) {
+      if (entry.type !== 'Videos') {
+        return false;
+      }
+      const link = getValidVideoLink(entry.link);
+      return !!link && entry.thumbnailForLink !== link && entry.thumbnailTriedFor !== link;
+    });
+
+    let functionCalls = 0;
+    for (const candidate of candidates) {
+      if (accountDeletionInProgress) {
+        break;
+      }
+      // Re-read: a foreground refresh may have swapped the object.
+      const entry = findEntryById(candidate.id);
+      const link = entry && entry.type === 'Videos' ? getValidVideoLink(entry.link) : '';
+      const attemptKey = candidate.id + '|' + link;
+      if (!link || thumbnailBackfillAttempted.has(attemptKey) ||
+          entry.thumbnailForLink === link || entry.thumbnailTriedFor === link) {
+        continue;
+      }
+      if (!getYouTubeThumbnail(link)) {
+        if (functionCalls >= THUMBNAIL_BACKFILL_FUNCTION_LIMIT || !navigator.onLine) {
+          continue;
+        }
+        if (functionCalls > 0) {
+          await new Promise(function (resolve) {
+            setTimeout(resolve, THUMBNAIL_BACKFILL_DELAY_MS);
+          });
+        }
+        functionCalls++;
+      }
+      thumbnailBackfillAttempted.add(attemptKey);
+      await resolveThumbnailForEntry(entry);
+    }
+  } catch (err) {
+    console.warn('Thumbnail backfill failed:', err);
+  }
+}
+
+// --- Thumbnail display ---
+// Priority: own cover (hasImage) > thumbnailUrl > the normal placeholder.
+// Hidden in Private mode. Shown as an <img> inside the cover box (see
+// .video-thumbnail in style.css); a failed load just removes it.
+const failedThumbnailUrls = new Set();
+
+function getDisplayableThumbnail(entry) {
+  if (!entry || entry.type !== 'Videos' || entry.hasImage || displayMode === 'private') {
+    return null;
+  }
+  const url = entry.thumbnailUrl;
+  if (!isSafeThumbnailUrl(url) || failedThumbnailUrls.has(url)) {
+    return null;
+  }
+  return url;
+}
+
+function findThumbnailImg(coverElement) {
+  for (let i = 0; i < coverElement.children.length; i++) {
+    if (coverElement.children[i].classList.contains('video-thumbnail')) {
+      return coverElement.children[i];
+    }
+  }
+  return null;
+}
+
+// Adds, updates or removes the thumbnail <img> in one cover box.
+// Returns true if a thumbnail is now shown.
+function applyThumbnailToCoverElement(coverElement, entry) {
+  coverElement.dataset.thumbEntryId = entry.id;
+  const url = getDisplayableThumbnail(entry);
+  let img = findThumbnailImg(coverElement);
+
+  if (!url) {
+    if (img) {
+      img.remove();
+    }
+    return false;
+  }
+  if (img && img.getAttribute('src') === url) {
+    return true;
+  }
+  if (!img) {
+    img = document.createElement('img');
+    img.className = 'video-thumbnail';
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    img.setAttribute('referrerpolicy', 'no-referrer');
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    // First child, so the status ribbon (added after) stays on top.
+    coverElement.insertBefore(img, coverElement.firstChild);
+  }
+  img.onerror = function () {
+    failedThumbnailUrls.add(url);
+    if (img.getAttribute('src') === url) {
+      img.remove();
+      coverElement.classList.remove('showing-thumbnail', 'thumbnail-natural');
+    }
+  };
+  img.src = url;
+  return true;
+}
+
+// The detail page's cover box. Only a Video with no own cover gets the
+// thumbnail; everything else is left exactly as showDetailView() drew it.
+// While the thumbnail loads (or if it fails) the box keeps the 16:9
+// placeholder (.showing-thumbnail). Once it has loaded, .thumbnail-natural
+// lets the box take the picture's own shape, uncropped (see style.css).
+// Detail page only: shelf cards never get .thumbnail-natural.
+function applyDetailThumbnail(entry) {
+  const shown = applyThumbnailToCoverElement(detailCoverBox, entry);
+  detailCoverBox.classList.toggle('showing-thumbnail', shown);
+  // Start from the placeholder every time, so a shape from a previous
+  // entry (or a previous URL) never sticks around.
+  detailCoverBox.classList.remove('thumbnail-natural');
+  const img = shown ? findThumbnailImg(detailCoverBox) : null;
+  if (!img) {
+    return;
+  }
+  const src = img.getAttribute('src');
+  function markLoaded() {
+    // Only if this same img still shows this same URL in the detail box
+    // (a late load from an earlier entry must not resize the box).
+    if (findThumbnailImg(detailCoverBox) === img && img.getAttribute('src') === src &&
+        detailCoverBox.classList.contains('showing-thumbnail') && img.naturalWidth > 0) {
+      detailCoverBox.classList.add('thumbnail-natural');
+    }
+  }
+  img.onload = markLoaded;
+  if (img.complete) {
+    markLoaded();
+  }
+}
+
+// Redraws the thumbnail on every box currently showing this entry,
+// without a full renderList() (which could wipe an edit in progress).
+function refreshShownThumbnails(entryId) {
+  const entry = findEntryById(entryId);
+  Array.prototype.forEach.call(
+    document.querySelectorAll('[data-thumb-entry-id]'),
+    function (element) {
+      if (element === detailCoverBox || element.dataset.thumbEntryId !== entryId) {
+        return;
+      }
+      if (entry) {
+        applyThumbnailToCoverElement(element, entry);
+      }
+    }
+  );
+  if (entry && currentDetailEntry && currentDetailEntry.id === entryId &&
+      detailView.style.display === 'block') {
+    applyDetailThumbnail(entry);
+  }
+}
+
+// --- Cover cloud download ---
+// Brings covers chosen on another device onto this one. For each comic
+// with an entry.coverVersion, if this device has no local cover or its
+// recorded localCoverVersion (COVER_VERSION_STORE_NAME) is different,
+// it downloads the cloud copy with the authenticated helper and saves
+// it locally WITHOUT uploading (saveDownloadedCoverLocally()). Covers
+// only. Nothing here deletes a local cover or makes a public URL.
+
+const MAX_COVER_DOWNLOADS = 3;
+let activeCoverDownloads = 0;
+const coverDownloadWaiters = [];
+
+// Simple "at most 3 at once" gate shared by every download path.
+function acquireCoverDownloadSlot() {
+  if (activeCoverDownloads < MAX_COVER_DOWNLOADS) {
+    activeCoverDownloads++;
+    return Promise.resolve();
+  }
+  return new Promise(function (resolve) {
+    coverDownloadWaiters.push(resolve);
+  });
+}
+function releaseCoverDownloadSlot() {
+  const next = coverDownloadWaiters.shift();
+  if (next) {
+    next(); // hand the slot straight to the next waiter
+  } else {
+    activeCoverDownloads--;
+  }
+}
+
+// The logged-in user downloads run for (null when logged out), and a
+// counter bumped whenever that changes, so a download started for one
+// account is thrown away if it finishes after a logout/user switch.
+let coverSyncUserId = null;
+let coverSyncGeneration = 0;
+// "entryId|coverVersion" keys that failed to download this page
+// session; not retried until the next page load, 'online' event, or
+// logout/user switch.
+const coverDownloadFailures = new Set();
+// entryId -> Promise<boolean>, so the sync and getCoverUrl() never
+// download the same cover twice at once.
+const coverDownloadsInFlight = new Map();
+
+// Called by showAuthOrApp() with the session's user id, or null.
+function setCoverSyncUser(userId) {
+  if (userId === coverSyncUserId) {
+    return;
+  }
+  coverSyncUserId = userId;
+  coverSyncGeneration++;
+  coverDownloadFailures.clear();
+}
+
+// Downloads and saves one comic's cloud cover if this device needs it.
+// Resolves true only if a new cover was actually saved locally, false
+// otherwise (nothing needed, skipped, failed). Never rejects, never
+// uploads, never changes entry.coverVersion.
+function downloadCoverIfNeeded(entryId) {
+  const existing = coverDownloadsInFlight.get(entryId);
+  if (existing) {
+    return existing;
+  }
+
+  const attempt = (async function () {
+    const entry = findEntryById(entryId);
+    if (!entry || !entry.coverVersion || !coverSyncUserId || !navigator.onLine ||
+        accountDeletionInProgress) {
+      return false;
+    }
+    const version = entry.coverVersion;
+    const failureKey = entryId + '|' + version;
+    if (coverDownloadFailures.has(failureKey)) {
+      return false;
+    }
+
+    // Captured BEFORE reading local state: a cover pick, Remove Image or
+    // comic delete bumps this, and then whatever we download is stale.
+    const cloudState = getCoverCloudState(entryId);
+    const turnAtStart = cloudState.latest;
+    const generation = coverSyncGeneration;
+
+    const status = await getLocalCoverStatus(entryId);
+    if (status.hasLocal && status.version === version) {
+      return false; // already up to date
+    }
+
+    // Requests the file for entry.coverVersion, falling back once to
+    // the legacy single-file path (see downloadCoverFromCloud()).
+    let result = { blob: null, missing: false };
+    await acquireCoverDownloadSlot();
+    try {
+      if (generation !== coverSyncGeneration) {
+        return false;
+      }
+      result = await downloadCoverFromCloud(entryId, version);
+    } finally {
+      releaseCoverDownloadSlot();
+    }
+
+    if (generation !== coverSyncGeneration) {
+      return false; // logged out / switched user meanwhile
+    }
+    const blob = result.blob;
+    if (result.missing) {
+      // Neither the versioned nor the legacy file exists: keep the
+      // placeholder, no error. Remembered like a failure so it isn't
+      // asked for again on every render this session.
+      coverDownloadFailures.add(failureKey);
+      return false;
+    }
+    if (!(blob instanceof Blob)) {
+      console.warn('Cover download unavailable for entry ' + entryId + ' (version ' + version + '); will retry on next load or when back online.');
+      coverDownloadFailures.add(failureKey);
+      return false;
+    }
+
+    // Re-check: the comic may have been deleted, its cover changed or
+    // removed, or a new cover picked here while we were downloading.
+    const current = findEntryById(entryId);
+    if (!current || current.coverVersion !== version || cloudState.latest !== turnAtStart ||
+        accountDeletionInProgress) {
+      return false;
+    }
+
+    await saveDownloadedCoverLocally(entryId, blob, version);
+    return true;
+  })().catch(function (error) {
+    console.error('Cover download failed for entry ' + entryId + ':', error);
+    const entry = findEntryById(entryId);
+    if (entry && entry.coverVersion) {
+      coverDownloadFailures.add(entryId + '|' + entry.coverVersion);
+    }
+    return false;
+  }).finally(function () {
+    coverDownloadsInFlight.delete(entryId);
+  });
+
+  coverDownloadsInFlight.set(entryId, attempt);
+  return attempt;
+}
+
+// Updates, in place, every cover box currently showing these comics
+// (shelf cards and the detail page) after their local cover changed.
+// Done in place instead of renderList() so a background download never
+// wipes out an inline edit in progress. One object URL per comic,
+// stored in imageObjectUrlCache like every other cover URL; the old
+// one is revoked by forgetCachedImageUrl().
+function refreshShownCovers(entryIds) {
+  const detailOpen = detailView.style.display === 'block';
+  entryIds.forEach(function (entryId) {
+    forgetCachedImageUrl(entryId);
+
+    const elements = Array.prototype.filter.call(
+      document.querySelectorAll('[data-cover-entry-id]'),
+      function (element) {
+        return element !== detailCoverBox && element.dataset.coverEntryId === entryId;
+      }
+    );
+    const entry = findEntryById(entryId);
+    if (detailOpen && currentDetailEntry && currentDetailEntry.id === entryId &&
+        entry && entry.hasImage) {
+      elements.push(detailCoverBox);
+    }
+    if (elements.length === 0) {
+      return;
+    }
+
+    loadImageForComic(entryId).then(function (imageBlob) {
+      if (!imageBlob) {
+        return;
+      }
+      let url = imageObjectUrlCache.get(entryId);
+      if (!url) {
+        url = URL.createObjectURL(imageBlob);
+        imageObjectUrlCache.set(entryId, url);
+      }
+      elements.forEach(function (element) {
+        if (!document.body.contains(element)) {
+          return;
+        }
+        if (element === detailCoverBox) {
+          if (!currentDetailEntry || currentDetailEntry.id !== entryId) {
+            return;
+          }
+          element.dataset.coverEntryId = entryId;
+        } else if (element.dataset.coverEntryId !== entryId) {
+          return;
+        }
+        setCoverElementImage(element, url);
+      });
+    }).catch(function (error) {
+      console.error('Could not show downloaded cover:', error);
+    });
+  });
+}
+
+// Checks every comic with a coverVersion and downloads the covers this
+// device is missing or has an older version of (at most 3 at a time).
+// Runs in the background: nothing awaits it. If it's called while
+// already running, it runs once more afterwards (entries may have
+// changed). Re-renders only if at least one cover was actually saved.
+let coverSyncRunning = false;
+let coverSyncRerunRequested = false;
+async function syncCoversFromCloud() {
+  if (!coverSyncUserId || !navigator.onLine || accountDeletionInProgress) {
+    return;
+  }
+  if (coverSyncRunning) {
+    coverSyncRerunRequested = true;
+    return;
+  }
+  coverSyncRunning = true;
+  const generation = coverSyncGeneration;
+  const changedIds = [];
+
+  try {
+    const entryIds = manhwaEntries
+      .filter(function (entry) { return entry && entry.id && entry.coverVersion; })
+      .map(function (entry) { return entry.id; });
+
+    let nextIndex = 0;
+    async function worker() {
+      while (nextIndex < entryIds.length && generation === coverSyncGeneration) {
+        const entryId = entryIds[nextIndex++];
+        if (await downloadCoverIfNeeded(entryId)) {
+          changedIds.push(entryId);
+        }
+      }
+    }
+    const workers = [];
+    for (let i = 0; i < MAX_COVER_DOWNLOADS; i++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
+  } catch (error) {
+    console.error('Cover sync failed:', error);
+  } finally {
+    coverSyncRunning = false;
+  }
+
+  if (changedIds.length > 0 && generation === coverSyncGeneration) {
+    refreshShownCovers(changedIds);
+    refreshListCovers();
+  }
+
+  if (coverSyncRerunRequested) {
+    coverSyncRerunRequested = false;
+    syncCoversFromCloud();
+  }
+}
+window.syncCoversFromCloud = syncCoversFromCloud;
+
+// Back online: forget this session's failures and try again. Separate
+// from the offline-queue 'online' listener, which is left unchanged.
+window.addEventListener('online', function () {
+  coverDownloadFailures.clear();
+  syncCoversFromCloud();
+  characterImageDownloadFailures.clear();
+  syncCharacterImagesFromCloud();
+});
+
 // Same idea as imageObjectUrlCache above, just its own separate Map for
 // character pictures rather than comic covers - kept separate (rather
 // than sharing one Map for both) just so each cache only ever has to
@@ -1331,6 +4513,10 @@ const characterImageObjectUrlCache = new Map();
 // at loadImageForCharacter()/characterImageObjectUrlCache instead of the
 // comic-cover versions.
 function applyCharacterImageToElement(imageElement, characterId) {
+  // Tags the box with its character (even if there's no local image
+  // yet), so an image downloaded from the cloud later can fill it in
+  // place - see refreshShownCharacterImages().
+  imageElement.dataset.characterImageId = characterId;
   const cachedUrl = characterImageObjectUrlCache.get(characterId);
   if (cachedUrl) {
     setCoverElementImage(imageElement, cachedUrl);
@@ -1360,6 +4546,965 @@ function forgetCachedCharacterImageUrl(characterId) {
     URL.revokeObjectURL(cachedUrl);
     characterImageObjectUrlCache.delete(characterId);
   }
+}
+
+// --- Character image cloud sync ---
+// The character-image equivalent of "Cover cloud sync" and "Cover cloud
+// download" above, following the same design:
+//   - character.imageVersion (inside entry.characters, synced with the
+//     entry) means "a cloud copy exists at that version".
+//   - The local IndexedDB copy is always saved first and is what the app
+//     shows. Uploads/deletes run in the background, one queue per
+//     character, and the last choice wins (the "latest" counter).
+//   - localImageVersion (CHARACTER_IMAGE_VERSION_STORE_NAME) records
+//     which cloud version this device's local image matches.
+// Characters with a local image but no imageVersion (made before this
+// existed) are left exactly as they are: nothing uploads automatically.
+
+// Finds a character by id across every comic, with the comic it lives
+// in. Used by background tasks, which must act on the LIVE objects (an
+// entry may have been reloaded or deleted while they ran).
+function findCharacterById(characterId) {
+  for (let i = 0; i < manhwaEntries.length; i++) {
+    const entry = manhwaEntries[i];
+    const characters = (entry && entry.characters) || [];
+    for (let j = 0; j < characters.length; j++) {
+      if (characters[j] && characters[j].id === characterId) {
+        return { entry: entry, character: characters[j] };
+      }
+    }
+  }
+  return null;
+}
+
+const characterImageCloudStates = new Map(); // characterId -> { latest, chain }
+
+function getCharacterImageCloudState(characterId) {
+  let state = characterImageCloudStates.get(characterId);
+  if (!state) {
+    state = { latest: 0, chain: Promise.resolve() };
+    characterImageCloudStates.set(characterId, state);
+  }
+  return state;
+}
+
+// Same contract as queueCoverCloudTask(): returns a promise for the
+// task's result (undefined if it threw).
+function queueCharacterImageCloudTask(characterId, task) {
+  const state = getCharacterImageCloudState(characterId);
+  const result = state.chain.then(function () { return task(); }).catch(function (error) {
+    console.error('Character image cloud task failed for ' + characterId + ':', error);
+    return undefined;
+  });
+  state.chain = result;
+  return result;
+}
+
+// Makes any queued or in-flight upload for this character stale, so it
+// won't set imageVersion when it finishes.
+function cancelPendingCharacterImageUploads(characterId) {
+  getCharacterImageCloudState(characterId).latest += 1;
+}
+
+// Removes a character's cloud files: everything under
+// "<userId>/characters/<characterId>/" except keepVersion (null removes
+// them all), plus the legacy "<userId>/characters/<characterId>" file.
+// Returns true on success, false on failure (logged). Never throws.
+async function removeCloudCharacterFiles(characterId, keepVersion) {
+  return (await removeCloudCharacterFilesResult(characterId, keepVersion, null)).ok;
+}
+
+async function removeCloudCharacterFilesResult(characterId, keepVersion, expectedUserId) {
+  if (!isValidCloudImageId(characterId)) {
+    console.error('Cloud character image: id must be a non-empty string with no slashes, got:', characterId);
+    return { ok: false, error: 'invalid id', permanent: true };
+  }
+  return removeCloudImageFolderResult(
+    function () { return buildCharacterCloudPaths(characterId); },
+    keepVersion, 'images for character ' + characterId, expectedUserId);
+}
+
+// Called (not awaited) after a picked character image has been saved
+// locally. Resizes the picked file, uploads it to a NEW versioned path,
+// and only on success stamps character.imageVersion, touches + syncs the
+// parent comic and records localImageVersion. On failure it only logs:
+// imageVersion is left unchanged and the user is never blocked.
+// If the upload can't be attempted (offline / not signed in) or fails,
+// an image task is queued so retryPendingImageTasks() finishes it later.
+function uploadCharacterImageInBackground(characterId, pickedFile) {
+  const state = getCharacterImageCloudState(characterId);
+  state.latest += 1;
+  const myTurn = state.latest;
+  const requestedAt = Date.now();
+  const ownerUserId = manhwaEntriesOwnerId;
+  const found = findCharacterById(characterId);
+  const entryId = found ? found.entry.id : null;
+  function isCurrent() {
+    return myTurn === state.latest;
+  }
+
+  queueCharacterImageCloudTask(characterId, async function () {
+    if (!isCurrent() || accountDeletionInProgress) {
+      return; // a newer pick / remove / delete is queued behind this one
+    }
+
+    const userId = await getImageSessionUserId();
+    if (!userId || !navigator.onLine || (ownerUserId && userId !== ownerUserId)) {
+      console.warn('Character image upload for ' + characterId + ' postponed (offline or not signed in); queued.');
+      enqueueImageTask('character', characterId, entryId, ownerUserId || userId, requestedAt, null);
+      return;
+    }
+
+    const result = await runCharacterImageUpload(characterId, pickedFile, isCurrent, userId);
+    handleImmediateUploadResult('character', characterId, entryId, userId, requestedAt, result);
+  });
+}
+
+// The character image upload flow, shared by
+// uploadCharacterImageInBackground() and reconcileImage(). Same contract
+// as runCoverUpload(). Must run on this character's chain.
+async function runCharacterImageUpload(characterId, sourceBlob, isCurrent, expectedUserId) {
+  let resized;
+  try {
+    resized = await resizeImageForUpload(sourceBlob);
+  } catch (error) {
+    console.error('Could not prepare character image for upload (' + characterId + '):', error);
+    return { status: 'failed', error: describeStorageError(error), permanent: true, stage: 'resize' };
+  }
+  if (!isCurrent()) {
+    return { status: 'stale' };
+  }
+
+  // Version picked BEFORE uploading; imageVersion isn't touched until
+  // the upload succeeds. Bumped past the current one in case the
+  // clock is behind it.
+  const before = findCharacterById(characterId);
+  if (!before) {
+    return { status: 'gone' };
+  }
+  const currentVersion = before.character.imageVersion;
+  let newVersion = Date.now();
+  if (isValidCoverVersion(currentVersion) && newVersion <= currentVersion) {
+    newVersion = currentVersion + 1;
+  }
+
+  const uploaded = await uploadImageToCloudResult('characters', characterId, resized, newVersion, expectedUserId);
+  if (!uploaded.ok) {
+    console.error('Character image upload failed for ' + characterId + '; imageVersion left unchanged.');
+    return { status: 'failed', error: uploaded.error, permanent: uploaded.permanent, stage: 'upload' };
+  }
+
+  // Something newer was requested meanwhile: its own task decides
+  // imageVersion and cleans up the file we just uploaded.
+  if (!isCurrent()) {
+    return { status: 'stale' };
+  }
+  // The character (or its whole comic) is gone - don't resync a
+  // deleted entry. Its delete task, queued after us, cleans the cloud.
+  const live = findCharacterById(characterId);
+  if (!live) {
+    return { status: 'gone' };
+  }
+  const entry = live.entry;
+
+  live.character.imageVersion = newVersion;
+  // The local image IS this version, so the download sync must never
+  // fetch it back.
+  setLocalCharacterImageVersion(characterId, newVersion).catch(function (error) {
+    console.error('Could not record local image version for character ' + characterId + ':', error);
+  });
+  touchEntry(entry);
+  saveToStorage();
+
+  return {
+    status: 'uploaded',
+    version: newVersion,
+    cleanup: syncEntryThenRemoveOlderCharacterImages(characterId, newVersion, isCurrent, expectedUserId)
+  };
+}
+
+// Character equivalent of syncEntryThenRemoveOlderCovers(): older cloud
+// versions are removed only after the parent entry (pointing at the new
+// version) has synced.
+function syncEntryThenRemoveOlderCharacterImages(characterId, keepVersion, isCurrent, expectedUserId) {
+  const live = findCharacterById(characterId);
+  if (!live) {
+    return Promise.resolve({ ok: true });
+  }
+  const entry = live.entry;
+  return syncEntryToSupabase(entry).then(function (synced) {
+    if (!synced) {
+      console.warn('Entry ' + entry.id + ' not synced yet; older cloud images for character ' + characterId + ' kept for now.');
+      return { ok: false, error: 'entry not synced yet', permanent: false };
+    }
+    return queueCharacterImageCloudTask(characterId, async function () {
+      if (!isCurrent()) {
+        return { ok: true };
+      }
+      const cleaned = await removeCloudCharacterFilesResult(characterId, keepVersion, expectedUserId);
+      if (!cleaned.ok) {
+        console.error('Could not clean up older cloud images for character ' + characterId + '.');
+      }
+      return cleaned;
+    }).then(function (cleaned) {
+      return cleaned || { ok: false, error: 'cleanup task threw', permanent: false };
+    });
+  });
+}
+
+// Called (not awaited) when a character's image is removed, the
+// character is deleted, or its comic is deleted. Cancels any pending
+// upload, then (after any in-flight one finishes) removes everything
+// under the character's cloud folder plus the legacy path. If that
+// can't be attempted or fails, an image task is queued. entryId (the
+// character's comic) is only recorded on the task, for reference.
+function deleteCharacterImageFromCloudInBackground(characterId, entryId) {
+  cancelPendingCharacterImageUploads(characterId);
+  const requestedAt = Date.now();
+  const ownerUserId = manhwaEntriesOwnerId;
+  queueCharacterImageCloudTask(characterId, async function () {
+    if (accountDeletionInProgress) {
+      return;
+    }
+    const userId = await getImageSessionUserId();
+    if (!userId || !navigator.onLine || (ownerUserId && userId !== ownerUserId)) {
+      console.warn('Cloud delete for character ' + characterId + ' postponed (offline or not signed in); queued.');
+      enqueueImageTask('character', characterId, entryId || null, ownerUserId || userId, requestedAt, null);
+      return;
+    }
+    const deleted = await removeCloudCharacterFilesResult(characterId, null, userId);
+    if (!deleted.ok) {
+      console.error('Could not delete cloud images for character ' + characterId + '.');
+    }
+    handleImmediateDeleteResult('character', characterId, entryId || null, userId, requestedAt, deleted);
+  });
+}
+
+// Downloads one character's image for the given version, falling back
+// once to the legacy single-file path. Resolves { blob } on success,
+// { blob: null, missing: true } if neither exists, or
+// { blob: null, missing: false } on any other failure (logged).
+async function downloadCharacterImageFromCloud(characterId, version) {
+  try {
+    const versionedPath = await buildCloudImagePath('characters', characterId, version);
+    const paths = await buildCharacterCloudPaths(characterId);
+    if (!versionedPath || !paths) {
+      return { blob: null, missing: false };
+    }
+
+    const candidates = [versionedPath, paths.legacy];
+    for (let i = 0; i < candidates.length; i++) {
+      const { data, error } = await supabaseClient.storage
+        .from('images')
+        .download(candidates[i]);
+      if (!error && data instanceof Blob) {
+        return { blob: data, missing: false };
+      }
+      if (error && !isStorageNotFoundError(error)) {
+        console.error('Character image download failed for', candidates[i], error);
+        return { blob: null, missing: false };
+      }
+    }
+    return { blob: null, missing: true };
+  } catch (error) {
+    console.error('Character image download failed for ' + characterId + ':', error);
+    return { blob: null, missing: false };
+  }
+}
+
+const MAX_CHARACTER_IMAGE_DOWNLOADS = 3;
+// "characterId|imageVersion" keys that were missing or failed this
+// session - not retried until the next page load, 'online' event, or
+// logout/user switch (tracked via coverSyncGeneration, which
+// setCoverSyncUser() bumps).
+const characterImageDownloadFailures = new Set();
+let characterImageFailuresGeneration = 0;
+const characterImageDownloadsInFlight = new Map(); // characterId -> Promise<boolean>
+
+function resetCharacterImageFailuresIfUserChanged() {
+  if (characterImageFailuresGeneration !== coverSyncGeneration) {
+    characterImageFailuresGeneration = coverSyncGeneration;
+    characterImageDownloadFailures.clear();
+  }
+}
+
+// Downloads and saves one character's cloud image if this device needs
+// it. Resolves true only if a new image was saved locally. Never
+// rejects, never uploads, never changes character.imageVersion.
+function downloadCharacterImageIfNeeded(characterId) {
+  const existing = characterImageDownloadsInFlight.get(characterId);
+  if (existing) {
+    return existing;
+  }
+
+  const attempt = (async function () {
+    const found = findCharacterById(characterId);
+    if (!found || !isValidCoverVersion(found.character.imageVersion) ||
+        !coverSyncUserId || !navigator.onLine || accountDeletionInProgress) {
+      return false;
+    }
+    const version = found.character.imageVersion;
+    const failureKey = characterId + '|' + version;
+    if (characterImageDownloadFailures.has(failureKey)) {
+      return false;
+    }
+
+    // Captured BEFORE reading local state: a new pick, remove or delete
+    // bumps this, and whatever we download is then stale.
+    const cloudState = getCharacterImageCloudState(characterId);
+    const turnAtStart = cloudState.latest;
+    const generation = coverSyncGeneration;
+
+    const status = await getLocalCharacterImageStatus(characterId);
+    if (status.hasLocal && status.version === version) {
+      return false; // already up to date
+    }
+
+    const result = await downloadCharacterImageFromCloud(characterId, version);
+    if (generation !== coverSyncGeneration) {
+      return false; // logged out / switched user meanwhile
+    }
+    if (!(result.blob instanceof Blob)) {
+      // Missing or failed: keep the placeholder, no error shown, and
+      // don't ask again this session.
+      characterImageDownloadFailures.add(failureKey);
+      return false;
+    }
+
+    // Re-check: the character may have been deleted, its image changed
+    // or removed, or a new one picked here while we were downloading.
+    const current = findCharacterById(characterId);
+    if (!current || current.character.imageVersion !== version ||
+        cloudState.latest !== turnAtStart) {
+      return false;
+    }
+
+    await saveDownloadedCharacterImageLocally(characterId, result.blob, version);
+    return true;
+  })().catch(function (error) {
+    console.error('Character image download failed for ' + characterId + ':', error);
+    const found = findCharacterById(characterId);
+    if (found && found.character.imageVersion) {
+      characterImageDownloadFailures.add(characterId + '|' + found.character.imageVersion);
+    }
+    return false;
+  }).finally(function () {
+    characterImageDownloadsInFlight.delete(characterId);
+  });
+
+  characterImageDownloadsInFlight.set(characterId, attempt);
+  return attempt;
+}
+
+// Updates, in place, every character picture currently on the page for
+// these characters (a comic's Favorite Characters section and the
+// Characters tab) - no re-render, so nothing flashes and the scroll
+// position is untouched. The Add/Edit form preview is only updated when
+// it's still showing that character's saved image - never over a
+// picture the user just picked or removed there.
+// The new object URL is applied BEFORE the old one is revoked, so a
+// box never briefly points at a dead URL.
+function refreshShownCharacterImages(characterIds) {
+  characterIds.forEach(function (characterId) {
+    loadImageForCharacter(characterId).then(function (imageBlob) {
+      if (!imageBlob) {
+        return;
+      }
+      const oldUrl = characterImageObjectUrlCache.get(characterId);
+      const newUrl = URL.createObjectURL(imageBlob);
+      characterImageObjectUrlCache.set(characterId, newUrl);
+
+      document.querySelectorAll('[data-character-image-id]').forEach(function (element) {
+        if (element.dataset.characterImageId !== characterId) {
+          return;
+        }
+        if (element === characterFormPreviewBox &&
+            (editingCharacterId !== characterId || pickedCharacterImageBlob || characterImageWasRemoved)) {
+          return;
+        }
+        setCoverElementImage(element, newUrl);
+      });
+
+      if (oldUrl && oldUrl !== newUrl) {
+        URL.revokeObjectURL(oldUrl);
+      }
+    }).catch(function (error) {
+      console.error('Could not show downloaded character image:', error);
+    });
+  });
+}
+
+// Checks every character with an imageVersion and downloads the images
+// this device is missing or has a different version of, at most 3 at a
+// time. Background only: nothing awaits it. If called while running, it
+// runs once more afterwards. Refreshes the page only for images that
+// were actually saved.
+let characterImageSyncRunning = false;
+let characterImageSyncRerunRequested = false;
+async function syncCharacterImagesFromCloud() {
+  if (!coverSyncUserId || !navigator.onLine || accountDeletionInProgress) {
+    return;
+  }
+  if (characterImageSyncRunning) {
+    characterImageSyncRerunRequested = true;
+    return;
+  }
+  characterImageSyncRunning = true;
+  resetCharacterImageFailuresIfUserChanged();
+  const generation = coverSyncGeneration;
+  const changedIds = [];
+
+  try {
+    const characterIds = [];
+    manhwaEntries.forEach(function (entry) {
+      ((entry && entry.characters) || []).forEach(function (character) {
+        if (character && character.id && isValidCoverVersion(character.imageVersion)) {
+          characterIds.push(character.id);
+        }
+      });
+    });
+
+    let nextIndex = 0;
+    async function worker() {
+      while (nextIndex < characterIds.length && generation === coverSyncGeneration) {
+        const characterId = characterIds[nextIndex++];
+        if (await downloadCharacterImageIfNeeded(characterId)) {
+          changedIds.push(characterId);
+        }
+      }
+    }
+    const workers = [];
+    for (let i = 0; i < MAX_CHARACTER_IMAGE_DOWNLOADS; i++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
+  } catch (error) {
+    console.error('Character image sync failed:', error);
+  } finally {
+    characterImageSyncRunning = false;
+  }
+
+  if (changedIds.length > 0 && generation === coverSyncGeneration) {
+    refreshShownCharacterImages(changedIds);
+  }
+
+  if (characterImageSyncRerunRequested) {
+    characterImageSyncRerunRequested = false;
+    syncCharacterImagesFromCloud();
+  }
+}
+window.syncCharacterImagesFromCloud = syncCharacterImagesFromCloud;
+
+// --- Image retry queue: enqueue, reconcile, retry runner ---
+// Cover and character uploads/cloud deletes that failed or couldn't be
+// attempted are recorded as image tasks in the offline queue (see
+// "Image retry queue" near getPendingWrites()). retryPendingImageTasks()
+// runs them via reconcileImage(), which makes the cloud match whatever
+// the LIVE local state is at that moment - so a record only says "this
+// image needs attention", never what to upload.
+//
+// requestedAt is the Date.now() of the user action that queued it. Cloud
+// versions are also Date.now() stamps taken at upload time, so a
+// request newer than the entry's current version means the local copy
+// is newer than the cloud one (localCoverVersion can't tell us that: a
+// pick deliberately records the OLD cloud version there, see the
+// coverImageInput listener). The catch-up scan queues with requestedAt
+// 0, meaning "upload only if there's no cloud version at all".
+
+const IMAGE_RETRY_DELAYS_MS = [30 * 1000, 2 * 60 * 1000, 10 * 60 * 1000, 60 * 60 * 1000];
+const IMAGE_RETRY_DAILY_MS = 24 * 60 * 60 * 1000;
+const IMAGE_TASK_MAX_ATTEMPTS = 8;
+const MAX_CONCURRENT_IMAGE_TASKS = 2;
+const IMAGE_CATCH_UP_LIMIT = 5;
+
+// Record keys with a reconcile running right now, so the same image is
+// never reconciled twice at once.
+const imageTasksInFlight = new Set();
+let imageNotSyncedMessageShown = false;
+let imageCatchUpScanDone = false;
+let imageRetryTimer = null;
+
+// Delay after the Nth failed attempt: 30 s, 2 min, 10 min, 1 h, then daily.
+function getImageRetryDelay(attempts) {
+  return IMAGE_RETRY_DELAYS_MS[attempts - 1] || IMAGE_RETRY_DAILY_MS;
+}
+
+// The signed-in user's id, or null. Reads the saved login locally (no
+// network), and doesn't log when signed out.
+async function getImageSessionUserId() {
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    return session ? session.user.id : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+// One non-blocking banner per page session.
+function notifyImageNotSynced() {
+  if (imageNotSyncedMessageShown) {
+    return;
+  }
+  imageNotSyncedMessageShown = true;
+  showSyncBanner('imageNotSynced');
+}
+
+// Saves (or overwrites) the one task record for this image. An older
+// request never overwrites a newer one, and a record belonging to a
+// different user is never touched. failure is null when the attempt
+// couldn't be made at all (due right away, e.g. on the next 'online'),
+// or { error } after a failed attempt (counts as attempt 1, 30 s wait).
+function enqueueImageTask(kind, id, entryId, userId, requestedAt, failure) {
+  if (accountDeletionInProgress) {
+    return Promise.resolve();
+  }
+  if (!userId || !isValidCloudImageId(id)) {
+    console.error('Image task not queued for ' + kind + ' ' + id + ': no user or bad id.');
+    return Promise.resolve();
+  }
+  const key = getImageQueueKey(kind, id);
+  const now = Date.now();
+  const attempts = failure ? 1 : 0;
+  return updateImageTaskRecord(key, function (existing) {
+    if (existing && existing.userId !== userId) {
+      console.warn('Image task ' + key + ' belongs to another account; left alone.');
+      return undefined;
+    }
+    if (existing && (existing.requestedAt || 0) > requestedAt) {
+      return undefined; // a newer request is already queued
+    }
+    return {
+      entry_id: key,
+      kind: kind,
+      id: id,
+      entryId: entryId || null,
+      userId: userId,
+      requestedAt: requestedAt,
+      attempts: attempts,
+      nextAttemptAt: attempts ? now + getImageRetryDelay(attempts) : now,
+      lastError: failure ? String(failure.error || 'failed') : null
+    };
+  }).then(function () {
+    updatePendingIndicator();
+    scheduleImageRetryTimer();
+  }).catch(function (error) {
+    console.error('Could not queue image task ' + key + ':', error);
+  });
+}
+
+// Drops this image's record if it isn't newer than requestedAt (used
+// after an immediate success: an older failed attempt is now obsolete).
+function clearImageTaskIfNotNewer(kind, id, userId, requestedAt) {
+  const key = getImageQueueKey(kind, id);
+  return updateImageTaskRecord(key, function (existing) {
+    if (!existing || existing.userId !== userId) {
+      return undefined;
+    }
+    return (existing.requestedAt || 0) <= requestedAt ? null : undefined;
+  }).then(updatePendingIndicator).catch(function (error) {
+    console.error('Could not clear image task ' + key + ':', error);
+  });
+}
+
+// What the immediate (Choose Image) flows do with runCoverUpload() /
+// runCharacterImageUpload()'s result.
+function handleImmediateUploadResult(kind, id, entryId, userId, requestedAt, result) {
+  if (result.status === 'uploaded') {
+    clearImageTaskIfNotNewer(kind, id, userId, requestedAt);
+    result.cleanup.then(function (cleaned) {
+      if (cleaned.ok) {
+        return;
+      }
+      if (cleaned.permanent) {
+        // Only stale older versions are left behind; nothing for the
+        // user to act on, so log instead of showing the message.
+        console.error('Old cloud versions for ' + kind + ' ' + id + ' could not be removed:', cleaned.error);
+        return;
+      }
+      // Entry didn't sync or cleanup failed: reconcile cleans up later.
+      enqueueImageTask(kind, id, entryId, userId, requestedAt, { error: cleaned.error });
+    });
+    return;
+  }
+  if (result.status === 'stale' || result.status === 'gone') {
+    return; // the newer action / the delete owns this image now
+  }
+  // Failed. A cloud rejection that can never succeed is dropped with
+  // the message. A resize failure of the picked file is queued: the
+  // retry resizes the saved local copy instead.
+  if (result.permanent && result.stage !== 'resize') {
+    console.error('Image ' + kind + ' ' + id + ' rejected by the cloud; not retrying:', result.error);
+    clearImageTaskIfNotNewer(kind, id, userId, requestedAt);
+    notifyImageNotSynced();
+    return;
+  }
+  enqueueImageTask(kind, id, entryId, userId, requestedAt, { error: result.error });
+}
+
+// Same for the immediate cloud deletes.
+function handleImmediateDeleteResult(kind, id, entryId, userId, requestedAt, result) {
+  if (result.ok) {
+    clearImageTaskIfNotNewer(kind, id, userId, requestedAt);
+    return;
+  }
+  if (result.permanent) {
+    console.error('Cloud delete for ' + kind + ' ' + id + ' rejected; not retrying:', result.error);
+    clearImageTaskIfNotNewer(kind, id, userId, requestedAt);
+    notifyImageNotSynced();
+    return;
+  }
+  enqueueImageTask(kind, id, entryId, userId, requestedAt, { error: result.error });
+}
+
+// Turns a { ok:false, error, permanent } / failed-upload result into a
+// reconcile outcome.
+function toImageFailureOutcome(result) {
+  return result.permanent
+    ? { permanent: true, error: result.error }
+    : { retry: true, error: result.error };
+}
+
+// Makes the cloud match the live local state for ONE image task.
+// Resolves an outcome:
+//   { done: true }              record can be dropped
+//   { stale: true }             a newer local action took over; leave it
+//   { retry: true, error }      try again later (backoff)
+//   { permanent: true, error }  drop it, show the message
+// Runs on the image's own cloud chain, so it never overlaps with a pick,
+// remove, delete or another cleanup for the same image.
+async function reconcileImage(record, userId) {
+  const isCover = record.kind === 'cover';
+  const id = record.id;
+  const state = isCover ? getCoverCloudState(id) : getCharacterImageCloudState(id);
+  const queueTask = isCover ? queueCoverCloudTask : queueCharacterImageCloudTask;
+  const generation = coverSyncGeneration;
+
+  const step = await queueTask(id, async function () {
+    const turnAtStart = state.latest;
+    function isCurrent() {
+      return state.latest === turnAtStart && generation === coverSyncGeneration;
+    }
+    function removeAll() {
+      return isCover
+        ? removeCloudCoverFilesResult(id, null, userId)
+        : removeCloudCharacterFilesResult(id, null, userId);
+    }
+
+    // Re-read the live entry / character by id.
+    let liveEntry;
+    let liveImageOwner; // the object holding hasImage + the version field
+    if (isCover) {
+      liveEntry = findEntryById(id);
+      liveImageOwner = liveEntry;
+    } else {
+      const found = findCharacterById(id);
+      liveEntry = found ? found.entry : null;
+      liveImageOwner = found ? found.character : null;
+    }
+    const versionField = isCover ? 'coverVersion' : 'imageVersion';
+
+    // Deleted: remove every cloud file for it (and the legacy path).
+    if (!liveImageOwner) {
+      const removed = await removeAll();
+      return removed.ok ? { done: true } : toImageFailureOutcome(removed);
+    }
+
+    // Removed locally: delete the cloud folder, then clear the version
+    // field only if it's still set (and nothing newer happened).
+    if (!liveImageOwner.hasImage) {
+      const removed = await removeAll();
+      if (!removed.ok) {
+        return toImageFailureOutcome(removed);
+      }
+      if (!isCurrent()) {
+        return { stale: true };
+      }
+      const again = isCover ? findEntryById(id) : findCharacterById(id);
+      const againOwner = again ? (isCover ? again : again.character) : null;
+      const againEntry = again ? (isCover ? again : again.entry) : null;
+      if (againOwner && !againOwner.hasImage && againOwner[versionField] !== undefined) {
+        delete againOwner[versionField];
+        touchEntry(againEntry);
+        saveToStorage();
+        syncEntryToSupabase(againEntry);
+      }
+      return { done: true };
+    }
+
+    const status = isCover ? await getLocalCoverStatus(id) : await getLocalCharacterImageStatus(id);
+    if (!status.hasLocal) {
+      console.warn('Image task ' + record.entry_id + ': hasImage is true but there is no local image on this device; dropping the task.');
+      return { done: true };
+    }
+
+    const cloudVersion = isValidCoverVersion(liveImageOwner[versionField]) ? liveImageOwner[versionField] : null;
+    const localIsNewer = cloudVersion === null || (record.requestedAt || 0) > cloudVersion;
+
+    if (localIsNewer) {
+      // Read the blob from the local copy NOW, then the same upload flow
+      // Choose Image uses.
+      const blob = isCover ? await loadImageForComic(id) : await loadImageForCharacter(id);
+      if (!(blob instanceof Blob)) {
+        console.warn('Image task ' + record.entry_id + ': local image could not be read; dropping the task.');
+        return { done: true };
+      }
+      if (!isCurrent()) {
+        return { stale: true };
+      }
+      const result = isCover
+        ? await runCoverUpload(id, blob, isCurrent, userId)
+        : await runCharacterImageUpload(id, blob, isCurrent, userId);
+      if (result.status === 'uploaded') {
+        return { cleanup: result.cleanup };
+      }
+      if (result.status === 'stale') {
+        return { stale: true };
+      }
+      if (result.status === 'gone') {
+        // Deleted mid-upload: the next run removes whatever was uploaded.
+        return { retry: true, error: 'deleted during upload' };
+      }
+      return toImageFailureOutcome(result);
+    }
+
+    // The entry points at a cloud version this device has locally: only
+    // remove stale older versions (after the entry has synced).
+    if (status.version === cloudVersion) {
+      return {
+        cleanup: isCover
+          ? syncEntryThenRemoveOlderCovers(id, cloudVersion, isCurrent, userId)
+          : syncEntryThenRemoveOlderCharacterImages(id, cloudVersion, isCurrent, userId)
+      };
+    }
+
+    // The cloud holds a newer image from another device; the download
+    // sync brings it here. Nothing for this task to do.
+    return { done: true };
+  });
+
+  if (!step) {
+    return { retry: true, error: 'reconcile task threw' };
+  }
+  // Awaited here, OUTSIDE the chain task: the cleanup queues its own
+  // task on the same chain.
+  if (step.cleanup) {
+    const cleaned = await step.cleanup;
+    return cleaned.ok ? { done: true } : toImageFailureOutcome(cleaned);
+  }
+  return step;
+}
+
+// Runs one record and updates or drops it. Only ever changes the record
+// if it's still the same request (same requestedAt) for the same user -
+// a newer enqueue made meanwhile is left for the next run.
+async function processImageTask(record, userId) {
+  const key = record.entry_id;
+  if (imageTasksInFlight.has(key)) {
+    return;
+  }
+  imageTasksInFlight.add(key);
+  try {
+    let outcome;
+    try {
+      outcome = await reconcileImage(record, userId);
+    } catch (error) {
+      console.error('Image task ' + key + ' failed:', error);
+      outcome = { retry: true, error: describeStorageError(error) };
+    }
+    if (outcome.stale) {
+      return;
+    }
+
+    function isSameRequest(existing) {
+      return existing && existing.userId === userId &&
+        (existing.requestedAt || 0) === (record.requestedAt || 0);
+    }
+
+    if (outcome.done) {
+      await updateImageTaskRecord(key, function (existing) {
+        return isSameRequest(existing) ? null : undefined;
+      });
+      return;
+    }
+
+    const attempts = (record.attempts || 0) + 1;
+    if (outcome.permanent || attempts >= IMAGE_TASK_MAX_ATTEMPTS) {
+      console.error('Image task ' + key + ' dropped after ' + attempts + ' attempt(s): ' + outcome.error);
+      await updateImageTaskRecord(key, function (existing) {
+        return isSameRequest(existing) ? null : undefined;
+      });
+      notifyImageNotSynced();
+      return;
+    }
+
+    console.warn('Image task ' + key + ' will retry (attempt ' + attempts + '): ' + outcome.error);
+    await updateImageTaskRecord(key, function (existing) {
+      if (!isSameRequest(existing)) {
+        return undefined;
+      }
+      return Object.assign({}, existing, {
+        attempts: attempts,
+        nextAttemptAt: Date.now() + getImageRetryDelay(attempts),
+        lastError: String(outcome.error || 'failed')
+      });
+    });
+  } finally {
+    imageTasksInFlight.delete(key);
+  }
+}
+
+// Retries due image tasks for the signed-in user, at most 2 at a time.
+// Skips when offline, signed out, or before this user's library has
+// loaded (reconcile reads live entries, and "entry not found" would
+// otherwise look like a delete). Called right after retryPendingWrites()
+// finishes. If called while running, it runs once more afterwards; that
+// can't loop quickly because failed records are pushed out by backoff.
+let imageRetryRunPromise = null;
+let imageRetryRerunRequested = false;
+function retryPendingImageTasks() {
+  if (accountDeletionInProgress) {
+    return imageRetryRunPromise || Promise.resolve();
+  }
+  if (imageRetryRunPromise) {
+    imageRetryRerunRequested = true;
+    return imageRetryRunPromise;
+  }
+  imageRetryRunPromise = (async function () {
+    try {
+      const userId = await getImageSessionUserId();
+      if (!userId || !navigator.onLine || libraryLoadState !== 'loaded' ||
+          manhwaEntriesOwnerId !== userId) {
+        return;
+      }
+      const now = Date.now();
+      const due = (await getPendingImageTasks()).filter(function (record) {
+        return record.userId === userId && (record.nextAttemptAt || 0) <= now;
+      });
+
+      let nextIndex = 0;
+      async function worker() {
+        while (nextIndex < due.length) {
+          const record = due[nextIndex++];
+          // Stop if the user changed or we went offline meanwhile.
+          if (accountDeletionInProgress || !navigator.onLine ||
+              (await getImageSessionUserId()) !== userId) {
+            return;
+          }
+          await processImageTask(record, userId);
+        }
+      }
+      const workers = [];
+      for (let i = 0; i < MAX_CONCURRENT_IMAGE_TASKS; i++) {
+        workers.push(worker());
+      }
+      await Promise.all(workers);
+
+      // Once per page session, after the runner has finished.
+      if (!imageCatchUpScanDone && navigator.onLine && !accountDeletionInProgress &&
+          (await getImageSessionUserId()) === userId) {
+        imageCatchUpScanDone = true;
+        if ((await runImageCatchUpScan(userId)) > 0) {
+          imageRetryRerunRequested = true;
+        }
+      }
+    } catch (error) {
+      console.error('Could not retry pending image tasks:', error);
+    } finally {
+      imageRetryRunPromise = null;
+      updatePendingIndicator();
+      scheduleImageRetryTimer();
+      if (imageRetryRerunRequested) {
+        imageRetryRerunRequested = false;
+        retryPendingImageTasks();
+      }
+    }
+  })();
+  return imageRetryRunPromise;
+}
+window.retryPendingImageTasks = retryPendingImageTasks;
+
+// One timer for the earliest FUTURE nextAttemptAt of this user's tasks,
+// so backoff retries happen even with no online/foreground event. Tasks
+// already due (e.g. queued while offline) wait for the next event
+// instead, so this never fires in a tight loop.
+async function scheduleImageRetryTimer() {
+  clearTimeout(imageRetryTimer);
+  imageRetryTimer = null;
+  if (accountDeletionInProgress) {
+    return;
+  }
+  try {
+    const userId = await getImageSessionUserId();
+    if (!userId || accountDeletionInProgress) {
+      return;
+    }
+    const now = Date.now();
+    let earliest = Infinity;
+    (await getPendingImageTasks()).forEach(function (record) {
+      if (record.userId === userId && (record.nextAttemptAt || 0) > now) {
+        earliest = Math.min(earliest, record.nextAttemptAt);
+      }
+    });
+    if (earliest === Infinity) {
+      return;
+    }
+    clearTimeout(imageRetryTimer);
+    imageRetryTimer = setTimeout(function () {
+      imageRetryTimer = null;
+      retryPendingImageTasks();
+    }, Math.min(earliest - now + 1000, IMAGE_RETRY_DAILY_MS));
+  } catch (error) {
+    console.error('Could not schedule image retry:', error);
+  }
+}
+
+// Queues up to 5 images (per page session) that have hasImage true and
+// a local copy but no cloud version - covers/character images whose
+// upload failed before this retry queue existed. Skips images that
+// already have a task. Returns how many it queued.
+async function runImageCatchUpScan(userId) {
+  let queued = 0;
+  if (accountDeletionInProgress) {
+    return queued;
+  }
+  try {
+    const existingKeys = new Set((await getPendingImageTasks()).map(function (record) {
+      return record.entry_id;
+    }));
+    const candidates = [];
+    manhwaEntries.forEach(function (entry) {
+      if (entry && entry.id && entry.hasImage && !isValidCoverVersion(entry.coverVersion) &&
+          !existingKeys.has(getImageQueueKey('cover', entry.id))) {
+        candidates.push({ kind: 'cover', id: entry.id, entryId: entry.id });
+      }
+      ((entry && entry.characters) || []).forEach(function (character) {
+        if (character && character.id && character.hasImage &&
+            !isValidCoverVersion(character.imageVersion) &&
+            !existingKeys.has(getImageQueueKey('character', character.id))) {
+          candidates.push({ kind: 'character', id: character.id, entryId: entry.id });
+        }
+      });
+    });
+
+    for (let i = 0; i < candidates.length && queued < IMAGE_CATCH_UP_LIMIT; i++) {
+      const candidate = candidates[i];
+      if (manhwaEntriesOwnerId !== userId) {
+        break;
+      }
+      const status = candidate.kind === 'cover'
+        ? await getLocalCoverStatus(candidate.id)
+        : await getLocalCharacterImageStatus(candidate.id);
+      if (!status.hasLocal) {
+        continue;
+      }
+      // requestedAt 0: "upload only if there's still no cloud version".
+      await enqueueImageTask(candidate.kind, candidate.id, candidate.entryId, userId, 0, null);
+      queued++;
+    }
+  } catch (error) {
+    console.error('Image catch-up scan failed:', error);
+  }
+  return queued;
 }
 
 // Builds the small "pencil" (edit) + "trash" (delete) icon button row.
@@ -1424,6 +5569,32 @@ function buildEntryActions(entry, onEditClick) {
     // Save the shorter list to localStorage so the deleted entry
     // doesn't come back after a page refresh.
     saveToStorage();
+    deleteEntryFromSupabase(entry.id);
+    removeEntryFromAllLists(entry.id);
+
+    // Always stop any in-flight cover upload from setting coverVersion
+    // and re-syncing (which would recreate the deleted row). Then, if
+    // the comic had a cover, delete the cloud copy in the background.
+    cancelPendingCoverUploads(entry.id);
+    if (entry.hasImage || entry.coverVersion) {
+      deleteCoverFromCloudInBackground(entry.id);
+    }
+
+    // Same for every character in this comic: their local images (which
+    // used to be left behind) and their cloud files.
+    (entry.characters || []).forEach(function (character) {
+      if (!character || !character.id) {
+        return;
+      }
+      cancelPendingCharacterImageUploads(character.id);
+      deleteImageForCharacter(character.id).catch(function (error) {
+        console.error('Could not delete character image:', error);
+      });
+      forgetCachedCharacterImageUrl(character.id);
+      if (character.hasImage || character.imageVersion) {
+        deleteCharacterImageFromCloudInBackground(character.id, entry.id);
+      }
+    });
 
     // Redraw the shelf so the deleted card disappears immediately
     renderList();
@@ -1433,14 +5604,27 @@ function buildEntryActions(entry, onEditClick) {
   return actionsRow;
 }
 
-// Fills in one Private-mode row for a comic: the title on the left, a
-// plain "<progress> · Status" text next, then the link, then the same
-// edit/delete icons on the right. listItem already exists (renderList()
-// created it and gave it the "private-row" class) - this function just
-// adds the pieces inside it.
+// Fills in one Private-mode row for a comic: the title, given most of
+// the row's width (see ".private-row-title" in style.css), and the
+// link on the right. listItem already exists (renderList() created it
+// and gave it the "private-row" class) - this function just adds the
+// pieces inside it.
+//
+// The chapter/status text and the edit/delete icons used to live here
+// too, but there wasn't enough room for all of it alongside a wide
+// title - long titles were getting truncated down to almost nothing.
+// Editing is still reachable from here (click the title to open the
+// detail page, which has its own Edit button). Deleting isn't - the
+// only way to delete a comic while Private mode is on is to switch it
+// off first and use the delete icon on the card in Cover view.
 function buildPrivateRow(listItem, entry) {
   const titleElement = document.createElement('div');
-  titleElement.className = 'private-row-title detail-link-target';
+  // "private-row-title-wide" is what caps this title at ~72% of the
+  // row's width instead of letting it stretch to fill everything -
+  // see the CSS comment on that class in style.css. Quick Note rows
+  // (buildPrivateNoteRow() below) don't add this class, so their
+  // titles still behave the old way.
+  titleElement.className = 'private-row-title private-row-title-wide detail-link-target';
   titleElement.textContent = entry.title;
   // Clicking the title opens this comic's detail page - see the
   // "Detail view" section above for what showDetailView() actually does.
@@ -1449,34 +5633,26 @@ function buildPrivateRow(listItem, entry) {
   });
   listItem.appendChild(titleElement);
 
-  const infoElement = document.createElement('div');
-  infoElement.className = 'private-row-info';
-  // formatProgressText() (see the "Type" section near the top of this
-  // file) returns something like "Ch. 12" or "Vol. 3, Pg. 45" - or ''
-  // if this entry's progress field(s) are blank. Only stick the "·"
-  // separator (a plain middle-dot character, not an icon or HTML) in
-  // front of the status when there's actually progress text to
-  // separate it from.
-  const progressText = formatProgressText(entry);
-  infoElement.textContent = progressText ? (progressText + ' · ' + entry.status) : entry.status;
-  listItem.appendChild(infoElement);
-
   // Same clickable link as the card view - clicking it pops open the
   // Open/Copy popup instead of opening in a new tab right away, same
   // as everywhere else - see the "Link popup" section near the bottom
   // of this file for wireLinkPopup().
-  const linkElement = document.createElement('a');
-  linkElement.className = 'entry-link';
-  linkElement.href = entry.link;
-  // "Link" here is a fixed word we typed ourselves (not user input),
-  // so it's fine to include directly in the same HTML string as the icon.
-  linkElement.innerHTML = ICON_LINK + ' Link';
-  linkElement.target = '_blank';
-  linkElement.rel = 'noopener noreferrer';
-  wireLinkPopup(linkElement);
-  listItem.appendChild(linkElement);
-
-  listItem.appendChild(buildEntryActions(entry));
+  // When the link is empty or unsafe, safeUrl() returns '' and we skip
+  // the Link button entirely - same as the detail page, which shows
+  // "No link added" instead of a link that does nothing.
+  const privateRowUrl = safeUrl(entry.link);
+  if (privateRowUrl) {
+    const linkElement = document.createElement('a');
+    linkElement.className = 'entry-link';
+    linkElement.href = privateRowUrl;
+    // "Link" here is a fixed word we typed ourselves (not user input),
+    // so it's fine to include directly in the same HTML string as the icon.
+    linkElement.innerHTML = ICON_LINK + ' Link';
+    linkElement.target = '_blank';
+    linkElement.rel = 'noopener noreferrer';
+    wireLinkPopup(linkElement);
+    listItem.appendChild(linkElement);
+  }
 }
 
 // Fills in one Private-mode row for a Quick Note. Same idea as
@@ -1549,6 +5725,11 @@ let editingCharacterId = null;
 // has been picked since the form was last opened/reset.
 let pickedCharacterImageBlob = null;
 
+// The original File behind pickedCharacterImageBlob. The cloud upload
+// resizes this with resizeImageForUpload() (the same way covers do),
+// rather than re-compressing the already-shrunk local Blob.
+let pickedCharacterImageFile = null;
+
 // The temporary "blob:..." preview url made straight from
 // pickedCharacterImageBlob, purely so the form can show that picture
 // immediately without waiting to save it first. Kept separate from
@@ -1570,7 +5751,13 @@ let characterImageWasRemoved = false;
 // made more sense for them than this full-page swap), so this function
 // only ever deals with actual comics now.
 function showDetailView(entry) {
+  // Save the box onto the entry it was opened for BEFORE it's refilled:
+  // covers opening another entry, and the Edit form's Save redrawing
+  // this same entry (which would otherwise reset the box to old notes).
+  saveDetailNotes(false);
+
   currentDetailEntry = entry;
+  detailNotesEntryId = entry.id;
 
   detailTitle.textContent = entry.title;
   detailCoverColumn.style.display = '';
@@ -1603,7 +5790,7 @@ function showDetailView(entry) {
   // "status-reading"), which is how style.css knows which color to
   // give this badge.
   detailStatusBadge.textContent = entry.status;
-  detailStatusBadge.className = 'detail-status-badge status-' + entry.status.toLowerCase();
+  detailStatusBadge.className = 'detail-status-badge status-' + String(entry.status || '').toLowerCase();
 
   // A comic added without a link has entry.link === ''. An <a> with no
   // href isn't clickable, so we leave href unset in that case and show
@@ -1615,9 +5802,10 @@ function showDetailView(entry) {
   // purpose: entry.link is text the user typed in, and textContent
   // always shows it as plain text no matter what's in it, instead of
   // risking it being read as HTML/code the way innerHTML could.
-  if (entry.link) {
-    detailLink.href = entry.link;
-    detailLink.textContent = entry.link;
+  const detailUrl = safeUrl(entry.link);
+  if (detailUrl) {
+    detailLink.href = detailUrl;
+    detailLink.textContent = detailUrl;
     detailLink.classList.remove('detail-link-empty');
   } else {
     detailLink.removeAttribute('href');
@@ -1629,12 +5817,15 @@ function showDetailView(entry) {
   // existed, same as everywhere else in this file that reads entry.tags.
   buildReadOnlyTagChips(detailTags, entry.tags || []);
 
-  // Star rating: same condition renderList() uses to decide whether to
-  // draw stars on the card at all - only Completed comics that have
-  // actually been given a rating.
-  if (entry.status === 'Completed' && entry.rating !== null && entry.rating !== undefined) {
+  // Star rating: shown for every Completed comic, even ones with no
+  // rating yet (renderDetailRatingStars() below just draws those as 5
+  // empty stars) - unlike the read-only stars on the shelf card, this
+  // row is how a rating gets SET now, so it has to be visible before a
+  // rating exists, not just after. Any other status still hides the
+  // row completely, same as before.
+  if (entry.status === 'Completed') {
     detailRating.style.display = '';
-    detailRating.innerHTML = buildStarsHTML(entry.rating);
+    renderDetailRatingStars(entry);
   } else {
     detailRating.style.display = 'none';
     detailRating.innerHTML = '';
@@ -1645,6 +5836,9 @@ function showDetailView(entry) {
   // existed - either way the textarea just starts empty, never with
   // any placeholder text that could look like a real saved note.
   detailNotesTextarea.value = entry.notes || '';
+  // Fresh box for this entry: no leftover status from the last one.
+  notesStatusToken++;
+  setDetailNotesStatus('');
 
   // Reset the "Edit" form (see the "Detail page Edit form" section
   // below) back to hidden every time a (possibly different) comic's
@@ -1698,6 +5892,9 @@ function showDetailView(entry) {
   if (entry.hasImage) {
     applyCoverImageToElement(detailCoverBox, entry.id);
   }
+  // Video with no own cover: automatic thumbnail (hidden in Private
+  // mode). Also removes a thumbnail left over from the last entry shown.
+  applyDetailThumbnail(entry);
 
   libraryView.style.display = 'none';
   detailView.style.display = 'block';
@@ -1713,6 +5910,11 @@ function showDetailView(entry) {
 // else needs to happen here for the tab/search/privacy mode to "come
 // back" correctly.
 function showLibraryView() {
+  // Back button (and any other way off the detail page): save unsaved
+  // notes first, then stop tying the box to that entry.
+  saveDetailNotes(false);
+  detailNotesEntryId = null;
+
   detailView.style.display = 'none';
   libraryView.style.display = 'block';
 
@@ -1727,6 +5929,12 @@ function showLibraryView() {
   if (currentFilter === 'Characters') {
     renderCharactersList();
   }
+
+  // Same for the Lists tab: a comic opened from a list may have been
+  // edited or deleted on its detail page.
+  if (currentFilter === 'Lists') {
+    renderListsView();
+  }
 }
 
 backButton.addEventListener('click', showLibraryView);
@@ -1737,9 +5945,105 @@ backButton.addEventListener('click', showLibraryView);
 // way every other edit in this app does - so the notes are still
 // there next time this comic's detail page is opened, even after a
 // page refresh.
-saveNotesButton.addEventListener('click', function () {
-  currentDetailEntry.notes = detailNotesTextarea.value;
+//
+// Autosave uses this exact same code path (saveDetailNotes() below):
+// 1.5s after typing stops, and right away when the box loses focus,
+// Back is pressed, another entry is opened, the Edit form opens or
+// saves, the tab is switched, or the page is hidden / unloaded.
+
+// The id of the entry the notes box was filled from, captured in
+// showDetailView(). Notes are only ever saved onto THIS entry (looked
+// up live by id at save time), never onto whatever currentDetailEntry
+// happens to point at later. null when no detail page is open.
+let detailNotesEntryId = null;
+
+// Pending 1.5s autosave timer, and a counter so an older save's
+// "Saved" can't overwrite a newer save's "Saving..." in the status.
+const NOTES_AUTOSAVE_DELAY_MS = 1500;
+let notesAutosaveTimer = null;
+let notesStatusToken = 0;
+let notesStatusClearTimer = null;
+const detailNotesStatus = document.getElementById('detailNotesStatus');
+
+function setDetailNotesStatus(text) {
+  clearTimeout(notesStatusClearTimer);
+  detailNotesStatus.textContent = text;
+}
+
+// Saves the notes box onto the entry it was opened for. Unless force is
+// true (the Save Notes button), does nothing when the box matches what
+// that entry already has. Local state is updated synchronously; the
+// Supabase sync is started but not awaited (a failed send goes to the
+// offline queue inside syncEntryToSupabase()). Returns true if it saved.
+function saveDetailNotes(force) {
+  clearTimeout(notesAutosaveTimer);
+  notesAutosaveTimer = null;
+  if (accountDeletionInProgress || detailNotesEntryId === null) {
+    return false;
+  }
+  const entry = findEntryById(detailNotesEntryId);
+  if (!entry) {
+    return false;
+  }
+  const value = detailNotesTextarea.value;
+  const changed = value !== (entry.notes || '');
+  if (!force && !changed) {
+    return false;
+  }
+
+  entry.notes = value;
+  touchEntry(entry);
   saveToStorage();
+
+  const syncPromise = syncEntryToSupabase(entry);
+  // Status only when the text actually changed (the button's own
+  // "Saved!" label covers a Save Notes click on an unchanged box).
+  if (!changed) {
+    return true;
+  }
+  const token = ++notesStatusToken;
+  setDetailNotesStatus('Saving…');
+  syncPromise.then(function () {
+    // Saved either way: synced, or queued to retry when back online.
+    if (token !== notesStatusToken) {
+      return;
+    }
+    setDetailNotesStatus('Saved');
+    notesStatusClearTimer = setTimeout(function () {
+      if (token === notesStatusToken) {
+        detailNotesStatus.textContent = '';
+      }
+    }, 2000);
+  });
+  return true;
+}
+
+// Restart the 1.5s timer on every keystroke; only saves if changed.
+detailNotesTextarea.addEventListener('input', function () {
+  clearTimeout(notesAutosaveTimer);
+  notesAutosaveTimer = setTimeout(function () {
+    saveDetailNotes(false);
+  }, NOTES_AUTOSAVE_DELAY_MS);
+});
+
+detailNotesTextarea.addEventListener('blur', function () {
+  saveDetailNotes(false);
+});
+
+// Page being hidden (app switched, tab switched, phone locked) or
+// unloaded: save now. Local state updates synchronously and the sync
+// starts; if it doesn't finish, the offline queue picks it up.
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'hidden') {
+    saveDetailNotes(false);
+  }
+});
+window.addEventListener('pagehide', function () {
+  saveDetailNotes(false);
+});
+
+saveNotesButton.addEventListener('click', function () {
+  saveDetailNotes(true);
 
   // Quick "Saved!" confirmation on the button itself, then switch the
   // label back after a second - just enough feedback to confirm the
@@ -1790,6 +6094,7 @@ let detailEditTags = [];
 // current values, then swaps it in for #detailViewFields. Called by
 // editEntryButton's click handler below.
 function openDetailEditForm() {
+  saveDetailNotes(false);
   const entry = currentDetailEntry;
 
   editEntryTitle.value = entry.title;
@@ -1801,11 +6106,9 @@ function openDetailEditForm() {
   editEntryEpisode.value = entry.episode || '';
   editEntryLink.value = entry.link || '';
   editEntryStatus.value = entry.status;
-  editEntryRating.value = (entry.rating === null || entry.rating === undefined) ? '' : entry.rating;
 
   updateAuthorFieldVisibility(entry.type, editEntryAuthor);
   updateProgressFieldsVisibility(entry.type, editEntryProgressFields);
-  editEntryRating.style.display = (entry.status === 'Completed') ? '' : 'none';
 
   detailEditTags = (entry.tags || []).slice();
   renderTagChips(editEntryTagsPreview, detailEditTags);
@@ -1822,12 +6125,6 @@ editEntryButton.addEventListener('click', openDetailEditForm);
 editEntryType.addEventListener('change', function () {
   updateAuthorFieldVisibility(editEntryType.value, editEntryAuthor);
   updateProgressFieldsVisibility(editEntryType.value, editEntryProgressFields);
-});
-
-// Status dropdown changing live-toggles the Rating field, same as the
-// card's edit mode.
-editEntryStatus.addEventListener('change', function () {
-  editEntryRating.style.display = (editEntryStatus.value === 'Completed') ? '' : 'none';
 });
 
 // Tag editor: same "Add Tag" button + Enter-key shortcut as the
@@ -1863,7 +6160,12 @@ cancelEntryEditButton.addEventListener('click', function () {
 // (e.g. its status ribbon, or which tab it belongs in if Type changed)
 // is already correct by the time Back is clicked.
 saveEntryEditButton.addEventListener('click', function () {
+  // Save unsaved notes first so the showDetailView() redraw below
+  // refills the box with them, not with the old notes.
+  saveDetailNotes(false);
   const entry = currentDetailEntry;
+  const linkBeforeEdit = entry.link;
+  const typeBeforeEdit = entry.type;
 
   entry.title = editEntryTitle.value;
   entry.type = editEntryType.value;
@@ -1875,7 +6177,7 @@ saveEntryEditButton.addEventListener('click', function () {
   entry.volume = editEntryVolume.value;
   entry.page = editEntryPage.value;
   entry.episode = editEntryEpisode.value;
-  entry.link = editEntryLink.value;
+  entry.link = safeUrl(editEntryLink.value);
   entry.status = editEntryStatus.value;
 
   // detailEditTags already holds exactly the tags built up via the
@@ -1883,18 +6185,33 @@ saveEntryEditButton.addEventListener('click', function () {
   // changes onto the real entry.
   entry.tags = detailEditTags;
 
-  // Only keep a rating for Completed comics, same rule as the card's
-  // edit mode.
-  if (editEntryStatus.value === 'Completed') {
-    entry.rating = editEntryRating.value === '' ? null : parseFloat(editEntryRating.value);
-  } else {
+  // There's no Rating field in this form anymore (rating is set by
+  // tapping the star row directly on the detail page - see
+  // renderDetailRatingStars() below), so the only rating-related thing
+  // left for Save to do here is clear it out if Status is being
+  // changed AWAY from Completed - same rule as before: a rating only
+  // ever makes sense for a Completed comic. If Status is staying (or
+  // becoming) Completed, entry.rating is left exactly as it already
+  // was - editing the title/chapter/etc. here should never wipe out a
+  // rating that was set separately by tapping stars.
+  if (editEntryStatus.value !== 'Completed') {
     entry.rating = null;
   }
 
+  // Mark this entry as just-modified so it moves back to the top of
+  // the shelf - see touchEntry() and renderList()'s sort step.
+  touchEntry(entry);
+
   saveToStorage();
+  syncEntryToSupabase(entry);
 
   showDetailView(entry);
   renderList();
+
+  // Link or type changed: (re)look up the video thumbnail, or clear it.
+  if (entry.link !== linkBeforeEdit || entry.type !== typeBeforeEdit) {
+    scheduleThumbnailResolve(entry);
+  }
 });
 
 // "Add Scene" button: just reveals the description/link form below it
@@ -1925,7 +6242,7 @@ cancelSceneButton.addEventListener('click', function () {
 // show up as a blank row, which would look broken.
 saveSceneButton.addEventListener('click', function () {
   const description = sceneDescriptionInput.value.trim();
-  const link = sceneLinkInput.value.trim();
+  const link = safeUrl(sceneLinkInput.value);
 
   if (description === '') {
     alert('Please enter a description before saving this scene.');
@@ -1937,7 +6254,9 @@ saveSceneButton.addEventListener('click', function () {
     link: link
   });
 
+  touchEntry(currentDetailEntry);
   saveToStorage();
+  syncEntryToSupabase(currentDetailEntry);
   renderSceneEntries(currentDetailEntry);
 
   addSceneForm.style.display = 'none';
@@ -1961,6 +6280,7 @@ function resetCharacterFormFields() {
     pickedCharacterImagePreviewUrl = null;
   }
   pickedCharacterImageBlob = null;
+  pickedCharacterImageFile = null;
   characterImageWasRemoved = false;
 
   clearCoverElementImage(characterFormPreviewBox);
@@ -2026,6 +6346,7 @@ characterImageInput.addEventListener('change', function () {
       }
 
       pickedCharacterImageBlob = resizedBlob;
+      pickedCharacterImageFile = pickedFile;
       characterImageWasRemoved = false;
 
       pickedCharacterImagePreviewUrl = URL.createObjectURL(resizedBlob);
@@ -2054,6 +6375,7 @@ removeCharacterImageButton.addEventListener('click', function () {
     pickedCharacterImagePreviewUrl = null;
   }
   pickedCharacterImageBlob = null;
+  pickedCharacterImageFile = null;
   characterImageWasRemoved = true;
 
   clearCoverElementImage(characterFormPreviewBox);
@@ -2065,8 +6387,15 @@ removeCharacterImageButton.addEventListener('click', function () {
 // inside it, so saving the whole entry is what actually persists the
 // character), redraw the character list, and close/reset the form.
 function finishSavingCharacter(entry) {
-  saveToStorage();
-  renderCharacterEntries(entry);
+  // Can run after an IndexedDB await - use the live entry with this id.
+  // If it's gone, there's nothing to save, but still close the form.
+  const live = findEntryById(entry.id);
+  if (live) {
+    touchEntry(live);
+    saveToStorage();
+    syncEntryToSupabase(live);
+    renderCharacterEntries(live);
+  }
 
   addCharacterForm.style.display = 'none';
   resetCharacterFormFields();
@@ -2108,6 +6437,8 @@ saveCharacterButton.addEventListener('click', function () {
   character.name = name;
 
   if (pickedCharacterImageBlob) {
+    // Captured now: finishSavingCharacter() resets the form fields.
+    const fileToUpload = pickedCharacterImageFile || pickedCharacterImageBlob;
     // A new picture was picked in this form session - save it into
     // IndexedDB under this character's own id, the exact same way a
     // comic's own cover photo is saved under ITS id (see
@@ -2119,26 +6450,59 @@ saveCharacterButton.addEventListener('click', function () {
         // from before - forget it before caching the new one, same
         // reasoning as coverImageInput's own listener below.
         forgetCachedCharacterImageUrl(character.id);
-        character.hasImage = true;
+        // Re-read: set only this field, on the live character.
+        const liveCharacter = findCharacterById(character.id);
+        if (liveCharacter) {
+          liveCharacter.character.hasImage = true;
+        }
+
+        // This just-picked image is newer than whatever is in the cloud.
+        // Mark it as matching the current cloud version so the download
+        // sync won't replace it with the older copy while the upload is
+        // pending (or if it fails) - same as covers.
+        const currentImageVersion = liveCharacter && liveCharacter.character.imageVersion;
+        if (currentImageVersion) {
+          setLocalCharacterImageVersion(character.id, currentImageVersion).catch(function (error) {
+            console.error('Could not record local image version for character ' + character.id + ':', error);
+          });
+        }
+
         finishSavingCharacter(entry);
+
+        // Local copy saved and showing - upload in the background. Not
+        // awaited, so it can never block or undo anything above.
+        uploadCharacterImageInBackground(character.id, fileToUpload);
       })
       .catch(function (error) {
         console.error('Could not save character image:', error);
         alert('Sorry, that image could not be saved. The character will be saved without it.');
-        character.hasImage = false;
+        const liveCharacter = findCharacterById(character.id);
+        if (liveCharacter) {
+          liveCharacter.character.hasImage = false;
+        }
         finishSavingCharacter(entry);
       });
-  } else if (characterImageWasRemoved && character.hasImage) {
+  } else if (characterImageWasRemoved && (character.hasImage || character.imageVersion)) {
     // "Remove Image" was clicked on a character that had a real saved
     // picture - actually delete it from IndexedDB now that Save has
     // been clicked (see the removeCharacterImageButton listener above
     // for why this is deferred until now instead of happening
     // immediately).
+    // Stop any upload still in progress from setting imageVersion
+    // after the image has been removed.
+    cancelPendingCharacterImageUploads(character.id);
     deleteImageForCharacter(character.id)
       .then(function () {
         forgetCachedCharacterImageUrl(character.id);
-        character.hasImage = false;
+        const liveCharacter = findCharacterById(character.id);
+        if (liveCharacter) {
+          liveCharacter.character.hasImage = false;
+          delete liveCharacter.character.imageVersion;
+        }
         finishSavingCharacter(entry);
+
+        // Background cloud delete - not awaited, failures only logged.
+        deleteCharacterImageFromCloudInBackground(character.id, entry.id);
       })
       .catch(function (error) {
         console.error('Could not remove character image:', error);
@@ -2157,15 +6521,36 @@ saveCharacterButton.addEventListener('click', function () {
 // same ".splice() + clean up IndexedDB + save + redraw" pattern
 // buildEntryActions() uses to delete a whole comic.
 function deleteCharacter(entry, character) {
-  const indexToRemove = entry.characters.indexOf(character);
+  // Both were captured when the row was drawn: remove the character by
+  // id from the live entry. If the entry is gone, do nothing.
+  const live = findEntryById(entry.id);
+  if (!live) {
+    return;
+  }
+  entry = live;
+  const indexToRemove = (entry.characters || []).findIndex(function (existing) {
+    return existing && existing.id === character.id;
+  });
+  if (indexToRemove === -1) {
+    renderCharacterEntries(entry);
+    return;
+  }
   entry.characters.splice(indexToRemove, 1);
 
+  // Stop any in-flight upload from stamping imageVersion on a character
+  // that no longer exists.
+  cancelPendingCharacterImageUploads(character.id);
   deleteImageForCharacter(character.id).catch(function (error) {
     console.error('Could not delete character image:', error);
   });
   forgetCachedCharacterImageUrl(character.id);
+  if (character.hasImage || character.imageVersion) {
+    deleteCharacterImageFromCloudInBackground(character.id, entry.id);
+  }
 
+  touchEntry(entry);
   saveToStorage();
+  syncEntryToSupabase(entry);
   renderCharacterEntries(entry);
 
   // If the character just deleted is the one currently open in the
@@ -2199,7 +6584,22 @@ coverImageInput.addEventListener('change', function () {
         const newObjectUrl = URL.createObjectURL(resizedBlob);
         imageObjectUrlCache.set(entry.id, newObjectUrl);
 
-        entry.hasImage = true;
+        // This just-picked cover is newer than whatever is in the
+        // cloud. Mark it as matching the current cloud version so the
+        // download sync won't replace it with the older cloud copy
+        // while the upload is pending (or if it fails). A successful
+        // upload then records its own new version.
+        // Runs after IndexedDB awaits: use the live entry with this id.
+        const live = findEntryById(entry.id);
+        if (live && live.coverVersion) {
+          setLocalCoverVersion(entry.id, live.coverVersion).catch(function (error) {
+            console.error('Could not record local cover version for entry ' + entry.id + ':', error);
+          });
+        }
+
+        if (live) {
+          live.hasImage = true;
+        }
         saveToStorage();
 
         // Update the big cover on this detail page immediately...
@@ -2209,6 +6609,12 @@ coverImageInput.addEventListener('change', function () {
         // above, so this redraw shows it instantly - no extra loading
         // moment on the shelf).
         renderList();
+
+        // Local copy is saved and showing - now upload to the cloud in
+        // the background. Deliberately NOT returned/awaited, so a slow
+        // or failed upload can never hit the alert() below or undo
+        // anything above.
+        uploadCoverInBackground(entry, pickedFile);
       });
     })
     .catch(function (error) {
@@ -2233,22 +6639,814 @@ removeCoverImageButton.addEventListener('click', function () {
     return;
   }
 
+  // Stop any upload still in progress from setting coverVersion after
+  // the user has already removed this cover.
+  cancelPendingCoverUploads(entry.id);
+
   deleteImageForComic(entry.id)
     .then(function () {
       forgetCachedImageUrl(entry.id);
 
-      entry.hasImage = false;
-      saveToStorage();
+      // Runs after an IndexedDB await: clear only the cover fields, on
+      // the live entry with this id. Gone: nothing to sync.
+      const live = findEntryById(entry.id);
+      if (live) {
+        live.hasImage = false;
+        delete live.coverVersion;
+        touchEntry(live);
+        saveToStorage();
+        syncEntryToSupabase(live);
+      }
 
       clearCoverElementImage(detailCoverBox);
       renderList();
+
+      // Background cloud delete - not awaited, failures only logged.
+      deleteCoverFromCloudInBackground(entry.id);
     })
     .catch(function (error) {
       console.error('Could not remove cover image:', error);
     });
 });
 
+// --- Lists tab ---
+// The "Lists" folder tab swaps the shelf for #listsView, the same way
+// the Characters tab swaps it for #charactersList (see renderList()).
+// #listsView shows one of two things:
+//   - the overview: a "New list" box plus a grid of square list tiles
+//     (see buildListTile()), or
+//   - one open list's comics, when currentOpenListId is set.
+// Every change goes through the data-layer functions in the
+// "--- Lists ---" section (createList, renameList, ...), so the sync
+// and offline queue behave exactly as they already do.
+//
+// List names are typed by the user, so they're always written with
+// textContent, never innerHTML.
+
+// listId of the list being viewed, or null for the overview. Reset to
+// null whenever a tab is clicked (see selectTypeFilter()), so clicking
+// "Lists" always lands on the overview.
+let currentOpenListId = null;
+
+// listId of the list whose name is currently an inline rename box, or
+// null when none is.
+let listBeingRenamedId = null;
+
+// When a list was created. listIds look like "list-<Date.now()>-xxxx"
+// (see generateListId()), so the creation time is read from there;
+// falls back to updatedAt if the id doesn't have that shape.
+function getListCreatedAt(list) {
+  const match = /^list-(\d+)-/.exec(list.listId || '');
+  return match ? Number(match[1]) : (list.updatedAt || 0);
+}
+
+// The comic an item points at, or null if that comic no longer exists.
+function findEntryById(entryId) {
+  return manhwaEntries.find(function (entry) {
+    return entry.id === entryId;
+  }) || null;
+}
+
+// "1 comic" / "4 comics". Only counts items whose comic still exists,
+// so the number matches what opening the list shows.
+function formatListItemCount(list) {
+  const count = list.items.filter(function (item) {
+    return findEntryById(item.entry_id) !== null;
+  }).length;
+  return count + (count === 1 ? ' comic' : ' comics');
+}
+
+function renderListsView() {
+  // The old tiles are about to be thrown away - free their covers.
+  revokeListCollageUrls();
+  listsView.innerHTML = '';
+
+  const openList = currentOpenListId ? findList(currentOpenListId) : null;
+  if (openList) {
+    renderListDetail(openList);
+  } else {
+    // The open list may have been deleted (or the user logged out).
+    currentOpenListId = null;
+    renderListsOverview();
+    refreshListCovers();
+  }
+}
+
+function renderListsOverview() {
+  // "New list" input + button.
+  const createRow = document.createElement('div');
+  createRow.className = 'lists-create-row';
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'lists-create-input';
+  nameInput.placeholder = 'New list name';
+  nameInput.maxLength = 100;
+  nameInput.setAttribute('aria-label', 'New list name');
+
+  const createButton = document.createElement('button');
+  createButton.type = 'button';
+  createButton.className = 'lists-create-button';
+  createButton.textContent = 'New list';
+
+  function submitNewList() {
+    const name = nameInput.value.trim();
+    if (!name) {
+      nameInput.focus();
+      return;
+    }
+    createList(name);
+    renderListsView();
+    // The re-render built a fresh input - put the cursor back in it
+    // so several lists can be created in a row.
+    const freshInput = listsView.querySelector('.lists-create-input');
+    if (freshInput) {
+      freshInput.focus();
+    }
+  }
+
+  createButton.addEventListener('click', submitNewList);
+  nameInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      submitNewList();
+    }
+  });
+
+  createRow.appendChild(nameInput);
+  createRow.appendChild(createButton);
+  listsView.appendChild(createRow);
+
+  if (userLists.length === 0) {
+    const emptyState = document.createElement('p');
+    emptyState.className = 'lists-empty-state';
+    emptyState.textContent = 'No lists yet. Create one above to start organizing your comics.';
+    listsView.appendChild(emptyState);
+    return;
+  }
+
+  // Newest-created first. .slice() so userLists itself isn't reordered.
+  const sortedLists = userLists.slice().sort(function (a, b) {
+    return getListCreatedAt(b) - getListCreatedAt(a);
+  });
+
+  const listOfLists = document.createElement('ul');
+  listOfLists.className = 'lists-overview';
+
+  sortedLists.forEach(function (list) {
+    listOfLists.appendChild(buildListTile(list));
+  });
+
+  listsView.appendChild(listOfLists);
+}
+
+// --- List tile collage covers ---
+// Each overview tile's background is a 2x2 collage of the FIRST FOUR
+// comics added to that list (smallest added_at first), in reading
+// order: top-left, top-right, bottom-left, bottom-right. Every slot
+// keeps its position - a missing cover or a deleted comic is a
+// placeholder in that slot, never skipped - so a tile looks the same
+// on every device.
+
+// The ONE place the collage gets a cover from. Returns a Promise that
+// resolves to a usable image URL, or null if this comic has no cover
+// available. A returned blob: URL is a fresh object URL owned by the
+// caller, who must revoke it (refreshListCovers() does).
+// If there's no local cover but the comic has a coverVersion, it tries
+// the cloud download once (downloadCoverIfNeeded() - saved locally, never
+// re-uploaded; failures are remembered for the session) and then
+// returns the local URL, or null if that didn't work.
+function getCoverUrl(entryId) {
+  if (!entryId) {
+    return Promise.resolve(null);
+  }
+  return loadImageForComic(entryId).then(function (imageBlob) {
+    if (imageBlob) {
+      return URL.createObjectURL(imageBlob);
+    }
+    const entry = findEntryById(entryId);
+    if (!entry || !entry.coverVersion || !coverSyncUserId) {
+      return null;
+    }
+    return downloadCoverIfNeeded(entryId).then(function (downloaded) {
+      if (downloaded) {
+        // Shelf/detail boxes for this comic can show it now too.
+        refreshShownCovers([entryId]);
+      }
+      return loadImageForComic(entryId);
+    }).then(function (downloadedBlob) {
+      return downloadedBlob ? URL.createObjectURL(downloadedBlob) : null;
+    });
+  }).catch(function (error) {
+    console.error('Could not load cover for list collage:', error);
+    return null;
+  });
+}
+
+// Object URLs the collage currently holds, revoked on every re-render.
+let listCollageObjectUrls = [];
+// Bumped on every refresh, so a cover lookup that finishes after a
+// newer render knows it's stale and throws its URL away.
+let listCollageRenderToken = 0;
+
+function revokeListCollageUrls() {
+  listCollageObjectUrls.forEach(function (url) {
+    // Harmless for a non-blob URL (e.g. a future remote copy).
+    URL.revokeObjectURL(url);
+  });
+  listCollageObjectUrls = [];
+}
+
+// The entry_ids for a list's four collage slots, oldest-added first.
+// Shorter lists are padded with null (a placeholder slot).
+function getListCollageEntryIds(list) {
+  const oldestFirst = list.items.slice().sort(function (a, b) {
+    return (a.added_at || 0) - (b.added_at || 0);
+  });
+  const entryIds = [];
+  for (let i = 0; i < 4; i++) {
+    entryIds.push(oldestFirst[i] ? oldestFirst[i].entry_id : null);
+  }
+  return entryIds;
+}
+
+// Re-fills just the collage slots of whatever tiles are on the page,
+// without rebuilding the tiles. Called after the Lists tab renders, and
+// exposed on window so cloud image sync can call it later once remote
+// covers finish loading.
+function refreshListCovers() {
+  revokeListCollageUrls();
+  listCollageRenderToken++;
+  const token = listCollageRenderToken;
+
+  listsView.querySelectorAll('.list-tile-slot').forEach(function (slot) {
+    slot.style.backgroundImage = '';
+    slot.classList.remove('has-image');
+
+    const entryId = slot.dataset.entryId || '';
+    // Deleted comics and Quick Notes stay placeholders, and so does
+    // everything in Private mode (the shelf hides covers there too).
+    const entry = entryId ? findEntryById(entryId) : null;
+    if (!entry || entry.type === 'Note' || displayMode === 'private') {
+      return;
+    }
+
+    // Promise.resolve() so this works whether getCoverUrl() returns a
+    // URL straight away or a Promise for one.
+    Promise.resolve(getCoverUrl(entryId)).then(function (url) {
+      if (!url) {
+        return;
+      }
+      if (token !== listCollageRenderToken || !document.body.contains(slot)) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      listCollageObjectUrls.push(url);
+      slot.style.backgroundImage = 'url("' + url + '")';
+      slot.classList.add('has-image');
+    }).catch(function (error) {
+      console.error('Could not show list collage cover:', error);
+    });
+  });
+}
+window.refreshListCovers = refreshListCovers;
+
+// Small icons for a tile's corner buttons. Fixed markup, no user text.
+const LIST_TILE_RENAME_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25zm17.7-10.2a1 1 0 0 0 0-1.42l-2.33-2.33a1 1 0 0 0-1.42 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+const LIST_TILE_DELETE_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+
+// The 2x2 collage. Slots start as placeholders; refreshListCovers()
+// fills in whichever covers it can find.
+function buildListCollage(list) {
+  const collage = document.createElement('div');
+  collage.className = 'list-tile-collage';
+  collage.setAttribute('aria-hidden', 'true');
+  getListCollageEntryIds(list).forEach(function (entryId) {
+    const slot = document.createElement('div');
+    slot.className = 'list-tile-slot';
+    slot.dataset.entryId = entryId || '';
+    collage.appendChild(slot);
+  });
+  return collage;
+}
+
+// One square tile in the overview: collage background, name + count
+// on a dark gradient at the bottom (click anywhere to open), and small
+// Rename / Delete icon buttons in the top-right corner. While being
+// renamed, the bottom becomes a text box with Save/Cancel instead.
+function buildListTile(list) {
+  const tile = document.createElement('li');
+  tile.className = 'list-tile';
+  tile.appendChild(buildListCollage(list));
+
+  if (list.listId === listBeingRenamedId) {
+    const renameBox = document.createElement('div');
+    renameBox.className = 'list-tile-rename';
+
+    const renameInput = document.createElement('input');
+    renameInput.type = 'text';
+    renameInput.className = 'list-rename-input';
+    renameInput.value = list.name;
+    renameInput.maxLength = 100;
+    renameInput.setAttribute('aria-label', 'List name');
+
+    const saveButton = document.createElement('button');
+    saveButton.type = 'button';
+    saveButton.className = 'list-row-button';
+    saveButton.textContent = 'Save';
+
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.className = 'list-row-button';
+    cancelButton.textContent = 'Cancel';
+
+    function saveRename() {
+      // renameList() trims and refuses an empty name; in that case
+      // keep the box open so the user can fix it.
+      if (!renameList(list.listId, renameInput.value)) {
+        renameInput.focus();
+        return;
+      }
+      listBeingRenamedId = null;
+      renderListsView();
+    }
+
+    function cancelRename() {
+      listBeingRenamedId = null;
+      renderListsView();
+    }
+
+    saveButton.addEventListener('click', saveRename);
+    cancelButton.addEventListener('click', cancelRename);
+    renameInput.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        saveRename();
+      } else if (event.key === 'Escape') {
+        cancelRename();
+      }
+    });
+
+    renameBox.appendChild(renameInput);
+    const renameActions = document.createElement('div');
+    renameActions.className = 'list-tile-rename-actions';
+    renameActions.appendChild(saveButton);
+    renameActions.appendChild(cancelButton);
+    renameBox.appendChild(renameActions);
+    tile.appendChild(renameBox);
+
+    // Focus once the tile is actually on the page.
+    setTimeout(function () {
+      renameInput.focus();
+      renameInput.select();
+    }, 0);
+    return tile;
+  }
+
+  // Covers the whole tile, so clicking anywhere opens the list. A real
+  // <button> so it's reachable by keyboard.
+  const openButton = document.createElement('button');
+  openButton.type = 'button';
+  openButton.className = 'list-tile-open';
+
+  const label = document.createElement('span');
+  label.className = 'list-tile-label';
+
+  const nameElement = document.createElement('span');
+  nameElement.className = 'list-tile-name';
+  nameElement.textContent = list.name;
+  label.appendChild(nameElement);
+
+  const countElement = document.createElement('span');
+  countElement.className = 'list-tile-count';
+  countElement.textContent = formatListItemCount(list);
+  label.appendChild(countElement);
+
+  openButton.appendChild(label);
+  openButton.addEventListener('click', function () {
+    currentOpenListId = list.listId;
+    listBeingRenamedId = null;
+    renderListsView();
+    window.scrollTo(0, 0);
+  });
+  tile.appendChild(openButton);
+
+  // Sits above openButton (later in the DOM + z-index), so these
+  // clicks never also open the list.
+  const actions = document.createElement('div');
+  actions.className = 'list-tile-actions';
+
+  const renameButton = document.createElement('button');
+  renameButton.type = 'button';
+  renameButton.className = 'list-tile-icon-button';
+  renameButton.innerHTML = LIST_TILE_RENAME_ICON;
+  renameButton.setAttribute('aria-label', 'Rename list');
+  renameButton.title = 'Rename';
+  renameButton.addEventListener('click', function () {
+    listBeingRenamedId = list.listId;
+    renderListsView();
+  });
+  actions.appendChild(renameButton);
+
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'list-tile-icon-button list-tile-delete';
+  deleteButton.innerHTML = LIST_TILE_DELETE_ICON;
+  deleteButton.setAttribute('aria-label', 'Delete list');
+  deleteButton.title = 'Delete';
+  deleteButton.addEventListener('click', function () {
+    // confirm() shows its message as plain text, so the user-typed
+    // name is safe here.
+    if (!window.confirm('Delete the list "' + list.name + '"? The comics in it will not be deleted.')) {
+      return;
+    }
+    deleteList(list.listId);
+    renderListsView();
+  });
+  actions.appendChild(deleteButton);
+
+  tile.appendChild(actions);
+  return tile;
+}
+
+// One open list: Back button, the list's name (and description, if it
+// has one), then its comics newest-added first.
+function renderListDetail(list) {
+  const backToListsButton = document.createElement('button');
+  backToListsButton.type = 'button';
+  backToListsButton.className = 'back-button';
+  backToListsButton.textContent = '← Back';
+  backToListsButton.addEventListener('click', function () {
+    currentOpenListId = null;
+    renderListsView();
+  });
+  listsView.appendChild(backToListsButton);
+
+  const heading = document.createElement('h2');
+  heading.className = 'list-detail-title';
+  heading.textContent = list.name;
+  listsView.appendChild(heading);
+
+  if (list.description) {
+    const description = document.createElement('p');
+    description.className = 'list-detail-description';
+    description.textContent = list.description;
+    listsView.appendChild(description);
+  }
+
+  // Newest-added first. Items whose comic no longer exists are skipped.
+  const itemsToShow = list.items
+    .slice()
+    .sort(function (a, b) {
+      return (b.added_at || 0) - (a.added_at || 0);
+    })
+    .map(function (item) {
+      return findEntryById(item.entry_id);
+    })
+    .filter(function (entry) {
+      return entry !== null;
+    });
+
+  if (itemsToShow.length === 0) {
+    const emptyState = document.createElement('p');
+    emptyState.className = 'lists-empty-state';
+    emptyState.textContent = 'This list is empty. Add comics from their card or detail page.';
+    listsView.appendChild(emptyState);
+    return;
+  }
+
+  // Same fixed-size card grid the Characters tab uses (".characters-list"
+  // in style.css), so these cards match the shelf without the zoom slider.
+  const grid = document.createElement('ul');
+  grid.className = 'characters-list list-detail-items';
+
+  itemsToShow.forEach(function (entry) {
+    grid.appendChild(buildListComicCard(list, entry));
+  });
+
+  listsView.appendChild(grid);
+}
+
+// A comic card for an open list. renderList()'s shelf card is built
+// inline (with edit mode, private rows, etc.), so it can't be called
+// on its own - this builds a read-only card from the same classes
+// (.cover-placeholder, .status-ribbon, .entry-title, .entry-info-row)
+// so it looks the same, plus a "Remove from list" button.
+// In Private mode the cover is left out, same as the shelf hides covers.
+function buildListComicCard(list, entry) {
+  const card = document.createElement('li');
+  card.className = 'character-card list-comic-card';
+
+  const isNote = entry.type === 'Note';
+  function openEntry() {
+    if (isNote) {
+      openQuickNoteModal(entry);
+    } else {
+      showDetailView(entry);
+    }
+  }
+
+  if (displayMode !== 'private') {
+    if (isNote) {
+      const notePreview = document.createElement('div');
+      notePreview.className = 'note-preview detail-link-target';
+      const noteRibbon = document.createElement('div');
+      noteRibbon.className = 'status-ribbon status-note';
+      noteRibbon.textContent = 'Note';
+      notePreview.appendChild(noteRibbon);
+      const notePreviewText = document.createElement('span');
+      notePreviewText.className = 'note-preview-text';
+      renderNoteTextInto(notePreviewText, entry.noteText, { preview: true });
+      notePreview.appendChild(notePreviewText);
+      notePreview.addEventListener('click', openEntry);
+      card.appendChild(notePreview);
+    } else {
+      const cover = document.createElement('div');
+      // dimmable-cover: opts this box into Cover dimming (see
+      // setCoverElementImage()).
+      cover.className = 'cover-placeholder dimmable-cover detail-link-target';
+      if (entry.type === 'Videos') {
+        cover.classList.add('video-cover');
+      }
+      const coverText = document.createElement('span');
+      coverText.className = 'cover-placeholder-text';
+      coverText.textContent = 'No Cover';
+      cover.appendChild(coverText);
+      const coverTitle = document.createElement('span');
+      coverTitle.className = 'cover-placeholder-title';
+      coverTitle.textContent = entry.title;
+      cover.appendChild(coverTitle);
+      const statusRibbon = document.createElement('div');
+      statusRibbon.className = 'status-ribbon status-' + String(entry.status || '').toLowerCase();
+      statusRibbon.textContent = entry.status;
+      cover.appendChild(statusRibbon);
+      if (entry.hasImage) {
+        applyCoverImageToElement(cover, entry.id);
+      } else if (entry.type === 'Videos') {
+        applyThumbnailToCoverElement(cover, entry);
+      }
+      cover.addEventListener('click', openEntry);
+      card.appendChild(cover);
+    }
+  }
+
+  const titleElement = document.createElement('div');
+  titleElement.className = 'entry-title detail-link-target';
+  titleElement.textContent = entry.title;
+  titleElement.addEventListener('click', openEntry);
+  card.appendChild(titleElement);
+
+  if (!isNote) {
+    const progressText = formatProgressText(entry);
+    if (progressText) {
+      const infoRow = document.createElement('div');
+      infoRow.className = 'entry-info-row';
+      const chapterElement = document.createElement('span');
+      chapterElement.className = 'entry-chapter';
+      chapterElement.textContent = progressText;
+      infoRow.appendChild(chapterElement);
+      card.appendChild(infoRow);
+    }
+  }
+
+  const removeButton = document.createElement('button');
+  removeButton.type = 'button';
+  removeButton.className = 'list-row-button list-remove-button';
+  removeButton.textContent = 'Remove from list';
+  removeButton.addEventListener('click', function () {
+    removeEntryFromList(list.listId, entry.id);
+    renderListsView();
+  });
+  card.appendChild(removeButton);
+
+  return card;
+}
+
+// --- Add to list picker ---
+// A small popup (a bottom sheet on phones - see ".list-picker-overlay"
+// in style.css) for putting ONE comic into any of the user's lists.
+// Opened from the "Add to list" button on each shelf comic card and on
+// the comic's detail page.
+//
+// Every change goes straight through the data-layer functions in the
+// "--- Lists ---" section (createList, addEntryToList,
+// removeEntryFromList), so it works offline the same way the Lists tab
+// does: a failed sync is queued and the sync banner reports it. There's
+// no Save button - each checkbox applies the moment it's toggled.
+//
+// List names are typed by the user, so they're written with
+// textContent, never innerHTML.
+
+const listPickerOverlay = document.getElementById('listPickerOverlay');
+const listPickerHeading = document.getElementById('listPickerHeading');
+const listPickerRows = document.getElementById('listPickerRows');
+const listPickerNewInput = document.getElementById('listPickerNewInput');
+const listPickerNewButton = document.getElementById('listPickerNewButton');
+const listPickerCloseButton = document.getElementById('listPickerCloseButton');
+const listPickerDoneButton = document.getElementById('listPickerDoneButton');
+const detailAddToListButton = document.getElementById('detailAddToListButton');
+
+// Bookmark icon. Fixed markup, no user text.
+const ICON_BOOKMARK = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon-svg" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>';
+
+// The comic the picker is open for, or null while it's closed.
+let listPickerEntry = null;
+// Whatever had focus before the picker opened, so closing it can put
+// focus back there.
+let listPickerReturnFocus = null;
+
+// The small bookmark button for a shelf comic card. Sits in the same
+// row as the card's edit/delete icons.
+function buildAddToListButton(entry) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'icon-button add-to-list-button';
+  button.innerHTML = ICON_BOOKMARK;
+  button.title = 'Add to list';
+  button.setAttribute('aria-label', 'Add to list');
+  button.addEventListener('click', function () {
+    openListPicker(entry);
+  });
+  return button;
+}
+
+function listContainsEntry(list, entryId) {
+  return list.items.some(function (item) {
+    return item.entry_id === entryId;
+  });
+}
+
+// After any change: the Lists tab is always rebuilt from userLists when
+// it's shown (renderList() / showLibraryView() call renderListsView()),
+// so its tiles, collages and counts pick the change up on their own the
+// next time it's opened. Only if it's on screen RIGHT NOW does it need
+// redrawing here.
+function refreshListsTabAfterPickerChange() {
+  if (currentFilter === 'Lists' && libraryView.style.display !== 'none') {
+    renderListsView();
+  }
+}
+
+// Rebuilds the checkbox rows from userLists, newest-created list first
+// (the same order as the Lists tab).
+function renderListPickerRows() {
+  listPickerRows.innerHTML = '';
+  const entry = listPickerEntry;
+  if (!entry) {
+    return;
+  }
+
+  if (userLists.length === 0) {
+    const emptyState = document.createElement('p');
+    emptyState.className = 'list-picker-empty';
+    emptyState.textContent = 'No lists yet. Create your first one below.';
+    listPickerRows.appendChild(emptyState);
+    return;
+  }
+
+  const sortedLists = userLists.slice().sort(function (a, b) {
+    return getListCreatedAt(b) - getListCreatedAt(a);
+  });
+
+  sortedLists.forEach(function (list) {
+    // The whole row is a <label>, so tapping anywhere on it toggles
+    // the checkbox - a much bigger target than the box itself.
+    const row = document.createElement('label');
+    row.className = 'list-picker-row';
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'list-picker-checkbox';
+    checkbox.checked = listContainsEntry(list, entry.id);
+    checkbox.addEventListener('change', function () {
+      if (checkbox.checked) {
+        addEntryToList(list.listId, entry.id);
+      } else {
+        removeEntryFromList(list.listId, entry.id);
+      }
+      // Match the box to what the list really holds now (e.g. if the
+      // list was deleted elsewhere while the picker was open).
+      const liveList = findList(list.listId);
+      checkbox.checked = !!liveList && listContainsEntry(liveList, entry.id);
+      refreshListsTabAfterPickerChange();
+    });
+
+    const nameElement = document.createElement('span');
+    nameElement.className = 'list-picker-row-name';
+    nameElement.textContent = list.name;
+
+    row.appendChild(checkbox);
+    row.appendChild(nameElement);
+    listPickerRows.appendChild(row);
+  });
+}
+
+function openListPicker(entry) {
+  if (!entry || entry.type === 'Note') {
+    return;
+  }
+  listPickerEntry = entry;
+  listPickerReturnFocus = document.activeElement;
+
+  listPickerHeading.textContent = entry.title;
+  listPickerNewInput.value = '';
+  renderListPickerRows();
+
+  listPickerOverlay.style.display = 'flex';
+  listPickerDoneButton.focus();
+}
+
+function closeListPicker() {
+  if (listPickerOverlay.style.display === 'none') {
+    return;
+  }
+  listPickerOverlay.style.display = 'none';
+  listPickerEntry = null;
+  listPickerRows.innerHTML = '';
+
+  // Put focus back on the button that opened the picker, if it's still
+  // on the page (a re-render may have replaced it).
+  if (listPickerReturnFocus && document.body.contains(listPickerReturnFocus)) {
+    listPickerReturnFocus.focus();
+  }
+  listPickerReturnFocus = null;
+}
+
+// "New list": creates the list, puts this comic in it, and shows it in
+// the picker already checked (it's newest, so it lands at the top).
+function submitListPickerNewList() {
+  const entry = listPickerEntry;
+  const name = listPickerNewInput.value.trim();
+  if (!entry || !name) {
+    listPickerNewInput.focus();
+    return;
+  }
+
+  const newList = createList(name);
+  if (!newList) {
+    listPickerNewInput.focus();
+    return;
+  }
+  addEntryToList(newList.listId, entry.id);
+
+  listPickerNewInput.value = '';
+  renderListPickerRows();
+  refreshListsTabAfterPickerChange();
+  listPickerNewInput.focus();
+}
+
+listPickerNewButton.addEventListener('click', submitListPickerNewList);
+listPickerNewInput.addEventListener('keydown', function (event) {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    submitListPickerNewList();
+  }
+});
+
+listPickerCloseButton.addEventListener('click', closeListPicker);
+listPickerDoneButton.addEventListener('click', closeListPicker);
+
+// Tapping the dimmed backdrop (not the box itself) closes it - same
+// check as the Quick Note popup.
+listPickerOverlay.addEventListener('click', function (event) {
+  if (event.target === listPickerOverlay) {
+    closeListPicker();
+  }
+});
+
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape' && listPickerOverlay.style.display !== 'none') {
+    closeListPicker();
+  }
+});
+
+detailAddToListButton.addEventListener('click', function () {
+  openListPicker(currentDetailEntry);
+});
+
 // Rebuilds the <ul> on the page from the manhwaEntries array
+// Shows/hides the two empty-state messages above #manhwaList (see
+// #libraryEmptyState / #tabEmptyState in index.html). Pass
+// onShelf = false for tabs that don't show the shelf at all
+// (Characters, Lists) so both messages stay hidden there.
+//   - Library card: only once a load has SUCCEEDED and there are zero
+//     entries of any kind. Never while loading or after a failed load.
+//   - Tab line: the library has entries, but none of the active type
+//     tab's type (ignores status filter and search on purpose).
+function updateEmptyStates(onShelf) {
+  const libraryIsEmpty = onShelf
+    && libraryLoadState === 'loaded'
+    && manhwaEntries.length === 0;
+  libraryEmptyState.hidden = !libraryIsEmpty;
+
+  const tabIsEmpty = onShelf
+    && !libraryIsEmpty
+    && manhwaEntries.length > 0
+    && ENTRY_TYPES.includes(currentFilter)
+    && !manhwaEntries.some(function (entry) { return entry.type === currentFilter; });
+  tabEmptyState.hidden = !tabIsEmpty;
+}
+
 function renderList() {
   // The "Characters" tab shows something completely different from
   // every other tab - one combined list of characters (see
@@ -2256,7 +7454,20 @@ function renderList() {
   // gets its own early branch here, before any of the normal
   // comic-card building below even starts. "return" at the end of this
   // branch means none of the shelf-building code further down runs.
+  if (currentFilter === 'Lists') {
+    updateEmptyStates(false);
+    manhwaList.style.display = 'none';
+    charactersList.style.display = 'none';
+    listsView.style.display = '';
+    renderListsView();
+    return;
+  }
+  listsView.style.display = 'none';
+  // Leaving the Lists tab: its collage covers aren't on screen anymore.
+  revokeListCollageUrls();
+
   if (currentFilter === 'Characters') {
+    updateEmptyStates(false);
     manhwaList.style.display = 'none';
     // '' (not 'grid') so this falls back to whatever style.css already
     // says #charactersList should be - which is "display: grid" (see
@@ -2281,6 +7492,7 @@ function renderList() {
 
   // Clear out whatever is currently shown
   manhwaList.innerHTML = '';
+  updateEmptyStates(true);
 
   // .filter() walks the full array and builds a new, shorter array
   // containing only the entries where the callback returns true.
@@ -2299,7 +7511,15 @@ function renderList() {
     // entries whose type matches that tab. This compares against
     // entry.type (not entry.status) - see typeInput in index.html for
     // where that value comes from when a comic is added.
-    const matchesFolder = (currentFilter === 'All') || (entry.type === currentFilter);
+    //
+    // "Notes" is a special case: the tab is called "Notes" (plural,
+    // matching TYPE_FILTER_OPTIONS above), but a Quick Note's own
+    // entry.type is 'Note' (singular) - see the "Quick Notes" section
+    // further down for why. So instead of comparing entry.type straight
+    // against currentFilter like every other tab does, this one extra
+    // branch checks for entry.type === 'Note' instead.
+    const matchesFolder = (currentFilter === 'All')
+      || (currentFilter === 'Notes' ? entry.type === 'Note' : entry.type === currentFilter);
 
     if (!matchesFolder) {
       // Already fails the folder check - no need to even look at the
@@ -2307,18 +7527,20 @@ function renderList() {
       return false;
     }
 
-    // --- Check 1b: does this entry match the active type tab's OWN status filter? ---
-    // Only type tabs (Manhwa/Other Comics/Videos) have a status filter
-    // at all - the top-level "All" tab has no #statusFilterRow (see
-    // index.html), so it always shows every status, same as before.
-    // When a type tab's own filter state is 'All' (see
+    // --- Check 1b: does this entry match the active tab's OWN status filter? ---
+    // "All" and every real type tab (Manhwa/Other Comics/Videos) have a
+    // status filter - "Notes" doesn't (a Quick Note has no entry.status
+    // to compare against), so it always shows every entry that made it
+    // past Check 1 above, same as before. Looking filterState up directly
+    // (rather than checking ENTRY_TYPES.includes(currentFilter)) is what
+    // makes this cover "All" too - typeStatusFilters has real entries for
+    // "All" plus the three types, so only "Notes"/"Characters" come back
+    // undefined here. When a tab's own filter state is 'All' (see
     // typeStatusFilters above), this check is skipped too - it only
     // narrows things down once a specific status has been picked.
-    if (currentFilter !== 'All') {
-      const filterState = typeStatusFilters[currentFilter];
-      if (filterState.mode === 'Status' && entry.status !== filterState.status) {
-        return false;
-      }
+    const statusFilterState = typeStatusFilters[currentFilter];
+    if (statusFilterState && statusFilterState.mode === 'Status' && entry.status !== statusFilterState.status) {
+      return false;
     }
 
     // --- Check 2: does this entry match what's typed in the search box? ---
@@ -2350,6 +7572,32 @@ function renderList() {
     return titleMatches || tagsMatch;
   });
 
+  // --- Sort: newest-added/most-recently-edited entries first ---
+  // entry.updatedAt (see touchEntry() near the top of this file) is a
+  // timestamp set the moment an entry is created, and refreshed every
+  // time it's edited - status/rating change, notes/scenes/characters
+  // added, bulk add, etc. Sorting by it here, AFTER filtering by
+  // tab/status/search above but BEFORE any cards get built below,
+  // means this "newest first" order applies no matter which tab or
+  // search term is active, without touching how that filtering works.
+  //
+  // "(b.updatedAt || 0) - (a.updatedAt || 0)" sorts biggest timestamp
+  // first (b minus a, not a minus b). Comics saved before this feature
+  // existed have no updatedAt at all (it's undefined), and
+  // "undefined || 0" becomes 0 - which is smaller than every real
+  // timestamp (real ones are huge numbers, like 1750000000000). That's
+  // what sends every pre-existing entry to the bottom automatically.
+  //
+  // Array.prototype.sort() in JavaScript is "stable": entries that tie
+  // (the comparison returns exactly 0) keep their original relative
+  // order instead of getting shuffled. Every pre-existing entry ties
+  // at 0, so this is what keeps all of them in their same order
+  // relative to each other - they just move together as a block to
+  // the end, nothing about them gets scrambled or lost.
+  entriesToShow.sort(function (a, b) {
+    return (b.updatedAt || 0) - (a.updatedAt || 0);
+  });
+
   entriesToShow.forEach(function (entry) {
     // Each <li> is one card (or, in Private mode, one row) on the
     // shelf. The CSS grid on #manhwaList arranges these into
@@ -2365,7 +7613,7 @@ function renderList() {
     // "entry.type === 'Note'" branch right after it - that branch
     // used to run unconditionally for every note regardless of
     // displayMode, which was the actual bug: it always built the
-    // large 16:9 Cover-mode card (see "#manhwaList li.note-card" in
+    // full comic-sized Cover-mode card (see ".note-card" in
     // style.css), even in Private mode where every other entry type
     // was already switching to the small text-row layout. Checking
     // Private mode first, here, is what makes notes follow that same
@@ -2377,34 +7625,77 @@ function renderList() {
       return;
     }
 
-    // Quick Notes get their own much simpler card, built here as an
-    // early branch before any of the comic-card code below even runs -
-    // a note has no status/chapter/cover/link/etc. for that code to
-    // read, and (unlike a comic card) a note card has no separate
-    // Edit/Delete icons of its own at all: the whole card is just one
-    // big click target that opens the Quick Note popup (see
-    // openQuickNoteModal() in the "Quick Notes" section further down
-    // this file), where editing/deleting actually happens. "return"
-    // here skips straight to the next entry, same as the Private-mode
-    // row branch just below this one does. (This branch only runs in
-    // Cover mode now - the Private-mode case is already handled and
-    // returned above.)
+    // Quick Notes get their own card, built here as an early branch
+    // before any of the comic-card code below even runs - a note has
+    // no status/chapter/link/etc. for that code to read. But the card
+    // is now built out of the SAME pieces a comic card uses (a cover-
+    // shaped box, a bold title below it, then the shared edit/delete
+    // icon row from buildEntryActions()), just with a text preview
+    // standing in for the missing cover image - so a note card ends up
+    // the same size/shape as a comic card instead of looking like a
+    // completely different kind of box. "return" here skips straight
+    // to the next entry, same as the Private-mode row branch just
+    // below this one does. (This branch only runs in Cover mode now -
+    // the Private-mode case is already handled and returned above.)
     if (entry.type === 'Note') {
-      listItem.className = 'note-card detail-link-target';
+      // Just a marker class now (see ".note-card" in style.css) - the
+      // actual sizing/shape comes from the same "#manhwaList li" rule
+      // every comic card uses, plus the child elements below.
+      listItem.className = 'note-card';
 
-      const noteTitleElement = document.createElement('div');
-      noteTitleElement.className = 'note-card-title';
-      noteTitleElement.textContent = entry.title;
-      listItem.appendChild(noteTitleElement);
-
-      const noteSnippetElement = document.createElement('div');
-      noteSnippetElement.className = 'note-card-snippet';
-      noteSnippetElement.textContent = buildNoteSnippet(entry.noteText);
-      listItem.appendChild(noteSnippetElement);
-
-      listItem.addEventListener('click', function () {
+      // Stands in for a comic's cover-placeholder: same box shape/size
+      // (see ".note-preview" in style.css, sized to match
+      // ".cover-placeholder"), but tinted its own distinct color and
+      // filled with a preview of this note's own text instead of an
+      // image - that's what keeps a note from ever being mistaken for
+      // a cover-less comic at a glance.
+      const notePreview = document.createElement('div');
+      notePreview.className = 'note-preview detail-link-target';
+      notePreview.addEventListener('click', function () {
         openQuickNoteModal(entry);
       });
+
+      // Same corner ribbon badge every comic card gets (see
+      // ".status-ribbon" further down, and the matching one built for
+      // comic cards later in this function) - reusing that exact class
+      // is what puts it in the same spot with the same shape/rotation.
+      // Unlike a comic's ribbon, this one never reads entry.status (a
+      // note doesn't have one) - it always just says the fixed word
+      // "Note", and ".status-ribbon.status-note" in style.css always
+      // colors it the same orange for every note, regardless of
+      // anything the user typed.
+      const noteRibbon = document.createElement('div');
+      noteRibbon.className = 'status-ribbon status-note';
+      noteRibbon.textContent = 'Note';
+      notePreview.appendChild(noteRibbon);
+
+      const notePreviewText = document.createElement('span');
+      notePreviewText.className = 'note-preview-text';
+      // Links in the preview open the Link popup (and stop the click
+      // from also opening the note); anywhere else opens the note.
+      renderNoteTextInto(notePreviewText, entry.noteText, { preview: true });
+      notePreview.appendChild(notePreviewText);
+
+      listItem.appendChild(notePreview);
+
+      // Title below the preview box, bold - same spot and look as a
+      // comic's ".entry-title" below its cover.
+      const noteTitleElement = document.createElement('div');
+      noteTitleElement.className = 'note-card-title detail-link-target';
+      noteTitleElement.textContent = entry.title;
+      noteTitleElement.addEventListener('click', function () {
+        openQuickNoteModal(entry);
+      });
+      listItem.appendChild(noteTitleElement);
+
+      // Same edit/delete icon row every comic card gets - Edit here
+      // opens the Quick Note popup instead of the inline comic-editing
+      // form (see the "onEditClick" comment on buildEntryActions()
+      // above for why), since a note has no status/chapter/type fields
+      // for that form to edit in the first place.
+      listItem.appendChild(buildEntryActions(entry, function () {
+        openQuickNoteModal(entry);
+      }));
 
       manhwaList.appendChild(listItem);
       return;
@@ -2437,7 +7728,9 @@ function renderList() {
     // ribbon that also lives inside this same box (appended further
     // down).
     const coverPlaceholder = document.createElement('div');
-    coverPlaceholder.className = 'cover-placeholder';
+    // dimmable-cover: opts this shelf box into Cover dimming (see
+    // setCoverElementImage()). The detail page's box never gets it.
+    coverPlaceholder.className = 'cover-placeholder dimmable-cover';
     // Videos get a wide/short thumbnail shape instead of the tall
     // portrait cover shape - see ".cover-placeholder.video-cover" in
     // style.css for the actual size change. Manhwa and Other Comics
@@ -2449,6 +7742,18 @@ function renderList() {
     coverPlaceholderText.className = 'cover-placeholder-text';
     coverPlaceholderText.textContent = 'No Cover';
     coverPlaceholder.appendChild(coverPlaceholderText);
+
+    // Phone-width version of the same "no cover" state: the entry's own
+    // title, shown big/bold/centered right on the cover box instead of
+    // the plain "No Cover" text above. Both spans always exist - which
+    // one is actually visible is decided purely by CSS (see
+    // ".cover-placeholder-title" in style.css), so nothing here needs to
+    // know the screen width or react to the window being resized.
+    const coverPlaceholderTitle = document.createElement('span');
+    coverPlaceholderTitle.className = 'cover-placeholder-title';
+    coverPlaceholderTitle.textContent = entry.title;
+    coverPlaceholder.appendChild(coverPlaceholderTitle);
+
     listItem.appendChild(coverPlaceholder);
 
     // Comics added before the cover-image feature existed (or that
@@ -2457,6 +7762,9 @@ function renderList() {
     // Cover" placeholder. Nothing else changes for them.
     if (entry.hasImage) {
       applyCoverImageToElement(coverPlaceholder, entry.id);
+    } else if (entry.type === 'Videos') {
+      // No own cover: show the automatic video thumbnail, if any.
+      applyThumbnailToCoverElement(coverPlaceholder, entry);
     }
 
     if (isEditing) {
@@ -2683,6 +7991,8 @@ function renderList() {
       saveButton.className = 'save-button';
       saveButton.textContent = 'Save';
       saveButton.addEventListener('click', function () {
+        const linkBeforeEdit = entry.link;
+        const typeBeforeEdit = entry.type;
         // Write the input values straight onto the entry object. Since
         // "entry" is the same object stored inside manhwaEntries (not
         // a copy), changing its properties here changes the real data
@@ -2699,7 +8009,7 @@ function renderList() {
         entry.page = pageField.value;
         entry.episode = episodeField.value;
         entry.status = statusField.value;
-        entry.link = linkField.value;
+        entry.link = safeUrl(linkField.value);
 
         // editingTags already holds exactly the tags the user built up
         // via the chips above (adds/removes edited this array directly -
@@ -2721,9 +8031,14 @@ function renderList() {
         // No card is being edited anymore.
         entryBeingEdited = null;
 
+        // Mark this entry as just-modified so it moves back to the top
+        // of the shelf - see touchEntry() and renderList()'s sort step.
+        touchEntry(entry);
+
         // Save the updated entry to localStorage so the edit survives
         // a page refresh.
         saveToStorage();
+        syncEntryToSupabase(entry);
 
         // Redraw the shelf. This re-runs the type-based folder filter
         // at the top of renderList() using the entry's new type, so if
@@ -2734,6 +8049,11 @@ function renderList() {
         // updates the ribbon/star rating - since tabs filter by type,
         // not status.
         renderList();
+
+        // Link or type changed: (re)look up the video thumbnail, or clear it.
+        if (entry.link !== linkBeforeEdit || entry.type !== typeBeforeEdit) {
+          scheduleThumbnailResolve(entry);
+        }
       });
       listItem.appendChild(saveButton);
     } else {
@@ -2746,7 +8066,7 @@ function renderList() {
       // class name, e.g. "status-reading", which is how style.css
       // knows which color to give each ribbon.
       const statusRibbon = document.createElement('div');
-      statusRibbon.className = 'status-ribbon status-' + entry.status.toLowerCase();
+      statusRibbon.className = 'status-ribbon status-' + String(entry.status || '').toLowerCase();
       statusRibbon.textContent = entry.status;
       coverPlaceholder.appendChild(statusRibbon);
 
@@ -2801,19 +8121,25 @@ function renderList() {
         infoRow.appendChild(chapterElement);
       }
 
-      const linkElement = document.createElement('a');
-      linkElement.className = 'entry-link';
-      linkElement.href = entry.link;
-      // "Link" here is a fixed word we typed ourselves (not user input),
-      // so it's fine to include directly in the same HTML string as the icon.
-      linkElement.innerHTML = ICON_LINK + ' Link';
-      linkElement.target = '_blank';
-      linkElement.rel = 'noopener noreferrer';
-      // Clicking it pops open the Open/Copy popup instead of opening
-      // in a new tab right away - see "Link popup" near the bottom of
-      // this file for wireLinkPopup().
-      wireLinkPopup(linkElement);
-      infoRow.appendChild(linkElement);
+      // When the link is empty or unsafe, safeUrl() returns '' and we
+      // skip the Link button entirely - same as the detail page, which
+      // shows "No link added" instead of a link that does nothing.
+      const cardUrl = safeUrl(entry.link);
+      if (cardUrl) {
+        const linkElement = document.createElement('a');
+        linkElement.className = 'entry-link';
+        linkElement.href = cardUrl;
+        // "Link" here is a fixed word we typed ourselves (not user input),
+        // so it's fine to include directly in the same HTML string as the icon.
+        linkElement.innerHTML = ICON_LINK + ' Link';
+        linkElement.target = '_blank';
+        linkElement.rel = 'noopener noreferrer';
+        // Clicking it pops open the Open/Copy popup instead of opening
+        // in a new tab right away - see "Link popup" near the bottom of
+        // this file for wireLinkPopup().
+        wireLinkPopup(linkElement);
+        infoRow.appendChild(linkElement);
+      }
 
       listItem.appendChild(infoRow);
 
@@ -2821,7 +8147,11 @@ function renderList() {
       // own lines. Now they're small icon buttons sharing one row at
       // the bottom of the card - built by buildEntryActions() above,
       // the same function the Private-mode row uses too.
-      listItem.appendChild(buildEntryActions(entry));
+      // Plus an "Add to list" button in the same row (comic cards only -
+      // Quick Notes and Characters cards don't get one).
+      const cardActions = buildEntryActions(entry);
+      cardActions.appendChild(buildAddToListButton(entry));
+      listItem.appendChild(cardActions);
     }
 
     manhwaList.appendChild(listItem);
@@ -2858,6 +8188,34 @@ typeInput.addEventListener('change', function () {
   updateAuthorFieldVisibility(typeInput.value, authorInput);
 });
 
+// Type pills (phone widths only - see .type-pill-row in index.html):
+// three buttons standing in for the #typeInput dropdown above. Gives
+// each pill the "active" look (white background, dark text) if it
+// matches whatever #typeInput's current value is, and the plain dark
+// look otherwise - see .type-pill / .type-pill.active in style.css.
+function updateTypePillActiveState() {
+  typePillButtons.forEach(function (pill) {
+    pill.classList.toggle('active', pill.dataset.type === typeInput.value);
+  });
+}
+
+// Tapping a pill sets the real #typeInput select to that pill's type,
+// then fires a "change" event on it - this makes the browser (and
+// every other listener on #typeInput, like the one just above) treat
+// it exactly the same as if that option had been picked from a normal
+// dropdown, so no other code needs to know pills exist at all.
+typePillButtons.forEach(function (pill) {
+  pill.addEventListener('click', function () {
+    typeInput.value = pill.dataset.type;
+    typeInput.dispatchEvent(new Event('change'));
+    updateTypePillActiveState();
+  });
+});
+
+// Set the correct pill active on page load, matching #typeInput's
+// starting value ("Manhwa" - see the <select> in index.html).
+updateTypePillActiveState();
+
 // Run this function whenever the button is clicked
 addButton.addEventListener('click', function () {
   const title = titleInput.value;
@@ -2872,7 +8230,7 @@ addButton.addEventListener('click', function () {
   const volume = volumeInput.value;
   const page = pageInput.value;
   const episode = episodeInput.value;
-  const link = linkInput.value;
+  const link = safeUrl(linkInput.value);
   const status = statusInput.value;
 
   // Don't add empty entries
@@ -2900,7 +8258,7 @@ addButton.addEventListener('click', function () {
   // holding the exact same array (instead of a copy), emptying
   // newComicTags would also empty the tags we just saved on this
   // entry, since both names would be pointing at the one array.
-  manhwaEntries.push({
+  const newEntry = {
     id: generateComicId(),
     title: title,
     type: type,
@@ -2916,15 +8274,25 @@ addButton.addEventListener('click', function () {
     notes: '',
     scenes: [],
     characters: [],
-    hasImage: false
-  });
+    hasImage: false,
+    // Stamped as "now" so this brand new entry sorts to the very top
+    // of the shelf - see touchEntry() and renderList()'s sort step.
+    updatedAt: Date.now()
+  };
+  manhwaEntries.push(newEntry);
 
   // Save the new full list to localStorage so the new entry survives
   // a page refresh.
   saveToStorage();
+  syncEntryToSupabase(newEntry);
 
   // Redraw the list so the new entry shows up
   renderList();
+
+  // New Video with a link: look up its thumbnail in the background.
+  if (newEntry.type === 'Videos' && newEntry.link) {
+    scheduleThumbnailResolve(newEntry);
+  }
 
   // Clear the inputs so they're ready for the next entry
   titleInput.value = '';
@@ -2939,9 +8307,11 @@ addButton.addEventListener('click', function () {
 
   // Type just got reset to 'Manhwa' above, so put the progress fields
   // (and the Author field) back to the matching visibility (Chapter #
-  // and Author shown, the rest hidden).
+  // and Author shown, the rest hidden), and re-highlight the Manhwa
+  // pill to match (see the "Type pills" section above).
   updateProgressFieldsVisibility('Manhwa', addFormProgressFields);
   updateAuthorFieldVisibility('Manhwa', authorInput);
+  updateTypePillActiveState();
 
   // Empty the tags array back out and redraw the (now empty) chip
   // preview, so the next comic starts with a blank tag list too.
@@ -3025,12 +8395,32 @@ bulkAddButton.addEventListener('click', function () {
   bulkAddTextarea.focus();
 });
 
-// "Cancel" hides the panel again and throws away whatever was pasted,
-// without adding anything.
-bulkAddCancelButton.addEventListener('click', function () {
+// Hides the panel and throws away whatever was pasted, without adding
+// anything. Shared by "Cancel", the sheet's own "X" (see
+// bulkAddSheetCloseButton below), and by closeAddEntrySheet() in the
+// "Add Entry sheet" section further down this file, so there's only
+// ONE place that resets this panel back to empty/hidden no matter how
+// you back out of it.
+//
+// Removing "showing-bulk-add" here is what switches the phone sheet
+// back to showing the normal Add Entry fields instead of this panel
+// (see .add-entry-sheet-overlay.showing-bulk-add in style.css) - it's
+// simply a no-op on laptop/tablet, where that class is never added in
+// the first place.
+function resetBulkAddPanel() {
   bulkAddTextarea.value = '';
   bulkAddPanel.style.display = 'none';
-});
+  addEntrySheetOverlay.classList.remove('showing-bulk-add');
+}
+
+bulkAddCancelButton.addEventListener('click', resetBulkAddPanel);
+
+// The sheet-mode "X" (only ever visible on phone widths, once "Bulk
+// add" has swapped this panel in as the sheet's content - see
+// .bulk-add-sheet-header in style.css) does the exact same thing as
+// "Cancel" above - it's just a second, familiar way back that matches
+// how every other popup in this app closes.
+bulkAddSheetCloseButton.addEventListener('click', resetBulkAddPanel);
 
 bulkAddSubmitButton.addEventListener('click', function () {
   const titles = parseBulkTitles(bulkAddTextarea.value);
@@ -3052,6 +8442,9 @@ bulkAddSubmitButton.addEventListener('click', function () {
 
   const addedTitles = [];
   const skippedTitles = [];
+  // The actual entry objects added this batch, so each one can be
+  // pushed up to Supabase once the whole batch has been saved locally.
+  const addedEntries = [];
 
   titles.forEach(function (title) {
     const titleLower = title.toLowerCase();
@@ -3068,7 +8461,7 @@ bulkAddSubmitButton.addEventListener('click', function () {
     // There's no Type dropdown in the Bulk Add panel, so every comic
     // added this way starts as type 'Manhwa' (its type can always be
     // changed afterward via Edit, same as any other entry).
-    manhwaEntries.push({
+    const newEntry = {
       id: generateComicId(),
       title: title,
       type: 'Manhwa',
@@ -3083,8 +8476,17 @@ bulkAddSubmitButton.addEventListener('click', function () {
       notes: '',
       scenes: [],
       characters: [],
-      hasImage: false
-    });
+      hasImage: false,
+      // Same "now" stamp a normal Add gets - see touchEntry() near the
+      // top of this file. Every title pasted in this same batch gets
+      // its own Date.now() call, so if two happen in the exact same
+      // millisecond they'll tie and just keep the order they were
+      // typed in (see the sort step in renderList()) - either way,
+      // the whole freshly-added batch lands above older entries.
+      updatedAt: Date.now()
+    };
+    manhwaEntries.push(newEntry);
+    addedEntries.push(newEntry);
 
     addedTitles.push(title);
 
@@ -3098,7 +8500,18 @@ bulkAddSubmitButton.addEventListener('click', function () {
     // Save and redraw once, after the whole batch is processed -
     // there's no need to save/redraw after every single title.
     saveToStorage();
+    addedEntries.forEach(syncEntryToSupabase);
     renderList();
+    // Any Videos with links (Bulk Add currently makes Manhwa with no
+    // link, so this is normally empty): thumbnails, 2 at a time.
+    const addedVideos = addedEntries.filter(function (entry) {
+      return entry.type === 'Videos' && entry.link;
+    });
+    if (addedVideos.length > 0) {
+      setTimeout(function () {
+        resolveThumbnailsWithLimit(addedVideos, 2);
+      }, 0);
+    }
   }
 
   // Build the one summary popup: always says how many were added, and
@@ -3116,9 +8529,10 @@ bulkAddSubmitButton.addEventListener('click', function () {
 
   alert(summaryMessage);
 
-  // Reset the panel so it's empty and ready next time it's opened.
-  bulkAddTextarea.value = '';
-  bulkAddPanel.style.display = 'none';
+  // Reset the panel so it's empty and ready next time it's opened (and,
+  // on phone widths, switch the sheet back to the normal Add Entry
+  // fields - see resetBulkAddPanel() above).
+  resetBulkAddPanel();
 });
 
 // --- Quick Notes ---
@@ -3133,51 +8547,395 @@ bulkAddSubmitButton.addEventListener('click', function () {
 // separate array off on its own.
 //
 // That one shared array is really the whole trick behind "notes show up
-// in All, but never in Manhwa/Other Comics/Videos, with no Notes tab of
-// their own": look back at the "matchesFolder" check inside renderList()
-// -
-//   const matchesFolder = (currentFilter === 'All') || (entry.type === currentFilter);
+// in All, AND also have their own dedicated Notes tab (phone width
+// only - see TYPE_FILTER_OPTIONS above), but never show up under
+// Manhwa/Other Comics/Videos": look back at the "matchesFolder" check
+// inside renderList() -
+//   const matchesFolder = (currentFilter === 'All')
+//     || (currentFilter === 'Notes' ? entry.type === 'Note' : entry.type === currentFilter);
 // - "All" always lets every entry through no matter its type, so a note
-// shows up there right alongside every comic. But none of the three
+// shows up there right alongside every comic. "Notes" has its own
+// explicit "entry.type === 'Note'" branch, since the tab itself is
+// named "Notes" (plural) while entry.type is 'Note' (singular) - so
+// only Quick Notes make it through that tab. And none of the three real
 // type tabs' data-filter values ("Manhwa", "Other Comics", "Videos")
-// ever equal "Note", so that same check quietly filters every note back
-// out the moment you're on any tab OTHER than All - with no extra
-// "is this a note?" check needed anywhere in that filtering logic. A
+// ever equal "Note" either, so that same check quietly filters every
+// note back out on any of those - with no extra checks needed there. A
 // Quick Note simply doesn't fit any of those three tabs, the same way a
-// Manhwa never shows up under the Videos tab - it's the exact same
-// mechanism already doing the work, not a special case bolted on for
-// notes.
+// Manhwa never shows up under the Videos tab.
 //
 // A note's card (built inside renderList() below) is handled as its own
 // early, separate branch though - reusing the comic-card code as-is
 // would mean constantly checking "does this field even apply to a
-// note?" (a note has no entry.status to build a ribbon out of, no
-// entry.chapter to format, etc.) - simpler to keep the "this is a note"
-// and "this is a comic" rendering code as two clearly separate paths.
+// note?" (a note has no entry.status - its ribbon always just says the
+// fixed word "Note" instead, see below - no entry.chapter to format,
+// etc.) - simpler to keep the "this is a note" and "this is a comic"
+// rendering code as two clearly separate paths.
 // And unlike a comic, a note doesn't open a detail PAGE at all when its
 // card is clicked - see the "Quick Note popup/modal" section further
 // down this file for why it gets a small popup instead, and how that's
 // built differently from showDetailView()/showLibraryView() above.
 
-// Builds the short one-line preview shown on a note's card (never the
-// full text - that's only shown once you open the note's own detail
-// page). "(noteText || '').trim()" covers a brand new note that was
-// saved with no text typed in at all. NOTE_SNIPPET_LENGTH characters is
-// roughly one short line - long enough to recognize the note, short
-// enough that the card stays exactly as compact as a comic card.
-const NOTE_SNIPPET_LENGTH = 80;
-function buildNoteSnippet(noteText) {
+// Builds the preview shown inside a note's card (never the full text -
+// that's only shown once you open the note's own detail page/popup).
+// "(noteText || '').trim()" covers a brand new note that was saved
+// with no text typed in at all.
+//
+// The preview box itself (".note-preview-text" in style.css) uses
+// "-webkit-line-clamp" to visually clip the text to a few lines and
+// add its own "..." right where it clips - so most of the time, this
+// function doesn't need to do any truncating itself, it just hands
+// over the text. NOTE_SNIPPET_LENGTH is only a safety net for
+// unusually long notes: without SOME cap, a note with thousands of
+// characters would still get its entire text stuffed into the page
+// for every single card, even though only the first few lines are
+// ever visible.
+const NOTE_SNIPPET_LENGTH = 280;
+
+// --- Links inside Quick Notes ---
+// A note's links are stored as plain text inside noteText (nothing about
+// the data changes). These helpers find them at display time so they can
+// be drawn as tappable links that open the shared Link popup.
+
+// Only text starting with http://, https:// or www. is ever a link -
+// bare domains ("example.com"), javascript:, data:, etc. stay plain text.
+const NOTE_LINK_PATTERN = /\b(?:https?:\/\/|www\.)[^\s<>"']+/gi;
+const NOTE_LINK_TRAILING_PUNCTUATION = '.,;:!?)]}\'"';
+const NOTE_LINK_MAX = 200;
+
+// Pure helper: splits text into [{type:'text'|'link', text, url, start}]
+// segments. "start" is the segment's offset in the original string (used
+// to select a link in the textarea on long-press). Joining every
+// segment's text always gives back the original string exactly.
+function tokenizeNoteText(text) {
+  const source = String(text || '');
+  const segments = [];
+  let cursor = 0;
+  let linkCount = 0;
+
+  function pushText(start, end) {
+    if (end <= start) {
+      return;
+    }
+    const last = segments[segments.length - 1];
+    if (last && last.type === 'text') {
+      last.text += source.slice(start, end);
+    } else {
+      segments.push({ type: 'text', text: source.slice(start, end), url: '', start: start });
+    }
+  }
+
+  const pattern = new RegExp(NOTE_LINK_PATTERN.source, 'gi');
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    if (linkCount >= NOTE_LINK_MAX) {
+      break;
+    }
+
+    let linkText = match[0];
+    while (linkText.length > 0 &&
+           NOTE_LINK_TRAILING_PUNCTUATION.indexOf(linkText.charAt(linkText.length - 1)) !== -1) {
+      linkText = linkText.slice(0, -1);
+    }
+
+    // Nothing left after the prefix (e.g. "https://." or "www.") - not a link.
+    const hasBody = /^(?:https?:\/\/|www\.)./i.test(linkText);
+    const url = hasBody ? safeUrl(linkText) : '';
+    if (!url) {
+      continue; // left as plain text by the pushText() calls around it
+    }
+
+    const linkStart = match.index;
+    pushText(cursor, linkStart);
+    segments.push({ type: 'link', text: linkText, url: url, start: linkStart });
+    cursor = linkStart + linkText.length;
+    linkCount += 1;
+  }
+
+  pushText(cursor, source.length);
+  return segments;
+}
+
+// Segments for a shelf card's preview: built from the FULL (trimmed)
+// note so a link is never cut in half before it's detected, then cut at
+// NOTE_SNIPPET_LENGTH visible characters. A cut-off link keeps its full
+// url. Same "No content yet" / trailing "..." behavior as before.
+function buildNotePreviewSegments(noteText) {
   const trimmedText = (noteText || '').trim();
 
   if (trimmedText === '') {
-    return 'No content yet';
-  }
-  if (trimmedText.length <= NOTE_SNIPPET_LENGTH) {
-    return trimmedText;
+    return [{ type: 'text', text: 'No content yet', url: '', start: 0 }];
   }
 
-  return trimmedText.slice(0, NOTE_SNIPPET_LENGTH).trim() + '...';
+  const segments = tokenizeNoteText(trimmedText);
+  if (trimmedText.length <= NOTE_SNIPPET_LENGTH) {
+    return segments;
+  }
+
+  const preview = [];
+  let remaining = NOTE_SNIPPET_LENGTH;
+  for (let i = 0; i < segments.length && remaining > 0; i++) {
+    const segment = segments[i];
+    if (segment.text.length <= remaining) {
+      preview.push(segment);
+      remaining -= segment.text.length;
+    } else {
+      preview.push({ type: segment.type, text: segment.text.slice(0, remaining), url: segment.url, start: segment.start });
+      remaining = 0;
+    }
+  }
+
+  // Matches the old ".slice(...).trim() + '...'".
+  const last = preview[preview.length - 1];
+  last.text = last.text.replace(/\s+$/, '');
+  if (last.text === '') {
+    preview.pop();
+  }
+  preview.push({ type: 'text', text: '...', url: '', start: -1 });
+  return preview;
 }
+
+// Draws note text into container using DOM APIs only (text nodes for all
+// note text - never innerHTML), so "<", "&" etc. always show literally.
+// Each link becomes <span class="note-link" role="link" tabindex="0">.
+// Clicking it (or Enter/Space) opens the shared Link popup above it and
+// stops the click from reaching the card/note underneath.
+// options:
+//   preview: true   -> use buildNotePreviewSegments() (shelf cards)
+//   onLinkLongPress -> function(segment); enables long-press on links
+function renderNoteTextInto(container, text, options) {
+  const settings = options || {};
+  const segments = settings.preview ? buildNotePreviewSegments(text) : tokenizeNoteText(text);
+
+  while (container.firstChild) {
+    container.removeChild(container.firstChild);
+  }
+
+  segments.forEach(function (segment) {
+    if (segment.type !== 'link') {
+      container.appendChild(document.createTextNode(segment.text));
+      return;
+    }
+
+    const linkElement = document.createElement('span');
+    linkElement.className = 'note-link';
+    linkElement.setAttribute('role', 'link');
+    linkElement.setAttribute('tabindex', '0');
+    linkElement.textContent = segment.text;
+
+    linkElement.addEventListener('click', function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (isNoteLinkClickSuppressed()) {
+        return;
+      }
+      openLinkPopupFor(linkElement, segment.url);
+    });
+
+    linkElement.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        event.stopPropagation();
+        openLinkPopupFor(linkElement, segment.url);
+      }
+    });
+
+    if (typeof settings.onLinkLongPress === 'function') {
+      wireNoteLinkLongPress(linkElement, segment, settings.onLinkLongPress);
+    }
+
+    container.appendChild(linkElement);
+  });
+}
+
+// Long-press on a note link: hold ~500ms without moving more than 10px.
+// Uses pointer events; the click that follows a long-press is swallowed
+// (a short time window, so a stale flag can never eat a later tap) so
+// it never opens the popup, and the native context menu is suppressed
+// only while a press is active.
+const NOTE_LINK_LONG_PRESS_MS = 500;
+const NOTE_LINK_LONG_PRESS_MOVE_PX = 10;
+const NOTE_LINK_SUPPRESS_CLICK_MS = 700;
+let noteLinkSuppressClicksUntil = 0;
+let noteLinkActivePress = null;
+
+function isNoteLinkClickSuppressed() {
+  return Date.now() < noteLinkSuppressClicksUntil;
+}
+
+function wireNoteLinkLongPress(linkElement, segment, onLongPress) {
+  linkElement.addEventListener('pointerdown', function (event) {
+    if (event.pointerType === 'mouse' && event.button !== 0) {
+      return;
+    }
+    // Stops compatibility mouse events (so the textarea that replaces
+    // this text can't grab focus/caret from the same touch) and text
+    // selection starting on the link. The click event still fires.
+    event.preventDefault();
+    cancelNoteLinkPress();
+
+    const press = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      fired: false,
+      onLongPress: onLongPress,
+      segment: segment,
+      timer: null
+    };
+    press.timer = setTimeout(function () {
+      press.fired = true;
+      noteLinkSuppressClicksUntil = Date.now() + NOTE_LINK_SUPPRESS_CLICK_MS;
+      press.onLongPress(press.segment);
+    }, NOTE_LINK_LONG_PRESS_MS);
+    noteLinkActivePress = press;
+  });
+
+  linkElement.addEventListener('contextmenu', function (event) {
+    if (noteLinkActivePress || isNoteLinkClickSuppressed()) {
+      event.preventDefault();
+    }
+  });
+}
+
+function cancelNoteLinkPress() {
+  if (noteLinkActivePress) {
+    clearTimeout(noteLinkActivePress.timer);
+    noteLinkActivePress = null;
+  }
+}
+
+// Listened for on the document (not the link) because a long-press
+// hides the reading view - and the link with it - mid-press.
+document.addEventListener('pointermove', function (event) {
+  const press = noteLinkActivePress;
+  if (!press || press.fired || event.pointerId !== press.pointerId) {
+    return;
+  }
+  const dx = event.clientX - press.startX;
+  const dy = event.clientY - press.startY;
+  if (Math.sqrt(dx * dx + dy * dy) > NOTE_LINK_LONG_PRESS_MOVE_PX) {
+    cancelNoteLinkPress();
+  }
+});
+
+document.addEventListener('pointerup', function (event) {
+  const press = noteLinkActivePress;
+  if (!press || event.pointerId !== press.pointerId) {
+    return;
+  }
+  cancelNoteLinkPress();
+  if (press.fired) {
+    noteLinkSuppressClicksUntil = Date.now() + NOTE_LINK_SUPPRESS_CLICK_MS;
+    // pointerup counts as a user gesture, which iOS requires before
+    // it will focus a textarea / show the keyboard - so apply the
+    // focus + selection once more here.
+    press.onLongPress(press.segment);
+  }
+});
+
+document.addEventListener('pointercancel', function (event) {
+  const press = noteLinkActivePress;
+  if (press && event.pointerId === press.pointerId) {
+    cancelNoteLinkPress();
+  }
+});
+
+// --- Add Entry sheet (phone widths only) ---
+// On laptop/tablet, .form (the Add Entry fields) just sits on the page
+// like it always has - none of this code changes that. On phone widths,
+// style.css turns #addEntrySheetOverlay into a dimmed backdrop and
+// .form into a popup "bottom sheet" sitting on top of it (see the
+// "Phone-width layout: Add-entry sheet" comment in style.css for the
+// full explanation), and the "+" button below is what opens it.
+//
+// This works by adding/removing one CSS class ("sheet-open") - it never
+// sets addEntrySheetOverlay.style.display directly the way the Quick
+// Note modal does. That distinction matters here: a JS-set inline style
+// would apply at EVERY screen width, but this feature must only ever do
+// anything on phone widths. Toggling a class instead lets style.css's
+// @media (max-width: 600px) rule stay in full control - on wider
+// screens, no CSS rule even looks at "sheet-open", so adding/removing
+// it has no effect at all.
+
+// "+" button: opens the sheet.
+openAddEntrySheetButton.addEventListener('click', function () {
+  addEntrySheetOverlay.classList.add('sheet-open');
+});
+
+// "Add my first title" (empty-library card): brings the Add Entry form
+// into view and puts the cursor in the title box. On phone widths the
+// form lives in the bottom sheet, so open that (adding "sheet-open" has
+// no effect on wider screens - see above); on laptop/tablet the form is
+// already on the page, so just scroll up to it.
+libraryEmptyStateAddButton.addEventListener('click', function () {
+  addEntrySheetOverlay.classList.add('sheet-open');
+  if (!window.matchMedia('(max-width: 600px)').matches) {
+    titleInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  titleInput.focus({ preventScroll: true });
+});
+
+// Closes the sheet completely and, via resetBulkAddPanel() (see the
+// "Bulk Add" section above), makes sure it's showing the normal Add
+// Entry fields again next time it's opened - rather than the Bulk Add
+// view someone may have swapped to. Without that reset, #bulkAddPanel
+// would also be left sitting there fixed on screen (it has its own,
+// separate display: flex/none - see resetBulkAddPanel()) even after
+// the dimmed backdrop behind it was gone.
+function closeAddEntrySheet() {
+  addEntrySheetOverlay.classList.remove('sheet-open');
+  resetBulkAddPanel();
+}
+
+// "X" button inside the sheet: closes it again. Doesn't touch any of
+// the typed-in field values - closing the sheet this way is exactly
+// like collapsing the always-visible form back down would be, nothing
+// gets cleared or saved.
+addEntrySheetCloseButton.addEventListener('click', closeAddEntrySheet);
+
+// Clicking the dimmed backdrop itself (anywhere OUTSIDE .form) also
+// closes the sheet - same "event.target === the overlay itself" check
+// used by the Quick Note modal below, so clicks inside the form fields
+// don't accidentally close it.
+addEntrySheetOverlay.addEventListener('click', function (event) {
+  if (event.target === addEntrySheetOverlay) {
+    closeAddEntrySheet();
+  }
+});
+
+// Pressing Escape closes the sheet too, but only while it's actually
+// open.
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape' && addEntrySheetOverlay.classList.contains('sheet-open')) {
+    closeAddEntrySheet();
+  }
+});
+
+// "Bulk add" link: instead of opening a whole new screen, this swaps
+// the sheet's CONTENT over to the existing #bulkAddPanel (the exact
+// same fields/logic the standalone "Bulk Add" button already uses on
+// laptop/tablet - see the "Bulk Add" section above) by adding the
+// "showing-bulk-add" class, which style.css uses to hide .form and
+// style #bulkAddPanel to look like the sheet in its place (see
+// .add-entry-sheet-overlay.showing-bulk-add in style.css). The sheet
+// itself stays open ("sheet-open" is untouched) - only what's showing
+// INSIDE it changes.
+sheetBulkAddLink.addEventListener('click', function () {
+  addEntrySheetOverlay.classList.add('showing-bulk-add');
+  bulkAddPanel.style.display = 'flex';
+  bulkAddTextarea.focus();
+});
+
+// "Quick note" link: closes the Add Entry sheet first, then opens the
+// existing Quick Note popup exactly the way #quickNotesButton already
+// does (see openQuickNoteModal() in the "Quick Note popup/modal"
+// section below) - reused completely as-is, nothing about it changes
+// here.
+sheetQuickNoteLink.addEventListener('click', function () {
+  closeAddEntrySheet();
+  openQuickNoteModal(null);
+});
 
 // --- Quick Note popup/modal ---
 // Everywhere else in this app, "opening" something (a comic's detail
@@ -3202,6 +8960,217 @@ function buildNoteSnippet(noteText) {
 // check this variable to know which of the two jobs they're doing.
 let editingQuickNoteEntry = null;
 
+// --- Quick Note window: size, page lock, on-screen keyboard ---
+// Matches the phone breakpoint in style.css. On phones the text area
+// just fills the window (CSS), so none of the auto-grow below applies.
+const quickNotePhoneQuery = window.matchMedia('(max-width: 600px)');
+
+// One height (e.g. "512px") shared by the textarea AND the reading
+// view, so both modes are always exactly the same size.
+let quickNoteBodyHeight = '';
+// True once the user drags the textarea's resize handle: from then on
+// their height wins over auto-grow until the popup is opened again.
+let quickNoteUserResized = false;
+let quickNoteHeightAtPointerDown = '';
+
+function isQuickNoteOpen() {
+  return quickNoteModalOverlay.style.display !== 'none';
+}
+
+function applyQuickNoteBodyHeight(height) {
+  quickNoteModalTextInput.style.height = height;
+  quickNoteModalReadView.style.height = height;
+}
+
+// Desktop/tablet: grow with the note's content, never below 55vh and
+// never above 80vh (after that it scrolls inside). The visible box is
+// measured by briefly setting its height to 0 - scrollHeight then
+// reports the full content height. overflow is hidden while measuring
+// so a temporary scrollbar can't change the line wrapping. All of
+// this happens in one go, so nothing flickers on screen.
+function sizeQuickNoteBody() {
+  if (quickNotePhoneQuery.matches) {
+    quickNoteBodyHeight = '';
+    applyQuickNoteBodyHeight('');
+    return;
+  }
+  if (quickNoteUserResized) {
+    applyQuickNoteBodyHeight(quickNoteBodyHeight);
+    return;
+  }
+  const box = isQuickNoteReading() ? quickNoteModalReadView : quickNoteModalTextInput;
+  const scrollTop = box.scrollTop;
+  box.style.overflowY = 'hidden';
+  box.style.height = '0px';
+  const contentHeight = box.scrollHeight;
+  box.style.overflowY = '';
+  const vh = window.innerHeight / 100;
+  const clamped = Math.min(Math.max(contentHeight, 55 * vh), 80 * vh);
+  quickNoteBodyHeight = Math.round(clamped) + 'px';
+  applyQuickNoteBodyHeight(quickNoteBodyHeight);
+  box.scrollTop = scrollTop;
+}
+
+quickNoteModalTextInput.addEventListener('input', sizeQuickNoteBody);
+
+// Spotting a manual resize: the browser's drag handle writes a new
+// inline height on the textarea, so compare it before/after a press.
+quickNoteModalTextInput.addEventListener('pointerdown', function () {
+  quickNoteHeightAtPointerDown = quickNoteModalTextInput.style.height;
+});
+window.addEventListener('pointerup', function () {
+  if (!isQuickNoteOpen() || quickNotePhoneQuery.matches) {
+    return;
+  }
+  const height = quickNoteModalTextInput.style.height;
+  if (height && height !== quickNoteHeightAtPointerDown && height !== quickNoteBodyHeight) {
+    quickNoteUserResized = true;
+    quickNoteBodyHeight = height;
+    applyQuickNoteBodyHeight(height);
+  }
+});
+
+// Window resized or crossed the phone breakpoint: re-fit.
+window.addEventListener('resize', function () {
+  if (isQuickNoteOpen()) {
+    sizeQuickNoteBody();
+  }
+});
+quickNotePhoneQuery.addEventListener('change', function () {
+  if (isQuickNoteOpen()) {
+    updateQuickNoteViewport();
+    sizeQuickNoteBody();
+  }
+});
+
+// Page lock. position: fixed on body (class in style.css) is what
+// actually stops scrolling on iOS Safari too; "top: -scrollY" keeps
+// the page visually where it was. Two small corrections:
+//  - "right" leaves room for the desktop scrollbar that disappears,
+//    so the centered page doesn't slide sideways;
+//  - an in-flow element is measured before/after, and any vertical
+//    shift (e.g. a first child's margin no longer collapsing through
+//    body) is cancelled out, so nothing moves behind the dim backdrop.
+// Calling it twice is harmless; closing scrolls back to the saved spot.
+let quickNoteSavedScrollY = null;
+
+function lockPageScrollForQuickNote() {
+  if (quickNoteSavedScrollY !== null) {
+    return;
+  }
+  const body = document.body;
+  const scrollY = window.scrollY;
+  const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+  const reference = Array.prototype.find.call(body.children, function (element) {
+    return element !== quickNoteModalOverlay &&
+      element.getClientRects().length > 0 &&
+      getComputedStyle(element).position !== 'fixed';
+  });
+  const topBefore = reference ? reference.getBoundingClientRect().top : 0;
+
+  quickNoteSavedScrollY = scrollY;
+  body.style.top = -scrollY + 'px';
+  body.style.right = scrollbarWidth > 0 ? scrollbarWidth + 'px' : '';
+  body.classList.add('quick-note-scroll-lock');
+
+  if (reference) {
+    const shift = reference.getBoundingClientRect().top - topBefore;
+    if (shift !== 0) {
+      body.style.top = (-scrollY - shift) + 'px';
+    }
+  }
+}
+
+function unlockPageScrollForQuickNote() {
+  if (quickNoteSavedScrollY === null) {
+    return;
+  }
+  const scrollY = quickNoteSavedScrollY;
+  quickNoteSavedScrollY = null;
+  document.body.classList.remove('quick-note-scroll-lock');
+  document.body.style.top = '';
+  document.body.style.right = '';
+  window.scrollTo(0, scrollY);
+}
+
+// On-screen keyboard (phones). The keyboard covers the bottom of the
+// screen without shrinking position: fixed elements on iOS, so the
+// overlay is pinned to the VISUAL viewport (the part still showing)
+// through two CSS variables - the window then shrinks to sit above
+// the keyboard, the text area takes the smaller height, and Save stays
+// reachable. Cleared when closed or on wider screens, where the CSS
+// falls back to the full screen.
+function updateQuickNoteViewport() {
+  const viewport = window.visualViewport;
+  const style = quickNoteModalOverlay.style;
+  if (!viewport || !isQuickNoteOpen() || !quickNotePhoneQuery.matches) {
+    style.removeProperty('--qn-viewport-top');
+    style.removeProperty('--qn-viewport-height');
+    return;
+  }
+  style.setProperty('--qn-viewport-top', viewport.offsetTop + 'px');
+  style.setProperty('--qn-viewport-height', viewport.height + 'px');
+  // Only when the visible height actually changed (keyboard opened or
+  // closed), so this never fights the user scrolling the note.
+  if (viewport.height !== quickNoteLastViewportHeight) {
+    quickNoteLastViewportHeight = viewport.height;
+    keepQuickNoteCaretVisible();
+  }
+}
+let quickNoteLastViewportHeight = 0;
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', updateQuickNoteViewport);
+  window.visualViewport.addEventListener('scroll', updateQuickNoteViewport);
+}
+
+// After the text area shrinks (keyboard opening) the caret can end up
+// below its visible part. Browsers don't expose the caret's position,
+// so an invisible copy of the text up to the caret (same width and
+// text metrics, see .quick-note-caret-mirror in style.css) tells us
+// how far down it is; then the textarea is scrolled just enough to
+// show that line. textContent only - never innerHTML.
+let quickNoteCaretMirror = null;
+
+function keepQuickNoteCaretVisible() {
+  const textarea = quickNoteModalTextInput;
+  if (document.activeElement !== textarea || isQuickNoteReading()) {
+    return;
+  }
+  if (!quickNoteCaretMirror) {
+    quickNoteCaretMirror = document.createElement('div');
+    quickNoteCaretMirror.className = 'quick-note-caret-mirror';
+    quickNoteCaretMirror.setAttribute('aria-hidden', 'true');
+    quickNoteModalOverlay.appendChild(quickNoteCaretMirror);
+  }
+  const computed = getComputedStyle(textarea);
+  const paddingTop = parseFloat(computed.paddingTop) || 0;
+  const paddingBottom = parseFloat(computed.paddingBottom) || 0;
+  const lineHeight = parseFloat(computed.lineHeight) || 24;
+
+  quickNoteCaretMirror.style.width = textarea.clientWidth + 'px';
+  // The zero-width space gives a trailing newline a line of its own.
+  quickNoteCaretMirror.textContent = textarea.value.slice(0, textarea.selectionEnd) + '​';
+
+  const caretBottom = quickNoteCaretMirror.offsetHeight - paddingBottom;
+  const caretTop = caretBottom - lineHeight;
+  if (caretTop - paddingTop < textarea.scrollTop) {
+    textarea.scrollTop = Math.max(0, caretTop - paddingTop);
+  } else if (caretBottom + paddingBottom > textarea.scrollTop + textarea.clientHeight) {
+    textarea.scrollTop = caretBottom + paddingBottom - textarea.clientHeight;
+  }
+}
+
+// Phones only: the keyboard is still sliding in at focus time. The
+// visualViewport resize above handles most browsers; this covers ones
+// that don't fire it. (Not on desktop, where there's no keyboard to
+// hide the caret and scrolling on focus would just make the text jump.)
+quickNoteModalTextInput.addEventListener('focus', function () {
+  if (quickNotePhoneQuery.matches) {
+    setTimeout(keepQuickNoteCaretVisible, 300);
+  }
+});
+
 // Shows the popup. Pass an existing note's entry object to edit it
 // (its title/text get loaded into the fields, and the Delete button
 // appears); pass null (or nothing) to open the popup empty, ready to
@@ -3217,9 +9186,102 @@ function openQuickNoteModal(entry) {
   // exists.
   quickNoteModalDeleteButton.style.display = entry ? '' : 'none';
 
+  // New notes start in editing mode. An existing note opens in reading
+  // mode only if it has at least one link - otherwise editing, as before.
+  const hasLink = !!entry && tokenizeNoteText(entry.noteText).some(function (segment) {
+    return segment.type === 'link';
+  });
+  setQuickNoteMode(hasLink ? 'read' : 'edit');
+
+  // Freeze the page behind first (remembers its scroll position), then
+  // show the popup and size it - sizing has to wait until it's visible,
+  // since a hidden element has no height to measure. Each note starts
+  // with the auto-grow height and scrolled to the top.
+  lockPageScrollForQuickNote();
   quickNoteModalOverlay.style.display = 'flex';
-  quickNoteModalTitleInput.focus();
+  quickNoteUserResized = false;
+  updateQuickNoteViewport();
+  sizeQuickNoteBody();
+  quickNoteModalTextInput.scrollTop = 0;
+  quickNoteModalReadView.scrollTop = 0;
+  if (hasLink) {
+    // Focus stays inside the dialog without popping up a phone keyboard.
+    quickNoteModalEditButton.focus({ preventScroll: true });
+  } else {
+    quickNoteModalTitleInput.focus();
+  }
 }
+
+// --- Quick Note reading/editing modes ---
+// The textarea is ALWAYS the one source of truth for the note's text
+// (Save reads it exactly as before). Reading mode just hides it and
+// shows #quickNoteModalReadView, freshly drawn from the textarea's
+// current value - so switching modes can never lose unsaved typing.
+function setQuickNoteMode(mode) {
+  // Both boxes share one height and identical text metrics (see
+  // "Quick Note window size" in style.css), so carrying the scroll
+  // offset across keeps the same lines in the same place - switching
+  // modes doesn't move the text or resize the window.
+  const outgoing = isQuickNoteReading() ? quickNoteModalReadView : quickNoteModalTextInput;
+  const scrollTop = outgoing.scrollTop;
+  if (mode === 'read') {
+    renderNoteTextInto(quickNoteModalReadView, quickNoteModalTextInput.value, {
+      onLinkLongPress: selectNoteLinkInEditor
+    });
+    quickNoteModalTextInput.style.display = 'none';
+    quickNoteModalReadView.style.display = '';
+    quickNoteModalEditButton.style.display = '';
+    quickNoteModalReadView.scrollTop = scrollTop;
+  } else {
+    quickNoteModalTextInput.style.display = '';
+    quickNoteModalReadView.style.display = 'none';
+    quickNoteModalEditButton.style.display = 'none';
+    quickNoteModalTextInput.scrollTop = scrollTop;
+  }
+}
+
+function isQuickNoteReading() {
+  return quickNoteModalReadView.style.display !== 'none';
+}
+
+// Switches to editing mode, focuses the textarea, and selects
+// [start, end) - offsets in the full text, taken from the tokenizer.
+// Re-applied in a frame and a short timeout because some mobile
+// browsers reset the selection right after focusing.
+function editQuickNoteWithSelection(start, end) {
+  if (isQuickNoteReading()) {
+    setQuickNoteMode('edit');
+  }
+  function applySelection() {
+    quickNoteModalTextInput.focus({ preventScroll: true });
+    quickNoteModalTextInput.setSelectionRange(start, end);
+  }
+  applySelection();
+  requestAnimationFrame(applySelection);
+  setTimeout(applySelection, 80);
+}
+
+// Long-press on a link in reading mode: edit with exactly that link
+// selected, so Backspace/Delete removes it.
+function selectNoteLinkInEditor(segment) {
+  editQuickNoteWithSelection(segment.start, segment.start + segment.text.length);
+}
+
+function editQuickNoteAtEnd() {
+  const end = quickNoteModalTextInput.value.length;
+  editQuickNoteWithSelection(end, end);
+}
+
+// Tapping non-link text in reading mode switches to editing (links stop
+// their own clicks, so this only sees taps elsewhere in the text).
+quickNoteModalReadView.addEventListener('click', function () {
+  if (isNoteLinkClickSuppressed()) {
+    return;
+  }
+  editQuickNoteAtEnd();
+});
+
+quickNoteModalEditButton.addEventListener('click', editQuickNoteAtEnd);
 
 // Hides the popup again without saving anything - used by the "X"
 // button, clicking the dimmed backdrop, and pressing Escape below, plus
@@ -3230,7 +9292,13 @@ function openQuickNoteModal(entry) {
 // closed.
 function closeQuickNoteModal() {
   quickNoteModalOverlay.style.display = 'none';
+  updateQuickNoteViewport();
+  unlockPageScrollForQuickNote();
   editingQuickNoteEntry = null;
+  // A link popup opened from this note's text shouldn't outlive it
+  // (e.g. closing with Escape, which isn't a click).
+  closeLinkPopup();
+  cancelNoteLinkPress();
 }
 
 // "Quick Notes" button in the Add-entry row: opens the popup empty, for
@@ -3287,19 +9355,27 @@ quickNoteModalSaveButton.addEventListener('click', function () {
     return;
   }
 
+  let savedNote;
   if (editingQuickNoteEntry === null) {
-    manhwaEntries.push({
+    savedNote = {
       id: generateComicId(),
       title: title,
       type: 'Note',
-      noteText: quickNoteModalTextInput.value
-    });
+      noteText: quickNoteModalTextInput.value,
+      // Stamped as "now" so this note sorts to the top of "All" -
+      // see touchEntry() and renderList()'s sort step.
+      updatedAt: Date.now()
+    };
+    manhwaEntries.push(savedNote);
   } else {
-    editingQuickNoteEntry.title = title;
-    editingQuickNoteEntry.noteText = quickNoteModalTextInput.value;
+    savedNote = editingQuickNoteEntry;
+    savedNote.title = title;
+    savedNote.noteText = quickNoteModalTextInput.value;
+    touchEntry(savedNote);
   }
 
   saveToStorage();
+  syncEntryToSupabase(savedNote);
   renderList();
   closeQuickNoteModal();
 });
@@ -3322,9 +9398,61 @@ quickNoteModalDeleteButton.addEventListener('click', function () {
   const indexToRemove = manhwaEntries.indexOf(editingQuickNoteEntry);
   manhwaEntries.splice(indexToRemove, 1);
   saveToStorage();
+  deleteEntryFromSupabase(editingQuickNoteEntry.id);
+  removeEntryFromAllLists(editingQuickNoteEntry.id);
   renderList();
   closeQuickNoteModal();
 });
+
+// Switches the active Type tab to filterValue (e.g. "Videos" or
+// "Characters"), updates every bit of UI that depends on it, and
+// re-renders the shelf. Pulled out into its own function so both the
+// real filter tabs AND the phone Type pill's menu options (see
+// buildTypeFilterDropdownMenu() below) can share this one copy of the
+// logic instead of repeating it.
+function selectTypeFilter(filterValue) {
+  saveDetailNotes(false);
+  currentFilter = filterValue;
+
+  // Move the "active" highlight: strip it from every tab, then add it
+  // back only to whichever one matches filterValue. This still works
+  // correctly even when filterValue came from a phone pill option
+  // instead of a real tab click, since it just compares data-filter
+  // values - it doesn't care who triggered the change.
+  filterTabs.forEach(function (t) {
+    t.classList.toggle('active', t.dataset.filter === filterValue);
+  });
+
+  // "characters-tab-active" on <body> is what style.css's
+  // "body.characters-tab-active .zoom-controls, .search-bar" rule
+  // keys off of, to hide the Card Size slider AND the search bar
+  // whenever this tab is the one selected (neither one applies to a
+  // combined list of characters) - same idea as "private-mode"
+  // further down this file hiding the zoom slider for Private mode.
+  document.body.classList.toggle('characters-tab-active', currentFilter === 'Characters');
+
+  // Same idea for the Lists tab (see "body.lists-tab-active" in
+  // style.css). Also always start the Lists tab on its overview.
+  document.body.classList.toggle('lists-tab-active', currentFilter === 'Lists');
+  currentOpenListId = null;
+  listBeingRenamedId = null;
+
+  // Close both status dropdowns (if either happened to be open) and
+  // redraw #statusFilterRow/#phoneStatusDropdown so they show/hide
+  // themselves correctly and reflect THIS newly-active tab's own
+  // remembered status filter, not whichever tab was active a moment
+  // ago - see the big comment above typeStatusFilters for why every
+  // type tab keeps its own separate filter instead of sharing one.
+  closeStatusDropdown();
+  closePhoneStatusDropdown();
+  updateStatusFilterRowUI();
+
+  // Keep the phone Type pill's own label in sync too.
+  updateTypeFilterDropdownUI();
+
+  // Redraw the shelf using the new filter
+  renderList();
+}
 
 // Wire up each filter tab. forEach loops over the NodeList of
 // buttons and gives each one its own click listener.
@@ -3332,48 +9460,54 @@ filterTabs.forEach(function (tab) {
   tab.addEventListener('click', function () {
     // The button's data-filter attribute (e.g. data-filter="Videos")
     // tells us which type to filter by. tab.dataset.filter reads it.
-    currentFilter = tab.dataset.filter;
-
-    // Move the "active" highlight: strip it from every tab, then add
-    // it back only to the one that was just clicked.
-    filterTabs.forEach(function (t) {
-      t.classList.remove('active');
-    });
-    tab.classList.add('active');
-
-    // "characters-tab-active" on <body> is what style.css's
-    // "body.characters-tab-active .zoom-controls, .search-bar" rule
-    // keys off of, to hide the Card Size slider AND the search bar
-    // whenever this tab is the one selected (neither one applies to a
-    // combined list of characters) - same idea as "private-mode"
-    // further down this file hiding the zoom slider for Private mode.
-    document.body.classList.toggle('characters-tab-active', currentFilter === 'Characters');
-
-    // Close the status dropdown (if it happened to be open) and redraw
-    // #statusFilterRow so it shows/hides itself correctly and reflects
-    // THIS newly-active tab's own remembered status filter, not
-    // whichever tab was active a moment ago - see the big comment
-    // above typeStatusFilters for why every type tab keeps its own
-    // separate filter instead of sharing one.
-    closeStatusDropdown();
-    updateStatusFilterRowUI();
-
-    // Redraw the shelf using the new filter
-    renderList();
+    selectTypeFilter(tab.dataset.filter);
   });
 });
+
+// Updates the phone Type pill's label to match currentFilter. Only
+// updates it for the four real TYPE_FILTER_OPTIONS values though -
+// while "Characters" is active (reached via the star button, not this
+// pill - see buildTypeFilterDropdownMenu() below), the pill just keeps
+// showing whichever real type was last selected, the same way the
+// phone status pill keeps remembering its last status while "All" is
+// active (see typeStatusFilters above for that same idea).
+function updateTypeFilterDropdownUI() {
+  if (TYPE_FILTER_OPTIONS.includes(currentFilter)) {
+    typeFilterDropdownLabel.textContent = currentFilter;
+  }
+}
+
+// Closes the phone Type pill's own menu (if it's open). Same idea as
+// closeStatusDropdown()/closePhoneStatusDropdown() above.
+function closeTypeFilterDropdown() {
+  typeFilterDropdownMenu.style.display = 'none';
+  typeFilterDropdownButton.setAttribute('aria-expanded', 'false');
+}
+
+// Builds the list of choices inside the phone Type pill's menu, one
+// button per entry in TYPE_FILTER_OPTIONS (All/Manhwa/Other Comics/
+// Videos/Notes) - the same choices the real tabs offer, plus the
+// phone-only "Notes" option tacked onto the end. Picking one just
+// calls selectTypeFilter(), exactly like clicking the real tab would.
+function buildTypeFilterDropdownMenu() {
+  TYPE_FILTER_OPTIONS.forEach(function (type) {
+    const optionButton = document.createElement('button');
+    optionButton.type = 'button';
+    optionButton.className = 'status-dropdown-option';
+    optionButton.textContent = type;
+    optionButton.addEventListener('click', function () {
+      selectTypeFilter(type);
+      closeTypeFilterDropdown();
+    });
+    typeFilterDropdownMenu.appendChild(optionButton);
+  });
+}
 
 // Clicking "All" switches the active type tab's own filter state to
 // 'All' (see typeStatusFilters above) - it only ever touches
 // typeStatusFilters[currentFilter], so it can never affect any other
 // type tab's own filter.
-statusAllButton.addEventListener('click', function () {
-  const filterState = typeStatusFilters[currentFilter];
-  filterState.mode = 'All';
-
-  updateStatusFilterRowUI();
-  renderList();
-});
+statusAllButton.addEventListener('click', selectStatusAll);
 
 // Clicking the dropdown button just toggles the menu open/closed - it
 // doesn't change the filter itself. Picking one of the options inside
@@ -3390,18 +9524,51 @@ statusDropdownButton.addEventListener('click', function () {
   }
 });
 
-// Clicking anywhere outside the dropdown (its button or its menu)
-// closes the menu if it's open - the standard "click elsewhere to
-// dismiss" behavior expected of any dropdown. statusDropdown.contains()
+// The phone status pill and phone Type pill work exactly the same way
+// as statusDropdownButton just above - toggle their own menu open/
+// closed, without changing any filter themselves.
+phoneStatusDropdownButton.addEventListener('click', function () {
+  const isCurrentlyOpen = phoneStatusDropdownMenu.style.display !== 'none';
+
+  if (isCurrentlyOpen) {
+    closePhoneStatusDropdown();
+  } else {
+    phoneStatusDropdownMenu.style.display = 'flex';
+    phoneStatusDropdownButton.setAttribute('aria-expanded', 'true');
+  }
+});
+
+typeFilterDropdownButton.addEventListener('click', function () {
+  const isCurrentlyOpen = typeFilterDropdownMenu.style.display !== 'none';
+
+  if (isCurrentlyOpen) {
+    closeTypeFilterDropdown();
+  } else {
+    typeFilterDropdownMenu.style.display = 'flex';
+    typeFilterDropdownButton.setAttribute('aria-expanded', 'true');
+  }
+});
+
+// Clicking anywhere outside a dropdown (its button or its menu) closes
+// that menu if it's open - the standard "click elsewhere to dismiss"
+// behavior expected of any dropdown. Each *Dropdown.contains() check
 // covers clicks on EITHER the button or the menu inside it, since both
 // live inside that one wrapping div (see index.html).
 document.addEventListener('click', function (event) {
   if (!statusDropdown.contains(event.target)) {
     closeStatusDropdown();
   }
+  if (!phoneStatusDropdown.contains(event.target)) {
+    closePhoneStatusDropdown();
+  }
+  if (!typeFilterDropdown.contains(event.target)) {
+    closeTypeFilterDropdown();
+  }
 });
 
 buildStatusDropdownMenu();
+buildPhoneStatusDropdownMenu();
+buildTypeFilterDropdownMenu();
 
 // --- Search bar ---
 // One text input filters the shelf live, combined with whichever
@@ -3455,6 +9622,9 @@ privacyToggleInput.addEventListener('change', function () {
   displayMode = privacyToggleInput.checked ? 'private' : 'cover';
   document.body.classList.toggle('private-mode', displayMode === 'private');
   renderList();
+  if (detailView.style.display === 'block' && currentDetailEntry) {
+    applyDetailThumbnail(currentDetailEntry);
+  }
 });
 
 // --- Zoom controls ---
@@ -3469,12 +9639,21 @@ privacyToggleInput.addEventListener('change', function () {
 // swapped for a simpler version at small sizes - it's the exact same
 // card, just drawn smaller (or bigger).
 
+// Starting Card Size when this device has no saved choice yet. Phone
+// = the same "(max-width: 600px)" breakpoint used below and in
+// style.css. A saved value (localStorage, per device) always wins.
+const CARD_SIZE_DEFAULT_DESKTOP = 1;
+const CARD_SIZE_DEFAULT_PHONE = 0.6;
+const CARD_SIZE_STORAGE_KEY = 'cardSizePercent';
+
 // How far the slider (and the +/- buttons) are allowed to go, and how
 // much one +/- click changes the zoom by. These match the min/max/step
-// already set on the <input type="range"> in index.html.
-const ZOOM_MIN = 0.6;
-const ZOOM_MAX = 1.8;
-const ZOOM_STEP = 0.1;
+// already set on the <input type="range"> in index.html. They're "let"
+// instead of "const" because the phone-width block further down
+// overrides them with a narrower range.
+let ZOOM_MIN = 0.6;
+let ZOOM_MAX = 1.8;
+let ZOOM_STEP = 0.1;
 
 // Applies a new zoom level: clamps it to the allowed range, writes it
 // onto the --card-scale CSS variable (which is what actually resizes
@@ -3486,25 +9665,126 @@ function setCardScale(scale) {
   manhwaList.style.setProperty('--card-scale', clampedScale);
   zoomSlider.value = clampedScale;
   zoomValueLabel.textContent = Math.round(clampedScale * 100) + '%';
+  return clampedScale;
+}
+
+// Saves the user's choice as a whole percent (e.g. "60") so float
+// noise from repeated +/- steps never ends up in storage. Only called
+// from user actions, never from the startup default, so an untouched
+// device keeps following the default.
+function saveCardScale(scale) {
+  try {
+    localStorage.setItem(CARD_SIZE_STORAGE_KEY, String(Math.round(scale * 100)));
+  } catch (error) {
+    // Storage unavailable (private browsing, etc.): the setting still
+    // works for this visit, it just won't be remembered.
+  }
+}
+
+// Returns the saved scale clamped to the current slider range, or the
+// default for this screen size if nothing valid is saved.
+function loadSavedCardScale(defaultScale) {
+  try {
+    const saved = localStorage.getItem(CARD_SIZE_STORAGE_KEY);
+    const percent = saved === null || saved.trim() === '' ? NaN : Number(saved);
+    if (!Number.isFinite(percent)) return defaultScale;
+    return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, percent / 100));
+  } catch (error) {
+    return defaultScale;
+  }
 }
 
 // Dragging the slider fires "input" continuously as it moves (not just
 // once when released), which is what makes the cards resize live.
 zoomSlider.addEventListener('input', function () {
-  setCardScale(parseFloat(zoomSlider.value));
+  saveCardScale(setCardScale(parseFloat(zoomSlider.value)));
 });
 
 zoomInButton.addEventListener('click', function () {
-  setCardScale(parseFloat(zoomSlider.value) + ZOOM_STEP);
+  saveCardScale(setCardScale(parseFloat(zoomSlider.value) + ZOOM_STEP));
 });
 
 zoomOutButton.addEventListener('click', function () {
-  setCardScale(parseFloat(zoomSlider.value) - ZOOM_STEP);
+  saveCardScale(setCardScale(parseFloat(zoomSlider.value) - ZOOM_STEP));
 });
 
-// Set the starting zoom to 100%, matching the slider's default value
-// in the HTML.
-setCardScale(1);
+// Starting zoom: the saved value if this device has one, otherwise
+// CARD_SIZE_DEFAULT_DESKTOP (100%) or, on phone widths,
+// CARD_SIZE_DEFAULT_PHONE (60%). This runs before the first
+// renderList(), so cards never flash at one size and then jump.
+// "(max-width: 600px)" is the same phone-width breakpoint used by the
+// @media rule in style.css, so this switches at the same screen size
+// as the rest of the phone layout.
+const isPhoneWidth = window.matchMedia('(max-width: 600px)').matches;
+
+// On phone widths, the slider gets its own, narrower range: 60%-100%
+// in 5% steps (instead of the desktop range of 60%-180% in 10% steps).
+// Cards can't usefully get bigger than 100% on a narrow phone screen,
+// and smaller steps make fine-tuning easier on a small slider. This
+// updates both the JS constants (used by the +/- buttons and the
+// clamp in setCardScale) and the <input> attributes (used by the
+// browser when you drag the slider itself), so they stay in sync.
+if (isPhoneWidth) {
+  ZOOM_MIN = 0.6;
+  ZOOM_MAX = 1;
+  ZOOM_STEP = 0.05;
+  zoomSlider.min = ZOOM_MIN;
+  zoomSlider.max = ZOOM_MAX;
+  zoomSlider.step = ZOOM_STEP;
+}
+
+// Runs after the phone-range override above so a saved value is
+// clamped to the range this screen actually uses.
+setCardScale(loadSavedCardScale(isPhoneWidth ? CARD_SIZE_DEFAULT_PHONE : CARD_SIZE_DEFAULT_DESKTOP));
+
+// --- Cover dimming ---
+// Lowers the brightness and saturation of cover pictures (shelf and
+// open-list card covers, their video thumbnails, and Lists collage
+// covers - never the detail page). It only sets two CSS variables plus
+// a "cover-dimming" class on <html>; style.css applies the filter to
+// the picture layers only. 0% removes the class, so no filter at all.
+// Saved per device in localStorage. This runs before the first
+// renderList() below, so covers never appear at full brightness first.
+const COVER_DIMMING_STORAGE_KEY = 'coverDimming';
+const COVER_DIMMING_DEFAULT = 25;
+const COVER_DIMMING_MAX = 60;
+const coverDimmingSlider = document.getElementById('coverDimmingSlider');
+const coverDimmingValueLabel = document.getElementById('coverDimmingValueLabel');
+
+// percent: 0-60. brightness = 1 - value, saturation = 1 - value * 0.5.
+function setCoverDimming(percent) {
+  const clamped = Math.min(COVER_DIMMING_MAX, Math.max(0, Math.round(percent)));
+  const value = clamped / 100;
+  const root = document.documentElement;
+  root.style.setProperty('--cover-brightness', String(1 - value));
+  root.style.setProperty('--cover-saturation', String(1 - value * 0.5));
+  root.classList.toggle('cover-dimming', clamped > 0);
+  coverDimmingSlider.value = clamped;
+  coverDimmingValueLabel.textContent = clamped + '%';
+  return clamped;
+}
+
+function loadSavedCoverDimming() {
+  try {
+    const saved = localStorage.getItem(COVER_DIMMING_STORAGE_KEY);
+    const parsed = saved === null ? NaN : Number(saved);
+    return Number.isFinite(parsed) ? parsed : COVER_DIMMING_DEFAULT;
+  } catch (error) {
+    return COVER_DIMMING_DEFAULT;
+  }
+}
+
+coverDimmingSlider.addEventListener('input', function () {
+  const applied = setCoverDimming(parseFloat(coverDimmingSlider.value));
+  try {
+    localStorage.setItem(COVER_DIMMING_STORAGE_KEY, String(applied));
+  } catch (error) {
+    // Storage unavailable (private browsing, etc.): the setting still
+    // works for this visit, it just won't be remembered.
+  }
+});
+
+setCoverDimming(loadSavedCoverDimming());
 
 // --- Link popup ---
 // Every link in the app (the compact card view, the Private list view,
@@ -3604,8 +9884,9 @@ function wireLinkPopup(linkElement) {
 // rel="noopener noreferrer" attribute: it stops that new tab from
 // getting a JavaScript handle back to this page.
 linkPopupOpenButton.addEventListener('click', function () {
-  if (linkPopupUrl) {
-    window.open(linkPopupUrl, '_blank', 'noopener,noreferrer');
+  const urlToOpen = safeUrl(linkPopupUrl);
+  if (urlToOpen) {
+    window.open(urlToOpen, '_blank', 'noopener,noreferrer');
   }
   closeLinkPopup();
 });
@@ -3674,3 +9955,1958 @@ wireLinkPopup(detailLink);
 loadFromStorage();
 updateStatusFilterRowUI();
 renderList();
+
+// --- Auth ---
+const authScreen = document.getElementById('authScreen');
+const appScreen = document.getElementById('appScreen');
+const authEmail = document.getElementById('authEmail');
+const authPassword = document.getElementById('authPassword');
+const signUpBtn = document.getElementById('signUpBtn');
+const signInBtn = document.getElementById('signInBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const authError = document.getElementById('authError');
+
+async function signUp() {
+  authError.textContent = '';
+  const { error } = await supabaseClient.auth.signUp({
+    email: authEmail.value,
+    password: authPassword.value,
+    options: {
+      emailRedirectTo: window.location.origin + window.location.pathname
+    }
+  });
+  if (error) {
+    authError.textContent = error.message;
+    return;
+  }
+  console.log('Signed up successfully');
+}
+
+async function signIn() {
+  authError.textContent = '';
+  const { error } = await supabaseClient.auth.signInWithPassword({
+    email: authEmail.value,
+    password: authPassword.value
+  });
+  if (error) {
+    authError.textContent = error.message;
+    return;
+  }
+  console.log('Signed in successfully');
+}
+
+async function signOut() {
+  // Save unsaved notes while still signed in as their owner.
+  saveDetailNotes(false);
+  await supabaseClient.auth.signOut();
+}
+
+async function checkSession() {
+  const { data } = await supabaseClient.auth.getSession();
+  showAuthOrApp(data.session);
+}
+
+async function showAuthOrApp(session) {
+  if (session) {
+    // Already loaded (or loading) the app for this user: checkSession()
+    // and the INITIAL_SESSION event both land here at startup, and only
+    // the first one may load. Set before any await so the second sees it.
+    if (session.user.id === appSessionUserId) {
+      return;
+    }
+    appSessionUserId = session.user.id;
+    // A different account than the one these lists belong to - drop
+    // them right away instead of showing them until the reload below.
+    if (userListsOwnerId !== null && userListsOwnerId !== session.user.id) {
+      clearUserLists();
+    }
+    // A different user (or first login) resets the cover-download
+    // failure memory and discards downloads started for anyone else.
+    setCoverSyncUser(session.user.id);
+    authScreen.style.display = 'none';
+    appScreen.style.display = '';
+    // Show the queued-changes count right away; retryPendingWrites()
+    // below refreshes it again once it finishes.
+    updatePendingIndicator();
+    // Push any edits queued while offline BEFORE loading, so the shelf
+    // loads the synced versions instead of the older ones still in
+    // Supabase. If we're still offline this fails quickly and the
+    // records stay queued.
+    await retryPendingWrites();
+    // Image tasks need this user's library loaded (reconcile re-reads
+    // live entries), so this call returns at once here...
+    retryPendingImageTasks();
+    await loadFromSupabase();
+    // Entries were reset for a different user: don't leave the old
+    // user's detail page open.
+    if (detailView.style.display === 'block' &&
+        (!currentDetailEntry || manhwaEntries.indexOf(currentDetailEntry) === -1)) {
+      // The notes box belongs to the previous account's entry: never
+      // save it into this account's data.
+      detailNotesEntryId = null;
+      showLibraryView();
+    }
+    // Fetch covers chosen on other devices in the background - not
+    // awaited, so the library shows immediately.
+    if (libraryLoadState === 'loaded') {
+      // ...and runs for real here, once the library is loaded.
+      retryPendingImageTasks();
+      syncCoversFromCloud();
+      syncCharacterImagesFromCloud();
+      // Automatic video thumbnails for existing entries (once per session).
+      backfillVideoThumbnails();
+    }
+    await loadListsFromSupabase();
+    // Lists arrive after the first render; redraw if they're on screen.
+    if (currentFilter === 'Lists') {
+      renderList();
+    }
+  } else {
+    appSessionUserId = null;
+    clearUserLists();
+    setCoverSyncUser(null);
+    libraryLoadState = 'idle';
+    authScreen.style.display = '';
+    appScreen.style.display = 'none';
+  }
+}
+
+// One-time migration: copies any comics that were saved to
+// localStorage (back before Supabase existed) into this user's
+// "Entries" table. No longer called automatically - the original
+// migration is done, and running it on every login copied this
+// browser's leftover localStorage data into brand-new accounts. Kept
+// so it can be triggered manually (e.g. from the console) if needed.
+// It checks Supabase first and bails out if this user already has rows.
+async function migrateLocalDataToSupabase() {
+  if (accountDeletionInProgress) {
+    return;
+  }
+  const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+  if (userError || !user) {
+    console.error('Could not get current user for migration:', userError && userError.message);
+    return;
+  }
+
+  const { data: existingRows, error: fetchError } = await supabaseClient
+    .from('Entries')
+    .select('id')
+    .eq('user_id', user.id);
+
+  if (fetchError) {
+    console.error('Could not check existing Supabase entries:', fetchError.message);
+    return;
+  }
+
+  if (existingRows.length > 0) {
+    return;
+  }
+
+  // manhwaEntries was already filled in from localStorage by
+  // loadFromStorage() at page load (see near the bottom of the
+  // "Page load" section above) - no need to load it again here.
+  if (manhwaEntries.length === 0) {
+    console.log('No local data to migrate');
+    return;
+  }
+
+  const rowsToInsert = manhwaEntries.map(function (entry) {
+    return {
+      user_id: user.id,
+      updated_at: new Date(entry.updatedAt || Date.now()).toISOString(),
+      data: entry
+    };
+  });
+
+  const { error: insertError } = await supabaseClient
+    .from('Entries')
+    .insert(rowsToInsert);
+
+  if (insertError) {
+    console.error('Migration to Supabase failed:', insertError.message);
+    return;
+  }
+
+  console.log(`Migrated ${rowsToInsert.length} entries to Supabase`);
+}
+
+// Only events that change WHO is signed in do a full load. Supabase
+// also fires TOKEN_REFRESHED, USER_UPDATED, and repeat SIGNED_IN /
+// INITIAL_SESSION events for the same user (e.g. on tab focus); those
+// leave the loaded library alone - reloading there is what used to
+// swap entry objects out from under the detail page.
+supabaseClient.auth.onAuthStateChange((event, session) => {
+  // TEMP: auth event debugging.
+  console.debug('[auth] onAuthStateChange:', event);
+
+  if (event === 'SIGNED_OUT') {
+    showAuthOrApp(null);
+    return;
+  }
+  if (event === 'SIGNED_IN') {
+    if (session && session.user.id !== appSessionUserId) {
+      showAuthOrApp(session);
+    }
+    return;
+  }
+  if (event === 'INITIAL_SESSION') {
+    // checkSession() may already have started the startup load; if so,
+    // showAuthOrApp() returns right away for the same user.
+    if (appSessionUserId === null) {
+      showAuthOrApp(session);
+    }
+    return;
+  }
+  // TOKEN_REFRESHED, USER_UPDATED, PASSWORD_RECOVERY, ...: nothing to load.
+});
+
+signUpBtn.addEventListener('click', signUp);
+signInBtn.addEventListener('click', signIn);
+logoutBtn.addEventListener('click', signOut);
+
+// --- Privacy & Contact ---
+// Opened from the footer link, which shows on both the login screen and
+// the app. Purely informational: it reads and writes no data. Closes the
+// same three ways as the other popups - Close/X, tapping the dimmed
+// backdrop, or Escape.
+const privacyLinkButton = document.getElementById('privacyLinkButton');
+const privacyModalOverlay = document.getElementById('privacyModalOverlay');
+const privacyModalCloseButton = document.getElementById('privacyModalCloseButton');
+const privacyModalCloseX = document.getElementById('privacyModalCloseX');
+const privacyContactEmailLink = document.getElementById('privacyContactEmailLink');
+
+privacyContactEmailLink.href = 'mailto:' + CONTACT_EMAIL;
+privacyContactEmailLink.textContent = CONTACT_EMAIL;
+
+function openPrivacyModal() {
+  privacyModalOverlay.style.display = 'flex';
+  privacyModalCloseButton.focus();
+}
+
+function closePrivacyModal() {
+  if (privacyModalOverlay.style.display === 'none') {
+    return;
+  }
+  privacyModalOverlay.style.display = 'none';
+  privacyLinkButton.focus();
+}
+
+privacyLinkButton.addEventListener('click', openPrivacyModal);
+privacyModalCloseButton.addEventListener('click', closePrivacyModal);
+privacyModalCloseX.addEventListener('click', closePrivacyModal);
+
+privacyModalOverlay.addEventListener('click', function (event) {
+  if (event.target === privacyModalOverlay) {
+    closePrivacyModal();
+  }
+});
+
+document.addEventListener('keydown', function (event) {
+  if (event.key === 'Escape' && privacyModalOverlay.style.display !== 'none') {
+    closePrivacyModal();
+  }
+});
+
+// --- Foreground refresh ---
+// Reloads entries and lists when the app comes back to the foreground
+// (or reconnects), so changes made on another device show up without a
+// restart. It never replaces local work:
+//   - queued writes are retried first. While any are still queued for
+//     this user, that kind of data (entries or lists) isn't reloaded.
+//   - nothing reloads while a form, picker, modal or typed-in text
+//     field is open. It tries again the next time the page is shown.
+//   - if anything changes locally while the fetch is in flight, the
+//     fetched rows are thrown away (see canApply below).
+// It's silent: no loading state, no empty-library card, no error
+// banner. On failure the current data is left as it is. It doesn't
+// touch the sync/queue/upload code, it only calls into it.
+
+const FOREGROUND_REFRESH_MIN_INTERVAL_MS = 60 * 1000;
+let foregroundRefreshRunning = false;
+// true when a refresh was wanted but couldn't run (a form was open, or
+// we came back online while hidden). The next visible event then runs
+// it even if a minute hasn't passed yet.
+let foregroundRefreshOwed = false;
+
+// Same "updatedAt + coverVersion + thumbnailUrl" comparison for every
+// entry. thumbnailUrl is included because thumbnail lookups don't
+// change updatedAt (so the shelf order stays put).
+function getEntryRefreshKey(entry) {
+  return (entry.updatedAt || 0) + '|' + (entry.coverVersion || 0) + '|' +
+    (entry.thumbnailUrl || '');
+}
+
+// One string describing every entry or list as it is right now. If it
+// changes during a fetch, the user (or this device) changed something.
+function getEntriesSignature() {
+  return manhwaEntries.map(function (entry) {
+    return entry.id + ':' + getEntryRefreshKey(entry);
+  }).join(',');
+}
+function getListsSignature() {
+  return userLists.map(function (list) {
+    return list.listId + ':' + (list.updatedAt || 0);
+  }).join(',');
+}
+
+function isElementShown(element) {
+  return !!element && element.getClientRects().length > 0;
+}
+
+// true if anything is open whose contents a re-render could wipe out or
+// whose entry object a reload would swap out from under it.
+function isForegroundRefreshBlocked() {
+  if (entryBeingEdited !== null || listBeingRenamedId !== null) {
+    return true;
+  }
+  if (detailEditForm.style.display !== 'none' ||
+      addSceneForm.style.display !== 'none' ||
+      addCharacterForm.style.display !== 'none') {
+    return true;
+  }
+  if (listPickerOverlay.style.display !== 'none' ||
+      quickNoteModalOverlay.style.display !== 'none' ||
+      privacyModalOverlay.style.display !== 'none' ||
+      addEntrySheetOverlay.classList.contains('sheet-open')) {
+    return true;
+  }
+  // Notes typed on the detail page but not saved with "Save Notes" yet.
+  if (detailView.style.display === 'block' && currentDetailEntry &&
+      detailNotesTextarea.value !== (currentDetailEntry.notes || '')) {
+    return true;
+  }
+  // Any other visible text field with something typed in it (the Add
+  // Entry form, "New list name", etc). The search box is excluded: it's
+  // kept across a refresh on purpose.
+  const fields = document.querySelectorAll(
+    'textarea, input:not([type]), input[type="text"], input[type="url"], ' +
+    'input[type="number"], input[type="search"], input[type="email"]'
+  );
+  return Array.prototype.some.call(fields, function (field) {
+    if (field === searchInput || field === detailNotesTextarea) {
+      return false;
+    }
+    return isElementShown(field) &&
+      field.value.trim() !== '' &&
+      field.value !== field.defaultValue;
+  });
+}
+
+// Which kinds of queued writes this user still has ('entry' / 'list').
+async function getPendingWriteKinds(userId) {
+  const records = await getPendingWrites();
+  const kinds = { entry: false, list: false };
+  records.forEach(function (record) {
+    if (record.user_id === userId) {
+      kinds[record.kind === 'list' ? 'list' : 'entry'] = true;
+    }
+  });
+  return kinds;
+}
+
+async function runForegroundRefresh() {
+  if (foregroundRefreshRunning || accountDeletionInProgress) {
+    return;
+  }
+  foregroundRefreshRunning = true;
+  try {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    // Not logged in, or the login screen's own load is still running.
+    if (!session || appScreen.style.display === 'none' || libraryLoadState === 'loading') {
+      return;
+    }
+    const userId = session.user.id;
+
+    if (isForegroundRefreshBlocked()) {
+      foregroundRefreshOwed = true;
+      return;
+    }
+
+    await retryPendingWrites();
+    // Background; never holds up the refresh.
+    retryPendingImageTasks();
+    const pending = await getPendingWriteKinds(userId);
+    if (pending.entry && pending.list) {
+      foregroundRefreshOwed = true;
+      return;
+    }
+
+    // Snapshot what's on screen now, so we can tell what changed and
+    // keep the existing objects for anything that didn't. (Entries need
+    // no snapshot: loadFromSupabase() merges into the same objects and
+    // reports which ids changed.)
+    const listsBefore = new Map();
+    userLists.forEach(function (list) {
+      listsBefore.set(list.listId, list);
+    });
+    const entriesSignatureAtStart = getEntriesSignature();
+    const listsSignatureAtStart = getListsSignature();
+    const loadStateBefore = libraryLoadState;
+    const scrollYBefore = window.scrollY;
+
+    // Re-checked right before each reload replaces local data, since
+    // the user may have started editing while it was fetching.
+    async function stillSafe(kind, signatureAtStart, loaderUserId) {
+      const { data: { session: nowSession } } = await supabaseClient.auth.getSession();
+      if (!nowSession || nowSession.user.id !== userId || loaderUserId !== userId) {
+        return false;
+      }
+      if (libraryLoadState === 'loading' || isForegroundRefreshBlocked()) {
+        return false;
+      }
+      const signatureNow = kind === 'list' ? getListsSignature() : getEntriesSignature();
+      if (signatureNow !== signatureAtStart) {
+        return false;
+      }
+      const pendingNow = await getPendingWriteKinds(userId);
+      return !pendingNow[kind];
+    }
+
+    let entriesLoaded = false;
+    if (!pending.entry) {
+      entriesLoaded = await loadFromSupabase({
+        background: true,
+        canApply: function (loaderUserId) {
+          return stillSafe('entry', entriesSignatureAtStart, loaderUserId);
+        }
+      });
+    }
+
+    let listsLoaded = false;
+    if (!pending.list) {
+      listsLoaded = await loadListsFromSupabase({
+        canApply: function (loaderUserId) {
+          return stillSafe('list', listsSignatureAtStart, loaderUserId);
+        }
+      });
+    }
+
+    // Entries were merged in place by id (see applyLoadedRowsToEntries()),
+    // so cards, the detail page and anything else holding them stay valid.
+    const entriesChanged = !!entriesLoaded &&
+      (entriesLoaded.changedIds.size > 0 || entriesLoaded.removedIds.size > 0);
+
+    // Lists: same idea, compared by updatedAt.
+    let listsChanged = false;
+    if (listsLoaded) {
+      const idsNow = new Set();
+      for (let i = 0; i < userLists.length; i++) {
+        const fresh = userLists[i];
+        idsNow.add(fresh.listId);
+        const old = listsBefore.get(fresh.listId);
+        if (old && (old.updatedAt || 0) === (fresh.updatedAt || 0)) {
+          userLists[i] = old;
+        } else {
+          listsChanged = true;
+        }
+      }
+      listsBefore.forEach(function (_list, id) {
+        if (!idsNow.has(id)) {
+          listsChanged = true;
+        }
+      });
+    }
+
+    // Detail page: redraw it only if its entry changed, and go back to
+    // the shelf if it was deleted on another device. Never redrawn while
+    // the notes box has unsaved text (the refresh is blocked then, and
+    // the merge skips that entry anyway), so the box is never replaced.
+    let leftDetailView = false;
+    if (entriesChanged && detailView.style.display === 'block' && currentDetailEntry) {
+      const freshDetailEntry = findEntryById(currentDetailEntry.id);
+      if (!freshDetailEntry) {
+        showLibraryView();
+        leftDetailView = true;
+      } else if (entriesLoaded.changedIds.has(freshDetailEntry.id) &&
+                 !detailNotesHaveUnsavedChanges()) {
+        showDetailView(freshDetailEntry);
+      }
+    }
+
+    // Shelf / Characters / Lists tab: renderList() keeps the current tab
+    // and search (they live in currentFilter / currentSearchTerm). Only
+    // redrawn when something it shows actually changed.
+    const shelfNeedsRedraw = entriesChanged ||
+      (listsChanged && currentFilter === 'Lists') ||
+      libraryLoadState !== loadStateBefore;
+    if (shelfNeedsRedraw && !leftDetailView) {
+      renderList();
+    }
+    if (!leftDetailView) {
+      window.scrollTo(0, scrollYBefore);
+    }
+
+    if (entriesLoaded) {
+      syncCoversFromCloud();
+      syncCharacterImagesFromCloud();
+      // Only does anything if the first attempt was skipped (offline,
+      // queued writes); it never runs twice in one session.
+      backfillVideoThumbnails();
+    }
+    // Something was skipped (writes still queued, the user started
+    // editing mid-fetch, or a load failed): try again next time the
+    // page is shown instead of waiting a minute.
+    foregroundRefreshOwed = pending.entry || pending.list ||
+      (!pending.entry && !entriesLoaded) || (!pending.list && !listsLoaded);
+  } catch (err) {
+    // Offline or any other failure: leave everything as it is.
+    console.error('Foreground refresh failed:', err);
+  } finally {
+    foregroundRefreshRunning = false;
+  }
+}
+
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState !== 'visible') {
+    return;
+  }
+  const minuteHasPassed = Date.now() - lastDataRefreshAt >= FOREGROUND_REFRESH_MIN_INTERVAL_MS;
+  if (minuteHasPassed || foregroundRefreshOwed) {
+    runForegroundRefresh();
+  }
+});
+
+// Back online after being offline. This runs alongside the existing
+// 'online' listeners (queue retry, cover sync). runForegroundRefresh()
+// awaits the same in-flight retryPendingWrites() run, so nothing is
+// sent twice. If the page is hidden, the refresh waits until it's shown.
+window.addEventListener('online', function () {
+  if (document.visibilityState === 'visible') {
+    runForegroundRefresh();
+  } else {
+    foregroundRefreshOwed = true;
+  }
+});
+
+checkSession();
+
+// --- Settings view ---
+// Opened from the gear button (#settingsGearLaptop next to the Add Entry
+// buttons on laptop/tablet, #settingsGearPhone at the end of the filter
+// row on phone - only one of the two is ever visible, see style.css).
+//
+// Same view swap as the detail page (see "Detail view" above): hide
+// #libraryView, show #settingsView, and swap back on the way out. The
+// library's DOM, currentFilter, currentSearchTerm and displayMode are
+// never touched, so the tab, search text and filters come back as they
+// were; the scroll position is saved on the way in and restored on the
+// way out. Nothing here loads, renders or saves entries or lists.
+//
+// Unlike the detail page, Settings also adds browser history entries,
+// so phone/browser Back returns to the library (and, on phone, from a
+// section's page to the section list first). Each open gets its own
+// openId; a history entry left over from an earlier open is never
+// treated as "still in Settings".
+//
+// SETTINGS_SECTIONS drives both the sidebar (laptop) and the section
+// list (phone). To add a section later: add { id, label, build } here
+// (build returns the page element, called once), plus optional onShow
+// (each time the page is shown) and onLeave (each time it's left).
+const settingsView = document.getElementById('settingsView');
+const settingsBackButton = document.getElementById('settingsBackButton');
+const settingsHeading = document.getElementById('settingsHeading');
+const settingsSectionList = document.getElementById('settingsSectionList');
+const settingsContent = document.getElementById('settingsContent');
+const settingsGearLaptop = document.getElementById('settingsGearLaptop');
+const settingsGearPhone = document.getElementById('settingsGearPhone');
+
+// Same phone breakpoint as style.css and the rest of this file.
+const settingsPhoneQuery = window.matchMedia('(max-width: 600px)');
+
+const SETTINGS_HISTORY_KEY = 'manhwaNotesSettings';
+
+const SETTINGS_SECTIONS = [
+  {
+    id: 'account',
+    label: 'Account',
+    build: buildAccountSettingsPage,
+    onShow: function () {
+      refreshAccountSettingsEmail();
+      deleteAccountUi.refreshZone();
+    },
+    onLeave: function () {
+      resetAccountPasswordForm();
+      deleteAccountUi.onLeave();
+    }
+  }
+];
+
+// The section shown in the laptop content pane / opened on phone.
+let settingsSelectedSectionId = SETTINGS_SECTIONS[0].id;
+// Phone only: true while a section's page is open instead of the list.
+let settingsPhonePageOpen = false;
+// The section page currently on screen (for onLeave), or null.
+let settingsShownSectionId = null;
+// Library scroll position when Settings was opened.
+let settingsLibraryScrollY = 0;
+// Identifies the current open in history.state (see the comment above).
+let settingsOpenId = 0;
+// Built once, on first use.
+const settingsSectionButtons = {};
+const settingsSectionPages = {};
+
+function isSettingsViewOpen() {
+  return settingsView.style.display === 'block';
+}
+
+function findSettingsSection(id) {
+  return SETTINGS_SECTIONS.find(function (section) {
+    return section.id === id;
+  }) || null;
+}
+
+function getSettingsHistoryState() {
+  const state = history.state;
+  return state && state[SETTINGS_HISTORY_KEY] ? state[SETTINGS_HISTORY_KEY] : null;
+}
+
+function pushSettingsHistoryState(section, depth) {
+  const state = {};
+  state[SETTINGS_HISTORY_KEY] = { openId: settingsOpenId, section: section, depth: depth };
+  history.pushState(state, '');
+}
+
+function buildSettingsSectionList() {
+  if (settingsSectionList.firstChild) {
+    return;
+  }
+  SETTINGS_SECTIONS.forEach(function (section) {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'settings-section-button';
+
+    const label = document.createElement('span');
+    label.textContent = section.label;
+    button.appendChild(label);
+
+    const chevron = document.createElement('span');
+    chevron.className = 'settings-section-chevron';
+    chevron.setAttribute('aria-hidden', 'true');
+    chevron.textContent = '›';
+    button.appendChild(chevron);
+
+    button.addEventListener('click', function () {
+      selectSettingsSection(section.id);
+    });
+
+    item.appendChild(button);
+    settingsSectionList.appendChild(item);
+    settingsSectionButtons[section.id] = button;
+  });
+}
+
+function getSettingsSectionPage(section) {
+  if (!settingsSectionPages[section.id]) {
+    const page = section.build();
+    page.hidden = true;
+    settingsContent.appendChild(page);
+    settingsSectionPages[section.id] = page;
+  }
+  return settingsSectionPages[section.id];
+}
+
+// Runs the outgoing section's onLeave (e.g. clearing password fields).
+function leaveShownSettingsSection() {
+  if (settingsShownSectionId === null) {
+    return;
+  }
+  const section = findSettingsSection(settingsShownSectionId);
+  const page = settingsSectionPages[settingsShownSectionId];
+  settingsShownSectionId = null;
+  if (page) {
+    page.hidden = true;
+  }
+  if (section && section.onLeave) {
+    section.onLeave();
+  }
+}
+
+// Draws the list/sidebar and the content pane for the current width.
+function renderSettingsView() {
+  buildSettingsSectionList();
+  const isPhone = settingsPhoneQuery.matches;
+  const showPage = !isPhone || settingsPhonePageOpen;
+  settingsView.classList.toggle('settings-phone-page-open', isPhone && settingsPhonePageOpen);
+
+  SETTINGS_SECTIONS.forEach(function (section) {
+    const button = settingsSectionButtons[section.id];
+    // Highlight = laptop sidebar only; on phone the list is just a menu.
+    if (!isPhone && section.id === settingsSelectedSectionId) {
+      button.setAttribute('aria-current', 'true');
+    } else {
+      button.removeAttribute('aria-current');
+    }
+  });
+
+  const wantedId = showPage ? settingsSelectedSectionId : null;
+  if (settingsShownSectionId !== wantedId) {
+    leaveShownSettingsSection();
+    if (wantedId !== null) {
+      const section = findSettingsSection(wantedId);
+      getSettingsSectionPage(section).hidden = false;
+      settingsShownSectionId = wantedId;
+      if (section.onShow) {
+        section.onShow();
+      }
+    }
+  }
+}
+
+function selectSettingsSection(id) {
+  if (settingsPhoneQuery.matches) {
+    // Phone: open this section's page on top of the list.
+    settingsSelectedSectionId = id;
+    settingsPhonePageOpen = true;
+    pushSettingsHistoryState(id, 2);
+    renderSettingsView();
+    window.scrollTo(0, 0);
+    const heading = settingsSectionPages[id] &&
+      settingsSectionPages[id].querySelector('.settings-page-heading');
+    if (heading) {
+      heading.focus({ preventScroll: true });
+    }
+    return;
+  }
+  // Laptop: just switch the content pane.
+  if (id !== settingsSelectedSectionId) {
+    settingsSelectedSectionId = id;
+    renderSettingsView();
+  }
+}
+
+function showSettingsView() {
+  if (isSettingsViewOpen() || detailView.style.display === 'block') {
+    return;
+  }
+  settingsLibraryScrollY = window.scrollY;
+  settingsOpenId++;
+  settingsPhonePageOpen = false;
+
+  libraryView.style.display = 'none';
+  settingsView.style.display = 'block';
+  renderSettingsView();
+  pushSettingsHistoryState(null, 1);
+
+  window.scrollTo(0, 0);
+  settingsHeading.focus({ preventScroll: true });
+}
+
+// Back to the library exactly as it was left. Does no history change
+// itself - callers that came from a Back press have already moved it.
+function closeSettingsView() {
+  if (!isSettingsViewOpen()) {
+    return;
+  }
+  leaveShownSettingsSection();
+  settingsPhonePageOpen = false;
+  settingsView.classList.remove('settings-phone-page-open');
+  settingsView.style.display = 'none';
+  libraryView.style.display = 'block';
+
+  window.scrollTo(0, settingsLibraryScrollY);
+  // Back to whichever gear is visible at this width.
+  const gear = settingsPhoneQuery.matches ? settingsGearPhone : settingsGearLaptop;
+  gear.focus({ preventScroll: true });
+}
+
+// Phone: from a section's page back to the section list.
+function closeSettingsPhonePage() {
+  settingsPhonePageOpen = false;
+  renderSettingsView();
+  window.scrollTo(0, 0);
+  const button = settingsSectionButtons[settingsSelectedSectionId];
+  if (button) {
+    button.focus({ preventScroll: true });
+  }
+}
+
+// The on-page Back button goes through history when our entries are on
+// top, so it and the browser/phone Back button always agree.
+settingsBackButton.addEventListener('click', function () {
+  const state = getSettingsHistoryState();
+  const ours = state && state.openId === settingsOpenId;
+  if (settingsPhoneQuery.matches && settingsPhonePageOpen) {
+    if (ours && state.depth === 2) {
+      history.back();
+    } else {
+      closeSettingsPhonePage();
+    }
+    return;
+  }
+  if (ours) {
+    history.go(-state.depth);
+  } else {
+    closeSettingsView();
+  }
+});
+
+window.addEventListener('popstate', function () {
+  if (!isSettingsViewOpen()) {
+    // Forward into an old Settings entry: ignored, the library stays.
+    return;
+  }
+  const state = getSettingsHistoryState();
+  if (!state || state.openId !== settingsOpenId) {
+    closeSettingsView();
+    return;
+  }
+  if (state.section === null && settingsPhonePageOpen) {
+    closeSettingsPhonePage();
+  } else if (state.section !== null && !settingsPhonePageOpen) {
+    settingsSelectedSectionId = state.section;
+    settingsPhonePageOpen = true;
+    renderSettingsView();
+  }
+});
+
+// Crossing the phone breakpoint while open: redraw for the new layout.
+settingsPhoneQuery.addEventListener('change', function () {
+  if (isSettingsViewOpen()) {
+    renderSettingsView();
+  }
+});
+
+// A refresh while in Settings reloads onto the library; drop the
+// now-meaningless Settings marker from the current history entry.
+if (getSettingsHistoryState()) {
+  history.replaceState(null, '');
+}
+
+settingsGearLaptop.addEventListener('click', showSettingsView);
+settingsGearPhone.addEventListener('click', showSettingsView);
+
+// Logging out (here or in another tab) while Settings is open: leave it
+// so the next login starts on the library, and clear the password form.
+// Separate from the main auth listener above, which is unchanged.
+supabaseClient.auth.onAuthStateChange(function (event) {
+  if (event === 'SIGNED_OUT') {
+    closeSettingsView();
+  }
+});
+
+// --- Settings: Account page ---
+// All text is set with textContent. Passwords are only ever read out of
+// the inputs inside submitPasswordChange(), sent to Supabase, and
+// cleared from the inputs afterwards - never logged or stored.
+const PASSWORD_MIN_LENGTH = 8;
+const PASSWORD_OFFLINE_MESSAGE = 'You need to be online to change your password.';
+
+let accountEmailValue = null;
+let accountUsernameInput = null;
+let changePasswordButton = null;
+let passwordOuterMessage = null;
+let passwordForm = null;
+let passwordFormMessage = null;
+let passwordSubmitButton = null;
+let passwordCancelButton = null;
+let passwordFields = [];
+let passwordChangeBusy = false;
+// Bumped on every reset, so a request that finishes after the form was
+// closed doesn't write messages into it.
+let passwordAttemptToken = 0;
+
+function makeSettingsElement(tag, className, text) {
+  const element = document.createElement(tag);
+  if (className) {
+    element.className = className;
+  }
+  if (text !== undefined) {
+    element.textContent = text;
+  }
+  return element;
+}
+
+function setSettingsMessage(element, text, kind) {
+  element.textContent = text;
+  element.classList.toggle('settings-message-error', kind === 'error');
+  element.classList.toggle('settings-message-success', kind === 'success');
+}
+
+// One labelled password input with a Show/Hide toggle.
+function buildPasswordField(id, labelText, autocomplete) {
+  const wrapper = makeSettingsElement('div');
+  const label = makeSettingsElement('label', 'settings-input-label', labelText);
+  label.htmlFor = id;
+
+  const row = makeSettingsElement('div', 'settings-input-row');
+  const input = makeSettingsElement('input', 'settings-input');
+  input.type = 'password';
+  input.id = id;
+  input.name = id;
+  input.autocomplete = autocomplete;
+  input.setAttribute('autocapitalize', 'none');
+  input.spellcheck = false;
+
+  const reveal = makeSettingsElement('button', 'settings-reveal-button', 'Show');
+  reveal.type = 'button';
+  reveal.setAttribute('aria-pressed', 'false');
+  reveal.setAttribute('aria-controls', id);
+  reveal.setAttribute('aria-label', 'Show ' + labelText.toLowerCase());
+  reveal.addEventListener('click', function () {
+    setPasswordVisible(field, input.type === 'password');
+  });
+
+  row.appendChild(input);
+  row.appendChild(reveal);
+  wrapper.appendChild(label);
+  wrapper.appendChild(row);
+
+  const field = { wrapper: wrapper, input: input, reveal: reveal, labelText: labelText };
+  return field;
+}
+
+function setPasswordVisible(field, visible) {
+  field.input.type = visible ? 'text' : 'password';
+  field.reveal.textContent = visible ? 'Hide' : 'Show';
+  field.reveal.setAttribute('aria-pressed', visible ? 'true' : 'false');
+  field.reveal.setAttribute('aria-label', (visible ? 'Hide ' : 'Show ') + field.labelText.toLowerCase());
+}
+
+function buildAccountSettingsPage() {
+  const page = makeSettingsElement('section', 'settings-page');
+  page.setAttribute('aria-labelledby', 'settingsAccountHeading');
+
+  const heading = makeSettingsElement('h3', 'settings-page-heading', 'Account');
+  heading.id = 'settingsAccountHeading';
+  heading.tabIndex = -1;
+  page.appendChild(heading);
+
+  // Email (read only)
+  const emailField = makeSettingsElement('div', 'settings-field');
+  const emailLabel = makeSettingsElement('p', 'settings-field-label', 'Email');
+  emailLabel.id = 'settingsEmailLabel';
+  accountEmailValue = makeSettingsElement('p', 'settings-field-value', '');
+  accountEmailValue.setAttribute('aria-labelledby', 'settingsEmailLabel');
+  emailField.appendChild(emailLabel);
+  emailField.appendChild(accountEmailValue);
+  emailField.appendChild(makeSettingsElement('p', 'settings-field-note', 'To change your email, contact support.'));
+  page.appendChild(emailField);
+
+  // Password
+  const passwordField = makeSettingsElement('div', 'settings-field');
+  passwordField.appendChild(makeSettingsElement('p', 'settings-field-label', 'Password'));
+  const dots = makeSettingsElement('p', 'settings-field-value');
+  const dotsText = makeSettingsElement('span', '', '••••••••');
+  dotsText.setAttribute('aria-hidden', 'true');
+  dots.appendChild(dotsText);
+  dots.appendChild(makeSettingsElement('span', 'visually-hidden', 'Hidden'));
+  passwordField.appendChild(dots);
+
+  changePasswordButton = makeSettingsElement('button', 'settings-button', 'Change password');
+  changePasswordButton.type = 'button';
+  changePasswordButton.setAttribute('aria-expanded', 'false');
+  changePasswordButton.setAttribute('aria-controls', 'settingsPasswordForm');
+  changePasswordButton.addEventListener('click', openPasswordForm);
+  passwordField.appendChild(changePasswordButton);
+
+  passwordOuterMessage = makeSettingsElement('p', 'settings-message');
+  passwordOuterMessage.setAttribute('role', 'status');
+  passwordOuterMessage.setAttribute('aria-live', 'polite');
+  passwordField.appendChild(passwordOuterMessage);
+
+  // The inline form. A real <form> so Enter submits and password
+  // managers recognise it; novalidate because the checks below give
+  // clearer messages than the browser's.
+  passwordForm = makeSettingsElement('form', 'settings-password-form');
+  passwordForm.id = 'settingsPasswordForm';
+  passwordForm.noValidate = true;
+  passwordForm.hidden = true;
+  passwordForm.setAttribute('aria-label', 'Change password');
+
+  // Lets password managers tie the new password to this account. Its
+  // value is set through defaultValue (see refreshAccountSettingsEmail),
+  // so it never counts as "typed text" anywhere else in this file.
+  accountUsernameInput = makeSettingsElement('input', 'visually-hidden');
+  accountUsernameInput.type = 'email';
+  accountUsernameInput.name = 'username';
+  accountUsernameInput.autocomplete = 'username';
+  accountUsernameInput.readOnly = true;
+  accountUsernameInput.tabIndex = -1;
+  accountUsernameInput.setAttribute('aria-hidden', 'true');
+  passwordForm.appendChild(accountUsernameInput);
+
+  passwordFields = [
+    buildPasswordField('settingsCurrentPassword', 'Current password', 'current-password'),
+    buildPasswordField('settingsNewPassword', 'New password', 'new-password'),
+    buildPasswordField('settingsConfirmPassword', 'Confirm new password', 'new-password')
+  ];
+  passwordFields.forEach(function (field) {
+    passwordForm.appendChild(field.wrapper);
+  });
+  const hint = makeSettingsElement('p', 'settings-hint',
+    'At least ' + PASSWORD_MIN_LENGTH + ' characters, and different from your current password.');
+  hint.id = 'settingsPasswordHint';
+  passwordFields[1].input.setAttribute('aria-describedby', 'settingsPasswordHint');
+  passwordForm.appendChild(hint);
+
+  passwordFormMessage = makeSettingsElement('p', 'settings-message');
+  passwordFormMessage.setAttribute('role', 'status');
+  passwordFormMessage.setAttribute('aria-live', 'polite');
+  passwordForm.appendChild(passwordFormMessage);
+
+  const actions = makeSettingsElement('div', 'settings-form-actions');
+  passwordSubmitButton = makeSettingsElement('button', 'settings-button', 'Save new password');
+  passwordSubmitButton.type = 'submit';
+  passwordCancelButton = makeSettingsElement('button', 'settings-button', 'Cancel');
+  passwordCancelButton.type = 'button';
+  passwordCancelButton.addEventListener('click', function () {
+    resetAccountPasswordForm();
+    changePasswordButton.focus();
+  });
+  actions.appendChild(passwordSubmitButton);
+  actions.appendChild(passwordCancelButton);
+  passwordForm.appendChild(actions);
+
+  passwordForm.addEventListener('submit', function (event) {
+    event.preventDefault();
+    submitPasswordChange();
+  });
+  passwordField.appendChild(passwordForm);
+  page.appendChild(passwordField);
+
+  // "Delete my account", below a divider (see "Settings: Delete my
+  // account" at the end of this file).
+  const dangerZone = makeSettingsElement('div', 'settings-danger-zone');
+  dangerZone.id = 'settingsAccountDangerZone';
+  deleteAccountUi.buildZone(dangerZone);
+  page.appendChild(dangerZone);
+
+  return page;
+}
+
+// Reads the email from the locally stored session, so it works offline.
+async function refreshAccountSettingsEmail() {
+  let email = '';
+  try {
+    const { data } = await supabaseClient.auth.getSession();
+    email = (data && data.session && data.session.user && data.session.user.email) || '';
+  } catch (err) {
+    email = '';
+  }
+  accountEmailValue.textContent = email || 'Not available';
+  accountUsernameInput.defaultValue = email;
+}
+
+function openPasswordForm() {
+  if (passwordChangeBusy) {
+    return;
+  }
+  if (!navigator.onLine) {
+    setSettingsMessage(passwordOuterMessage, PASSWORD_OFFLINE_MESSAGE, 'error');
+    return;
+  }
+  setSettingsMessage(passwordOuterMessage, '', null);
+  passwordForm.hidden = false;
+  changePasswordButton.setAttribute('aria-expanded', 'true');
+  passwordFields[0].input.focus();
+}
+
+// Clears and hides the form. Also runs whenever the Account page is
+// left or Settings is closed (see SETTINGS_SECTIONS' onLeave).
+function resetAccountPasswordForm() {
+  if (!passwordForm) {
+    return;
+  }
+  passwordAttemptToken++;
+  passwordFields.forEach(function (field) {
+    field.input.value = '';
+    setPasswordVisible(field, false);
+  });
+  setSettingsMessage(passwordFormMessage, '', null);
+  setSettingsMessage(passwordOuterMessage, '', null);
+  passwordForm.hidden = true;
+  changePasswordButton.setAttribute('aria-expanded', 'false');
+  setPasswordFormBusy(false);
+}
+
+function setPasswordFormBusy(busy) {
+  passwordChangeBusy = busy;
+  passwordSubmitButton.disabled = busy;
+  passwordCancelButton.disabled = busy;
+  changePasswordButton.disabled = busy;
+  passwordSubmitButton.textContent = busy ? 'Saving…' : 'Save new password';
+}
+
+// Supabase reports "couldn't reach the server" as AuthRetryableFetchError
+// (status 0) rather than a normal auth error.
+function isAuthNetworkError(error) {
+  return !navigator.onLine || !!(error && (error.name === 'AuthRetryableFetchError' || error.status === 0));
+}
+
+function showPasswordFormError(text, focusField) {
+  setSettingsMessage(passwordFormMessage, text, 'error');
+  if (focusField) {
+    focusField.input.focus();
+  }
+}
+
+async function submitPasswordChange() {
+  if (passwordChangeBusy) {
+    return;
+  }
+  const currentField = passwordFields[0];
+  const newField = passwordFields[1];
+  const confirmField = passwordFields[2];
+
+  if (!navigator.onLine) {
+    showPasswordFormError(PASSWORD_OFFLINE_MESSAGE, null);
+    return;
+  }
+  if (currentField.input.value === '') {
+    showPasswordFormError('Enter your current password.', currentField);
+    return;
+  }
+  if (newField.input.value.length < PASSWORD_MIN_LENGTH) {
+    showPasswordFormError('Your new password must be at least ' + PASSWORD_MIN_LENGTH + ' characters.', newField);
+    return;
+  }
+  if (newField.input.value !== confirmField.input.value) {
+    showPasswordFormError('The new passwords don’t match.', confirmField);
+    return;
+  }
+  if (newField.input.value === currentField.input.value) {
+    showPasswordFormError('Your new password must be different from your current password.', newField);
+    return;
+  }
+
+  const token = passwordAttemptToken;
+  setPasswordFormBusy(true);
+  setSettingsMessage(passwordFormMessage, 'Changing your password…', null);
+
+  try {
+    const { data } = await supabaseClient.auth.getSession();
+    const email = data && data.session && data.session.user && data.session.user.email;
+    if (token !== passwordAttemptToken) {
+      return;
+    }
+    if (!email) {
+      showPasswordFormError('You’re not signed in. Please log in again.', null);
+      return;
+    }
+
+    // Re-authenticate first. For the same user this fires SIGNED_IN,
+    // which the main auth listener ignores (session.user.id ===
+    // appSessionUserId), so nothing reloads.
+    const { error: reauthError } = await supabaseClient.auth.signInWithPassword({
+      email: email,
+      password: currentField.input.value
+    });
+    if (token !== passwordAttemptToken) {
+      return;
+    }
+    if (reauthError) {
+      if (isAuthNetworkError(reauthError)) {
+        showPasswordFormError(PASSWORD_OFFLINE_MESSAGE, null);
+      } else if (reauthError.status === 429) {
+        showPasswordFormError('Too many attempts. Please wait a moment and try again.', null);
+      } else {
+        showPasswordFormError('Current password is incorrect.', currentField);
+      }
+      return;
+    }
+
+    const { error: updateError } = await supabaseClient.auth.updateUser({
+      password: newField.input.value
+    });
+    if (token !== passwordAttemptToken) {
+      return;
+    }
+    if (updateError) {
+      if (isAuthNetworkError(updateError)) {
+        showPasswordFormError(PASSWORD_OFFLINE_MESSAGE, null);
+      } else {
+        showPasswordFormError('Couldn’t change your password: ' + updateError.message, null);
+      }
+      return;
+    }
+
+    // Success: clear and close the form, then confirm outside it.
+    resetAccountPasswordForm();
+    setSettingsMessage(passwordOuterMessage, 'Your password has been changed.', 'success');
+    changePasswordButton.focus();
+  } catch (err) {
+    // Deliberately not logged: keep anything near the passwords out of
+    // the console.
+    if (token === passwordAttemptToken) {
+      showPasswordFormError(navigator.onLine
+        ? 'Couldn’t change your password. Please try again.'
+        : PASSWORD_OFFLINE_MESSAGE, null);
+    }
+  } finally {
+    if (token === passwordAttemptToken) {
+      setPasswordFormBusy(false);
+    }
+  }
+}
+
+// --- Settings: Delete my account ---
+// A muted "Delete my account…" control at the bottom of the Account
+// page opens a confirmation dialog. Only that dialog's confirm button
+// (password entered AND "DELETE" typed) can start a deletion; nothing
+// here runs on load, on a timer, or from the console. All text is set
+// with textContent. The password is only read out of its input inside
+// runAccountDeletion(), sent to Supabase for re-authentication, and
+// cleared afterwards - never logged, stored or shown.
+//
+// Order on confirm:
+//   a. accountDeletionInProgress = true, so every background process
+//      (sync, queue, retries, foreground refresh, backfills, uploads,
+//      downloads) stands down. Reset if anything fails.
+//   b. Re-authenticate with signInWithPassword(). For the same user the
+//      main auth listener ignores this SIGNED_IN (session.user.id ===
+//      appSessionUserId, and showAuthOrApp() checks the same thing), so
+//      nothing reloads and the UI doesn't change.
+//   c. Invoke the "delete-account" Edge Function (no body). The server
+//      deletes images, then the login, then any leftover rows.
+//   d/e. Success -> clean up this device. Failure -> message, dialog
+//      re-enabled, and NOTHING local is deleted.
+// The returned object only builds/refreshes the Account page area; it
+// doesn't expose the deletion itself.
+const deleteAccountUi = (function () {
+  const CONFIRM_WORD = 'DELETE';
+  const OFFLINE_MESSAGE = 'You need to be online to delete your account.';
+  const DELETED_NOTICE = 'Your account has been deleted.';
+  // Longest we wait for in-flight syncs to settle before cleaning up
+  // (an entry sync gives up on its own after ENTRY_SYNC_TIMEOUT_MS).
+  const DRAIN_TIMEOUT_MS = ENTRY_SYNC_TIMEOUT_MS + 2000;
+
+  let zone = null;
+  let openButton = null;
+
+  let overlay = null;
+  let dialog = null;
+  let emailText = null;
+  let usernameInput = null;
+  let passwordField = null;
+  let confirmInput = null;
+  let messageArea = null;
+  let cancelButton = null;
+  let deleteButton = null;
+  let busy = false;
+
+  function getSessionEmail() {
+    return supabaseClient.auth.getSession().then(function (result) {
+      const session = result && result.data && result.data.session;
+      return (session && session.user && session.user.email) || '';
+    }).catch(function () {
+      return '';
+    });
+  }
+
+  // --- The control on the Account page ---
+  function buildZone(container) {
+    zone = container;
+    const caption = makeSettingsElement('p', 'delete-account-caption',
+      'Permanently delete your account and all of its data.');
+    openButton = makeSettingsElement('button', 'delete-account-open-button', 'Delete my account…');
+    openButton.type = 'button';
+    openButton.setAttribute('aria-haspopup', 'dialog');
+    openButton.addEventListener('click', openDialog);
+    zone.appendChild(caption);
+    zone.appendChild(openButton);
+    zone.hidden = true; // shown by refreshZone() once a session is confirmed
+  }
+
+  // Hidden whenever nobody is signed in.
+  function refreshZone() {
+    if (!zone) {
+      return;
+    }
+    getSessionEmail().then(function (email) {
+      zone.hidden = !email;
+    });
+  }
+
+  // --- The dialog ---
+  function buildDialog() {
+    if (overlay) {
+      return;
+    }
+    overlay = makeSettingsElement('div', 'modal-overlay delete-account-overlay');
+    overlay.style.display = 'none';
+
+    dialog = makeSettingsElement('div', 'modal-box delete-account-dialog');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'true');
+    dialog.setAttribute('aria-labelledby', 'deleteAccountTitle');
+    dialog.setAttribute('aria-describedby', 'deleteAccountWho');
+
+    const title = makeSettingsElement('h3', 'delete-account-title', 'Delete your account?');
+    title.id = 'deleteAccountTitle';
+    dialog.appendChild(title);
+
+    const who = makeSettingsElement('p', 'delete-account-text');
+    who.id = 'deleteAccountWho';
+    who.appendChild(document.createTextNode('This will permanently delete the account for '));
+    emailText = makeSettingsElement('strong', 'delete-account-email', '');
+    who.appendChild(emailText);
+    who.appendChild(document.createTextNode('.'));
+    dialog.appendChild(who);
+
+    dialog.appendChild(makeSettingsElement('p', 'delete-account-text', 'This will delete:'));
+    const list = makeSettingsElement('ul', 'delete-account-list');
+    ['Your entries, notes and tags', 'Your lists', 'Your cover and character images', 'Your login']
+      .forEach(function (text) {
+        list.appendChild(makeSettingsElement('li', '', text));
+      });
+    dialog.appendChild(list);
+    dialog.appendChild(makeSettingsElement('p', 'delete-account-text delete-account-warning',
+      'This can’t be undone.'));
+
+    // A real <form> so Enter works and password managers recognise the
+    // field; novalidate, the checks below decide.
+    const form = makeSettingsElement('form', 'delete-account-form');
+    form.noValidate = true;
+    form.setAttribute('aria-label', 'Confirm account deletion');
+
+    // Same hidden username field as the change-password form, so a
+    // password manager offers the right saved password. Set through
+    // defaultValue only.
+    usernameInput = makeSettingsElement('input', 'visually-hidden');
+    usernameInput.type = 'email';
+    usernameInput.name = 'username';
+    usernameInput.autocomplete = 'username';
+    usernameInput.readOnly = true;
+    usernameInput.tabIndex = -1;
+    usernameInput.setAttribute('aria-hidden', 'true');
+    form.appendChild(usernameInput);
+
+    // Same field + Show/Hide toggle as the change-password form.
+    passwordField = buildPasswordField('deleteAccountPassword', 'Your password', 'current-password');
+    form.appendChild(passwordField.wrapper);
+
+    const confirmWrapper = makeSettingsElement('div');
+    const confirmLabel = makeSettingsElement('label', 'settings-input-label', 'Type DELETE to confirm');
+    confirmLabel.htmlFor = 'deleteAccountConfirm';
+    confirmInput = makeSettingsElement('input', 'settings-input delete-account-confirm-input');
+    confirmInput.type = 'text';
+    confirmInput.id = 'deleteAccountConfirm';
+    confirmInput.name = 'deleteAccountConfirm';
+    confirmInput.autocomplete = 'off';
+    confirmInput.setAttribute('autocapitalize', 'off');
+    confirmInput.setAttribute('autocorrect', 'off');
+    confirmInput.spellcheck = false;
+    confirmWrapper.appendChild(confirmLabel);
+    confirmWrapper.appendChild(confirmInput);
+    form.appendChild(confirmWrapper);
+
+    messageArea = makeSettingsElement('p', 'settings-message delete-account-message');
+    messageArea.setAttribute('role', 'status');
+    messageArea.setAttribute('aria-live', 'polite');
+    form.appendChild(messageArea);
+
+    const actions = makeSettingsElement('div', 'delete-account-actions');
+    cancelButton = makeSettingsElement('button', 'delete-account-cancel-button', 'Cancel');
+    cancelButton.type = 'button';
+    cancelButton.addEventListener('click', function () {
+      closeDialog();
+    });
+    deleteButton = makeSettingsElement('button', 'delete-account-confirm-button', 'Delete my account');
+    deleteButton.type = 'submit';
+    deleteButton.disabled = true;
+    actions.appendChild(deleteButton);
+    actions.appendChild(cancelButton);
+    form.appendChild(actions);
+
+    form.addEventListener('submit', function (event) {
+      event.preventDefault();
+      if (canConfirm()) {
+        runAccountDeletion();
+      }
+    });
+    passwordField.input.addEventListener('input', updateDeleteButton);
+    confirmInput.addEventListener('input', updateDeleteButton);
+
+    dialog.appendChild(form);
+    overlay.appendChild(dialog);
+
+    // Outside click closes (not while deleting).
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) {
+        closeDialog();
+      }
+    });
+    // Escape closes (not while deleting); Tab stays inside the dialog.
+    overlay.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        closeDialog();
+        return;
+      }
+      if (event.key === 'Tab') {
+        trapFocus(event);
+      }
+    });
+
+    document.body.appendChild(overlay);
+  }
+
+  function isDialogOpen() {
+    return !!overlay && overlay.style.display !== 'none';
+  }
+
+  function getFocusable() {
+    return Array.prototype.filter.call(
+      dialog.querySelectorAll('button, input, [tabindex]:not([tabindex="-1"])'),
+      function (element) {
+        return !element.disabled && element.tabIndex !== -1 && isElementShown(element);
+      }
+    );
+  }
+
+  function trapFocus(event) {
+    const focusable = getFocusable();
+    if (focusable.length === 0) {
+      // Everything is disabled while deleting: keep focus on the dialog.
+      event.preventDefault();
+      dialog.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+
+  // Focus that wanders outside (e.g. a click on the page behind on some
+  // browsers) is pulled back in.
+  document.addEventListener('focusin', function (event) {
+    if (isDialogOpen() && !dialog.contains(event.target)) {
+      const focusable = getFocusable();
+      (focusable[0] || dialog).focus();
+    }
+  });
+
+  function canConfirm() {
+    return !busy && navigator.onLine &&
+      passwordField.input.value !== '' &&
+      confirmInput.value === CONFIRM_WORD; // exact, case-sensitive
+  }
+
+  function setMessage(text, isError) {
+    setSettingsMessage(messageArea, text, isError ? 'error' : null);
+  }
+
+  // Enables Delete only when allowed; shows/clears the offline line.
+  function updateDeleteButton() {
+    if (!overlay) {
+      return;
+    }
+    if (!busy) {
+      if (!navigator.onLine) {
+        setMessage(OFFLINE_MESSAGE, true);
+      } else if (messageArea.textContent === OFFLINE_MESSAGE) {
+        setMessage('', false);
+      }
+    }
+    deleteButton.disabled = !canConfirm();
+  }
+  window.addEventListener('online', updateDeleteButton);
+  window.addEventListener('offline', updateDeleteButton);
+
+  function setBusy(isBusy) {
+    busy = isBusy;
+    passwordField.input.disabled = isBusy;
+    passwordField.reveal.disabled = isBusy;
+    confirmInput.disabled = isBusy;
+    cancelButton.disabled = isBusy;
+    deleteButton.textContent = isBusy ? 'Deleting…' : 'Delete my account';
+    dialog.setAttribute('aria-busy', isBusy ? 'true' : 'false');
+    if (isBusy) {
+      deleteButton.disabled = true;
+      // Every control is disabled now: keep focus inside the dialog.
+      dialog.focus();
+    } else {
+      updateDeleteButton();
+    }
+  }
+
+  function clearPassword() {
+    passwordField.input.value = '';
+    setPasswordVisible(passwordField, false);
+  }
+
+  function openDialog() {
+    if (busy) {
+      return;
+    }
+    buildDialog();
+    getSessionEmail().then(function (email) {
+      if (!email) {
+        refreshZone();
+        return;
+      }
+      emailText.textContent = email;
+      usernameInput.defaultValue = email;
+      clearPassword();
+      confirmInput.value = '';
+      setMessage('', false);
+      setBusy(false);
+      dialog.tabIndex = -1;
+      overlay.style.display = 'flex';
+      updateDeleteButton();
+      passwordField.input.focus();
+    });
+  }
+
+  // Closes and clears the dialog. Refused while a deletion is running,
+  // unless force is true (only used after a successful deletion).
+  function closeDialog(force) {
+    if (!overlay || (busy && !force)) {
+      return;
+    }
+    const wasOpen = isDialogOpen();
+    clearPassword();
+    confirmInput.value = '';
+    setMessage('', false);
+    overlay.style.display = 'none';
+    if (force) {
+      setBusy(false);
+    }
+    deleteButton.disabled = true;
+    if (wasOpen && !force && openButton && isElementShown(openButton)) {
+      openButton.focus();
+    }
+  }
+
+  // The Account page was left / Settings closed (e.g. phone Back).
+  function onLeave() {
+    closeDialog();
+  }
+
+  // Logged out (here or in another tab): hide the control and close the
+  // dialog, unless a deletion is running (it finishes on its own).
+  supabaseClient.auth.onAuthStateChange(function (event) {
+    if (event === 'SIGNED_OUT') {
+      if (zone) {
+        zone.hidden = true;
+      }
+      closeDialog();
+    }
+  });
+
+  // --- Error helpers ---
+  async function readFunctionErrorBody(error) {
+    const context = error && error.context;
+    if (!context || typeof context.json !== 'function') {
+      return null;
+    }
+    try {
+      const source = typeof context.clone === 'function' ? context.clone() : context;
+      const body = await source.json();
+      return body && typeof body === 'object' ? body : null;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  // After an unexpected failure: true only if the server says this
+  // account no longer exists (or its session is no longer valid there).
+  // A network error is never treated as "gone".
+  async function accountAppearsDeleted() {
+    try {
+      const { data, error } = await supabaseClient.auth.getUser();
+      if (!error) {
+        return !(data && data.user);
+      }
+      if (isAuthNetworkError(error)) {
+        return false;
+      }
+      const status = error.status;
+      const code = typeof error.code === 'string' ? error.code : '';
+      const message = typeof error.message === 'string' ? error.message.toLowerCase() : '';
+      return status === 403 || status === 404 ||
+        code === 'user_not_found' || code === 'session_not_found' ||
+        /user[^.]*(not found|does not exist|doesn't exist)/.test(message);
+    } catch (err) {
+      return false;
+    }
+  }
+
+  // --- The deletion ---
+  async function runAccountDeletion() {
+    if (busy || !canConfirm()) {
+      return;
+    }
+    // Read once; the input is cleared in finally below.
+    const password = passwordField.input.value;
+    setBusy(true);
+    setMessage('Deleting…', false);
+
+    // a. Stop every background process.
+    accountDeletionInProgress = true;
+    let succeeded = false;
+
+    try {
+      const email = await getSessionEmail();
+      if (!email) {
+        setMessage('You’re not signed in. Please log in again.', true);
+        return;
+      }
+
+      // b. Re-authenticate. Same-user SIGNED_IN: ignored by the auth
+      // listener, so no reload and no UI change.
+      let reauthError = null;
+      try {
+        const result = await supabaseClient.auth.signInWithPassword({ email: email, password: password });
+        reauthError = result.error;
+      } catch (err) {
+        reauthError = err || new Error('sign-in failed');
+      }
+      if (reauthError) {
+        if (isAuthNetworkError(reauthError)) {
+          setMessage('Couldn’t reach the server. Please check your connection and try again.', true);
+        } else if (reauthError.status === 429) {
+          setMessage('Too many attempts. Please wait a moment and try again.', true);
+        } else {
+          setMessage('Password is incorrect.', true);
+        }
+        return;
+      }
+
+      // c. The only place an account is ever deleted.
+      let outcome = 'unknown';
+      try {
+        const result = await supabaseClient.functions.invoke('delete-account');
+        if (!result.error) {
+          const status = result.response ? result.response.status : 200;
+          if (status === 200 && result.data && result.data.ok === true) {
+            outcome = 'ok';
+          }
+        } else {
+          const status = result.error.context && typeof result.error.context.status === 'number'
+            ? result.error.context.status
+            : 0;
+          const body = await readFunctionErrorBody(result.error);
+          const code = body && typeof body.error === 'string' ? body.error : '';
+          if (status === 401 || code === 'reauth_required' || code === 'unauthorized') {
+            outcome = 'reauth';
+          } else if (status === 500 && code === 'storage_cleanup_failed') {
+            outcome = 'storage';
+          } else if (status === 500 && code === 'user_delete_failed') {
+            outcome = 'user';
+          }
+        }
+      } catch (err) {
+        outcome = 'unknown';
+      }
+
+      // e. Anything unexpected (including network errors): the account
+      // may already be gone. Only the server saying so counts.
+      if (outcome === 'unknown' && (await accountAppearsDeleted())) {
+        outcome = 'ok';
+      }
+
+      if (outcome === 'ok') {
+        succeeded = true;
+      } else if (outcome === 'reauth') {
+        setMessage('Please try again. We couldn’t confirm it’s you.', true);
+      } else if (outcome === 'storage') {
+        setMessage('We couldn’t delete your images, so nothing was deleted. Please try again.', true);
+      } else if (outcome === 'user') {
+        setMessage('We couldn’t delete your account. Please try again.', true);
+      } else {
+        setMessage('Something went wrong and your account may not have been deleted. Please check your connection and try again.', true);
+      }
+    } catch (err) {
+      // Deliberately not logged: keep anything near the password out of
+      // the console.
+      setMessage('Something went wrong and your account may not have been deleted. Please check your connection and try again.', true);
+    } finally {
+      clearPassword();
+      if (!succeeded) {
+        // Nothing local is touched on failure; background work resumes.
+        accountDeletionInProgress = false;
+        setBusy(false);
+        if (isDialogOpen()) {
+          passwordField.input.focus();
+        }
+      }
+    }
+
+    if (succeeded) {
+      // d. -> step 4.
+      await cleanUpDeviceAfterAccountDeletion();
+    }
+  }
+
+  // --- Step 4: wipe this device ---
+  function waitWithTimeout(promise, ms) {
+    return Promise.race([
+      Promise.resolve(promise).catch(function () {}),
+      new Promise(function (resolve) { setTimeout(resolve, ms); })
+    ]);
+  }
+
+  // Lets syncs that were already in flight before the flag was set
+  // finish (they fail against the deleted account and, with the flag
+  // set, queue nothing), so none of them writes after the wipe.
+  async function drainInFlightWork() {
+    const deadline = Date.now() + DRAIN_TIMEOUT_MS;
+    await waitWithTimeout(Promise.all([
+      retryPendingWritesPromise,
+      imageRetryRunPromise
+    ]), DRAIN_TIMEOUT_MS);
+    while (Date.now() < deadline) {
+      let anyInFlight = false;
+      entrySyncStates.forEach(function (state) {
+        if (state.inFlight) {
+          anyInFlight = true;
+        }
+      });
+      if (!anyInFlight) {
+        break;
+      }
+      await new Promise(function (resolve) { setTimeout(resolve, 200); });
+    }
+  }
+
+  function revokeAll(map) {
+    map.forEach(function (url) {
+      try {
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        // ignore
+      }
+    });
+    map.clear();
+  }
+
+  function clearInMemoryData() {
+    clearTimeout(notesAutosaveTimer);
+    notesAutosaveTimer = null;
+    clearTimeout(imageRetryTimer);
+    imageRetryTimer = null;
+
+    manhwaEntries.length = 0;
+    manhwaEntriesOwnerId = null;
+    clearUserLists();
+    newComicTags.length = 0;
+    detailEditTags = [];
+
+    currentDetailEntry = null;
+    detailNotesEntryId = null;
+    detailNotesTextarea.value = '';
+    entryBeingEdited = null;
+    listBeingRenamedId = null;
+    currentOpenListId = null;
+    listPickerEntry = null;
+    listPickerReturnFocus = null;
+    editingQuickNoteEntry = null;
+    editingCharacterId = null;
+    if (pickedCharacterImagePreviewUrl) {
+      URL.revokeObjectURL(pickedCharacterImagePreviewUrl);
+      pickedCharacterImagePreviewUrl = null;
+    }
+    pickedCharacterImageBlob = null;
+    pickedCharacterImageFile = null;
+    characterImageWasRemoved = false;
+    searchInput.value = '';
+    currentSearchTerm = '';
+
+    // Caches and per-item state.
+    revokeAll(imageObjectUrlCache);
+    revokeAll(characterImageObjectUrlCache);
+    revokeListCollageUrls();
+    listCollageRenderToken++;
+    coverCloudStates.clear();
+    characterImageCloudStates.clear();
+    coverDownloadFailures.clear();
+    coverDownloadsInFlight.clear();
+    characterImageDownloadFailures.clear();
+    characterImageDownloadsInFlight.clear();
+    thumbnailLookupsInFlight.clear();
+    thumbnailBackfillAttempted.clear();
+    failedThumbnailUrls.clear();
+    imageTasksInFlight.clear();
+    // entrySyncStates is cleared after drainInFlightWork(), which reads it.
+    // Per-page-session "once" flags start fresh for whoever logs in next.
+    thumbnailBackfillStarted = false;
+    imageCatchUpScanDone = false;
+    imageNotSyncedMessageShown = false;
+    setCoverSyncUser(null); // also discards any download still finishing
+    libraryLoadState = 'idle';
+    lastDataRefreshAt = 0;
+    foregroundRefreshOwed = false;
+
+    // Pending counter and badge.
+    pendingIndicatorRequestId++;
+    const badge = document.getElementById('pendingSyncBadge');
+    if (badge) {
+      badge.textContent = '';
+      badge.hidden = true;
+    }
+    hideSyncErrorBanner();
+  }
+
+  // Closes a cached IndexedDB connection (if any), then deletes the
+  // database. Resolves either way; "blocked" (another open tab) still
+  // completes on its own once that tab lets go.
+  async function deleteDatabase(name, connectionPromise) {
+    if (connectionPromise) {
+      try {
+        (await connectionPromise).close();
+      } catch (err) {
+        // never opened / already closed
+      }
+    }
+    await new Promise(function (resolve) {
+      let request;
+      try {
+        request = indexedDB.deleteDatabase(name);
+      } catch (err) {
+        resolve();
+        return;
+      }
+      request.onsuccess = function () { resolve(); };
+      request.onerror = function () { resolve(); };
+      request.onblocked = function () { resolve(); };
+    });
+  }
+
+  function getAuthStorageKey() {
+    const key = supabaseClient.auth && supabaseClient.auth.storageKey;
+    return typeof key === 'string' && key
+      ? key
+      : 'sb-' + new URL(SUPABASE_URL).hostname.split('.')[0] + '-auth-token';
+  }
+
+  // Only this app's own keys: the legacy entries copy, Card Size, Cover
+  // dimming, and Supabase's auth keys (the session plus its
+  // "-code-verifier" / "-user" companions).
+  function removeAppStorageKeys() {
+    const authKey = getAuthStorageKey();
+    const appKeys = [STORAGE_KEY, CARD_SIZE_STORAGE_KEY, COVER_DIMMING_STORAGE_KEY];
+    [window.localStorage, window.sessionStorage].forEach(function (storage) {
+      try {
+        appKeys.forEach(function (key) {
+          storage.removeItem(key);
+        });
+        const authKeys = [];
+        for (let i = 0; i < storage.length; i++) {
+          const key = storage.key(i);
+          if (key && key.indexOf(authKey) === 0) {
+            authKeys.push(key);
+          }
+        }
+        authKeys.forEach(function (key) {
+          storage.removeItem(key);
+        });
+      } catch (err) {
+        // Storage unavailable (private mode etc.): nothing to remove.
+      }
+    });
+  }
+
+  // Hides every popup/modal without running their save paths.
+  function closeAllPopups() {
+    closeLinkPopup();
+    listPickerOverlay.style.display = 'none';
+    if (quickNoteModalOverlay.style.display !== 'none') {
+      quickNoteModalOverlay.style.display = 'none';
+      unlockPageScrollForQuickNote();
+    }
+    addEntrySheetOverlay.classList.remove('sheet-open');
+    privacyModalOverlay.style.display = 'none';
+    closeDialog(true);
+  }
+
+  async function cleanUpDeviceAfterAccountDeletion() {
+    // Everything here runs with accountDeletionInProgress still true.
+    try {
+      clearInMemoryData();
+      await drainInFlightWork();
+      entrySyncStates.clear();
+
+      const queueConnection = pendingWritesDatabasePromise;
+      pendingWritesDatabasePromise = null;
+      const imageConnection = imageDatabasePromise;
+      imageDatabasePromise = null;
+      await deleteDatabase(PENDING_WRITES_DB_NAME, queueConnection);
+      await deleteDatabase(IMAGE_DB_NAME, imageConnection);
+      // A late open while deleting would have cached a new connection.
+      pendingWritesDatabasePromise = null;
+      imageDatabasePromise = null;
+
+      removeAppStorageKeys();
+      closeAllPopups();
+
+      // Empty the shelf/detail page so nothing from this account stays
+      // in the page.
+      detailView.style.display = 'none';
+      libraryView.style.display = 'block';
+      try {
+        renderList();
+      } catch (err) {
+        // The login screen covers it anyway.
+      }
+    } catch (err) {
+      console.error('Account deleted, but cleaning up this device hit an error.');
+    }
+
+    // Local sign-out (the user no longer exists on the server). Fires
+    // SIGNED_OUT, which shows the login screen and closes Settings.
+    try {
+      await supabaseClient.auth.signOut({ scope: 'local' });
+    } catch (err) {
+      // ignored
+    }
+    removeAppStorageKeys();
+
+    // Make sure Settings is closed and the login screen is showing even
+    // if no event fired.
+    closeSettingsView();
+    showAuthOrApp(null);
+    if (zone) {
+      zone.hidden = true;
+    }
+    if (accountEmailValue) {
+      accountEmailValue.textContent = '';
+    }
+    showDeletedNotice();
+    accountDeletionInProgress = false;
+  }
+
+  // One-time message on the login screen; cleared once the person starts
+  // signing in or up again.
+  function showDeletedNotice() {
+    const notice = document.getElementById('authNotice');
+    if (!notice) {
+      return;
+    }
+    notice.textContent = DELETED_NOTICE;
+    notice.hidden = false;
+    const email = document.getElementById('authEmail');
+    if (email) {
+      email.value = '';
+      email.focus();
+    }
+    const password = document.getElementById('authPassword');
+    if (password) {
+      password.value = '';
+    }
+  }
+
+  function clearDeletedNotice() {
+    const notice = document.getElementById('authNotice');
+    if (notice && !notice.hidden) {
+      notice.textContent = '';
+      notice.hidden = true;
+    }
+  }
+  signInBtn.addEventListener('click', clearDeletedNotice);
+  signUpBtn.addEventListener('click', clearDeletedNotice);
+
+  return {
+    buildZone: buildZone,
+    refreshZone: refreshZone,
+    onLeave: onLeave
+  };
+})();

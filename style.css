@@ -53,7 +53,10 @@ h1 {
    #volumeInput, #pageInput, and #episodeInput are the "Type" dropdown
    and the extra progress fields it can reveal (see the Type section in
    script.js) - grouped into this same rule so every field in the form
-   matches, whether it's visible right now or not. */
+   matches, whether it's visible right now or not. #quickNoteModalTitleInput
+   used to be part of this group too, but now has its own dark-themed
+   rule further down (see "Quick Note modal" below) to match the rest
+   of today's redesign. */
 #titleInput,
 #typeInput,
 #chapterInput,
@@ -61,8 +64,7 @@ h1 {
 #pageInput,
 #episodeInput,
 #linkInput,
-#statusInput,
-#quickNoteModalTitleInput {
+#statusInput {
   flex: 1;
   padding: 8px;
   font-size: 16px;
@@ -126,7 +128,6 @@ h1 {
 
 #bulkAddSubmitButton,
 #bulkAddCancelButton,
-#quickNoteModalSaveButton,
 #quickNoteModalDeleteButton {
   padding: 8px 16px;
   font-size: 15px;
@@ -198,6 +199,245 @@ h1 {
 
 .modal-close-button:hover {
   color: #aaa;
+}
+
+/* Quick Note modal fields: dark gray, rounded, matching the fields on
+   the Add Entry / Bulk Add sheets (same background/padding/rounding as
+   ".add-entry-sheet-overlay #titleInput" etc. further down this file),
+   instead of the white/navy look #quickNoteModalTitleInput used to
+   share with the rest of the add-comic form. ::placeholder is set
+   separately below since it needs light gray text of its own to stay
+   readable on this dark background. */
+#quickNoteModalTitleInput,
+#quickNoteModalTextInput {
+  box-sizing: border-box;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 10px;
+  background: #333;
+  color: #fff;
+  font-size: 16px;
+}
+
+#quickNoteModalTitleInput::placeholder,
+#quickNoteModalTextInput::placeholder {
+  color: #999;
+}
+
+/* Reading mode for a Quick Note (see setQuickNoteMode() in script.js):
+   same box look as #quickNoteModalTextInput, but plain text with
+   tappable links. pre-wrap keeps the note's own line breaks. Tapping
+   anywhere that isn't a link switches to the textarea, hence the text
+   cursor. */
+.quick-note-read-view {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 180px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #333;
+  color: #fff;
+  font-size: 16px;
+  font-family: Arial, sans-serif;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+
+/* --- Quick Note window size ---
+   Scoped to the #quickNote... ids on purpose: the list picker and the
+   privacy popup share .modal-overlay/.modal-box and must not change.
+
+   The box itself no longer scrolls (overflow: hidden). Only the note
+   text scrolls, so the header (Edit / X) and Save/Delete always stay
+   on screen however long the note is. Header, title and buttons keep
+   their natural size (flex-shrink: 0); only the text area gives up
+   space if the window is too short. */
+#quickNoteModal {
+  width: min(760px, 92vw);
+  max-width: none;
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
+}
+
+#quickNoteModal > .modal-header,
+#quickNoteModalTitleInput,
+#quickNoteModal > .bulk-add-controls {
+  flex-shrink: 0;
+}
+
+/* Editing textarea and reading view share EVERY box and text metric
+   below, so switching modes never moves the text or resizes the
+   window. Their height comes from one shared value that script.js
+   sets on both (see sizeQuickNoteBody()): content height clamped
+   between 55vh and 80vh. The plain "height: 55vh" is only the
+   starting value before script.js measures. min-height: 0 lets the
+   flex column shrink the text area below 55vh only when the window
+   is shorter than its contents (a short laptop window), which keeps
+   Save visible instead of pushing it off screen.
+   overscroll-behavior: contain stops a scroll that reaches the end of
+   the note from carrying over to the page behind. */
+#quickNoteModalTextInput,
+#quickNoteModalReadView {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  height: 55vh;
+  min-height: 0;
+  max-height: 80vh;
+  flex: 0 1 auto;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 10px;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  letter-spacing: normal;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Dark scrollbar (and resize grip) instead of the default white one. */
+  color-scheme: dark;
+}
+
+/* Only the editing box gets the drag handle. */
+#quickNoteModalTextInput {
+  resize: vertical;
+}
+
+/* Invisible copy of the textarea's text, used by script.js only to
+   work out where the caret sits so it can be scrolled into view after
+   the keyboard opens (see keepQuickNoteCaretVisible()). Same metrics
+   as the textarea above. */
+.quick-note-caret-mirror {
+  position: absolute;
+  top: 0;
+  left: -9999px;
+  visibility: hidden;
+  pointer-events: none;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Page lock while the Quick Note is open: script.js adds this class
+   and sets body's "top" to minus the current scroll position, so the
+   page stays visually where it was but can't scroll; closing removes
+   both and scrolls back to the same spot. */
+body.quick-note-scroll-lock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 600px) {
+  /* Phone: nearly the whole screen. The overlay follows the visual
+     viewport (the part not covered by the on-screen keyboard) through
+     two variables script.js keeps updated while the note is open
+     (--qn-viewport-top / --qn-viewport-height); without them it is
+     simply the full screen. 100vh first, then 100dvh for browsers
+     that understand it. */
+  #quickNoteModalOverlay {
+    padding: 8px;
+    bottom: auto;
+    top: var(--qn-viewport-top, 0px);
+    height: var(--qn-viewport-height, 100vh);
+    height: var(--qn-viewport-height, 100dvh);
+  }
+
+  /* Fixed height (92dvh) rather than "grow with content", so the text
+     area always fills the window. max-height: 100% clamps it to the
+     overlay, which is what shrinks it above the keyboard. */
+  #quickNoteModal {
+    width: 100%;
+    height: 92vh;
+    height: 92dvh;
+    max-height: 100%;
+    padding: 14px;
+  }
+
+  /* Text area fills whatever height is left between the title and the
+     buttons. script.js doesn't set a height on phones. */
+  #quickNoteModalTextInput,
+  #quickNoteModalReadView {
+    flex: 1 1 auto;
+    height: auto;
+    max-height: none;
+    resize: none;
+  }
+}
+
+/* Edit (reading mode only) + X, grouped on the right of the header. */
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.quick-note-edit-button {
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  background: #444;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 4px;
+}
+
+.quick-note-edit-button:hover {
+  background: #555;
+}
+
+/* A link inside a Quick Note (reading view and shelf-card preview),
+   built by renderNoteTextInto() in script.js. Same light blue as
+   .detail-link, readable on both the dark modal and the brown note
+   card. user-select/touch-callout: none keeps a long-press from
+   opening the browser's own selection/link menu. */
+.note-link {
+  color: #6cf;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.note-link:hover {
+  color: #8fdcff;
+}
+
+.note-link:focus-visible {
+  outline: 2px solid #6cf;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* "Save Note": same full-width button shape and turquoise (#40e0d0)
+   as the other add-entry buttons, so they all read as one consistent
+   set of actions. Text stays dark (#1c1c1c) for readability. */
+#quickNoteModalSaveButton {
+  padding: 14px 16px;
+  border: none;
+  border-radius: 10px;
+  background: #40e0d0;
+  color: #1c1c1c;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+#quickNoteModalSaveButton:hover {
+  background: #2dd4bf;
 }
 
 /* Tag input row (text box + "Add Tag" button) for the Add-comic form.
@@ -593,6 +833,13 @@ body.characters-tab-active .search-bar {
   display: none;
 }
 
+/* Same for the Lists tab: neither Card Size nor search applies to it.
+   body.lists-tab-active is toggled by selectTypeFilter() in script.js. */
+body.lists-tab-active .zoom-controls,
+body.lists-tab-active .search-bar {
+  display: none;
+}
+
 /* Row of zoom controls (label, -, slider, +, percentage) that sits
    above the shelf. Just a plain flex row - the actual zooming logic
    lives in the --card-scale variable set on #manhwaList below. */
@@ -600,7 +847,48 @@ body.characters-tab-active .search-bar {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Card Size + Cover dimming, side by side; on a narrow (phone) screen
+   the second group wraps onto its own line. The bottom margin that
+   used to be on .zoom-controls lives here now. */
+.display-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 24px;
   margin-bottom: 16px;
+}
+
+/* Private mode hides every cover, and the Characters tab has no
+   dimmed covers, so neither control applies there - hide the row. On
+   the Lists tab only Card Size is hidden (rules above); Cover dimming
+   stays because it dims the collage covers. */
+body.private-mode .display-controls,
+body.characters-tab-active .display-controls {
+  display: none;
+}
+
+.cover-dimming-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+#coverDimmingSlider {
+  cursor: pointer;
+  min-width: 0;
+  max-width: 160px;
+  flex: 1 1 auto;
+}
+
+/* Same fixed width as #zoomValueLabel, so "5%" vs "60%" doesn't nudge
+   the slider. */
+#coverDimmingValueLabel {
+  min-width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .zoom-button {
@@ -712,11 +1000,13 @@ body.private-mode #manhwaList {
   font-size: 15px;
 }
 
-/* Comic title, left-aligned. flex: 1 lets it take up all the leftover
-   space in the row, pushing the info text and action icons over
-   toward the right; the overflow/text-overflow/white-space trio is
-   what turns a too-long title into a "…" ellipsis instead of wrapping
-   the row onto a second line. */
+/* Title text, left-aligned, shared by a comic's private row and a
+   Quick Note's private row. flex: 1 lets it take up all the leftover
+   space in the row (there's nothing else in a note row to share that
+   space with); the comic row below overrides this with a fixed width
+   instead. The overflow/text-overflow/white-space trio is what turns
+   a too-long title into a "…" ellipsis instead of wrapping the row
+   onto a second line. */
 .private-row-title {
   flex: 1;
   min-width: 0; /* lets the ellipsis above actually kick in inside a flex item */
@@ -726,18 +1016,22 @@ body.private-mode #manhwaList {
   white-space: nowrap;
 }
 
-/* Compact "Ch. # · Status" text sitting between the title and the
-   action icons. white-space: nowrap keeps it from wrapping mid-row. */
-.private-row-info {
-  color: #ccc;
-  white-space: nowrap;
+/* A comic's private row only (buildPrivateRow() in script.js adds this
+   extra class alongside ".private-row-title" - Quick Notes don't get
+   it). Caps the title at roughly the left 70-75% of the row instead of
+   letting it stretch, so there's always room left over for the link
+   on the right - see ".private-row .entry-link" below. */
+.private-row-title-wide {
+  flex: 0 0 72%;
 }
 
 /* Private rows keep the same edit/delete icon buttons as cards, but
    fixed-size (not scaled by --card-scale) for the same reason the row
-   itself uses fixed pixels above. These selectors (two classes) are
-   more specific than the plain ".entry-actions" / ".icon-button"
-   rules further down, so they win without needing !important. */
+   itself uses fixed pixels above. Only Quick Note rows still have
+   these buttons - see buildPrivateRow()/buildPrivateNoteRow() in
+   script.js. These selectors (two classes) are more specific than the
+   plain ".entry-actions" / ".icon-button" rules further down, so they
+   win without needing !important. */
 .private-row .entry-actions {
   gap: 8px;
   flex-shrink: 0;
@@ -749,10 +1043,12 @@ body.private-mode #manhwaList {
   border-radius: 4px;
 }
 
-/* The comic link, sitting between the "Ch. # · Status" text and the
-   edit/delete icons. white-space: nowrap keeps "Link" from wrapping
-   onto its own line like the other private-row text. */
+/* The comic link. margin-left: auto pushes it all the way to the
+   right edge of the row, past the title's fixed 72% width, instead of
+   sitting right up against it. white-space: nowrap keeps "Link" from
+   wrapping onto its own line. */
 .private-row .entry-link {
+  margin-left: auto;
   white-space: nowrap;
 }
 
@@ -787,6 +1083,16 @@ body.private-mode #manhwaList {
   color: #666;
 }
 
+/* .cover-placeholder-title is the big-title-on-the-cover treatment for
+   phone width (see the @media (max-width: 600px) block further down,
+   and script.js where this span is created alongside the plain "No
+   Cover" text). Hidden by default here so laptop/tablet keeps showing
+   the plain gray box with "No Cover" text exactly as before - only the
+   phone media query below ever turns this on. */
+.cover-placeholder-title {
+  display: none;
+}
+
 /* Videos-only card shape. Added alongside the plain ".cover-placeholder"
    class (see script.js, entry.type === 'Videos') so it only overrides
    the one property that needs to change - the aspect ratio - while
@@ -797,6 +1103,58 @@ body.private-mode #manhwaList {
    shape used for comic covers. */
 .cover-placeholder.video-cover {
   aspect-ratio: 16 / 9;
+}
+
+/* Automatic video thumbnail (script.js, applyThumbnailToCoverElement).
+   An <img> laid over the whole cover box, behind the status ribbon
+   (which comes later in the DOM). Hidden as soon as the box shows the
+   user's own cover (.has-image), so an own cover always wins. */
+.cover-placeholder > .video-thumbnail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-placeholder.has-image > .video-thumbnail {
+  display: none;
+}
+
+/* Detail page: 16:9 only while a thumbnail is actually shown there
+   (a Video with no own cover). Otherwise the box keeps its usual shape. */
+.cover-placeholder.detail-cover.showing-thumbnail:not(.has-image) {
+  aspect-ratio: 16 / 9;
+}
+
+/* Detail page only, once the thumbnail has loaded (script.js,
+   applyDetailThumbnail): the box takes the picture's own shape instead
+   of 16:9, and the whole picture is shown, uncropped. The width stays
+   the cover column's width; the height is capped at 70% of the screen
+   so a tall picture can't push the page off screen (object-fit:
+   contain letterboxes it inside that cap). Shelf cards never get
+   .thumbnail-natural, so they keep the absolute, cropped rule above. */
+.cover-placeholder.detail-cover.showing-thumbnail.thumbnail-natural:not(.has-image) {
+  aspect-ratio: auto;
+  height: auto;
+}
+
+.cover-placeholder.detail-cover.thumbnail-natural:not(.has-image) > .video-thumbnail {
+  position: static;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+/* The img now sits in the box's normal flow, so hide the "No Cover"
+   text instead of letting it sit beside the picture. */
+.cover-placeholder.detail-cover.thumbnail-natural:not(.has-image) > .cover-placeholder-text,
+.cover-placeholder.detail-cover.thumbnail-natural:not(.has-image) > .cover-placeholder-title {
+  display: none;
 }
 
 /* The diagonal "New"-style ribbon showing the entry's status.
@@ -851,84 +1209,94 @@ body.private-mode #manhwaList {
   color: #fff;
 }
 
+/* Quick Note ribbon: always the same orange for every note, never
+   user-changeable, since a note has no entry.status to pick a color
+   from the way a comic's ribbon does above - see script.js where
+   entry.type === 'Note' cards are built. White text reads best on this
+   orange. */
+.status-ribbon.status-note {
+  background: #e08000;
+  color: #fff;
+}
+
 .entry-title {
   font-weight: bold;
 }
 
-/* Quick Note cards. These sit in the exact same #manhwaList grid as
-   every comic card (see "#manhwaList li" above for the box shape/
-   background/padding they inherit from just being an <li> in that
-   list) - the alignment override is needed because a comic card
-   centers everything underneath its (roughly square) cover image, but
-   a note card has no picture at all, just two lines of text, which
-   reads much more naturally left-aligned like a little note card than
-   centered.
+/* Quick Note cards. ".note-card" is just a marker class now - it has
+   no styling of its own. A note card gets the exact same size/shape as
+   a comic card for free, just by being an "#manhwaList li" (see that
+   rule above for the shared background/padding/centering every card
+   already gets) and by being built out of the same kinds of pieces: a
+   cover-shaped box (".note-preview" below, standing in for
+   ".cover-placeholder"), a bold title under it (".note-card-title",
+   standing in for ".entry-title"), and the same shared edit/delete
+   icon row (".entry-actions", built by buildEntryActions() in
+   script.js - the very same function every comic card also calls). */
 
-   The selector is "#manhwaList li.note-card" (not just ".note-card")
-   for the same reason "#manhwaList li.private-row" further up does the
-   same thing: "#manhwaList li" uses an ID, and an ID always beats a
-   plain class in CSS's specificity rules regardless of which one is
-   written later in the file - so a bare ".note-card { text-align:
-   left }" would actually lose to "#manhwaList li"'s own "text-align:
-   center" and silently do nothing. Repeating "#manhwaList li" in the
-   selector here gives this rule an ID of its own to match, so it wins
-   the way it's supposed to.
-
-   "aspect-ratio: 16 / 9" is what gives the card its wide/horizontal
-   shape - the exact same ratio used for a Videos card's thumbnail (see
-   ".cover-placeholder.video-cover" above), just applied to the whole
-   card here instead of just one box inside it, since a note has no
-   image of its own to put that ratio on. Without something like this,
-   a note card's height is just whatever its two lines of text need,
-   which made it a random, inconsistent shape instead of matching the
-   other card types on the shelf.
-
-   "overflow: hidden" + "box-sizing: border-box" are the actual fix for
-   the old overflow bug: the title/snippet text below used to have no
-   width limit of its own, so as a flex item (align-items isn't
-   "stretch" here) it sized itself to fit its own content instead of
-   the card's width - a long word, a pasted link, or just a long note
-   title could end up wider than the card and spill out past its edges
-   onto the page. "overflow: hidden" clips anything that still doesn't
-   fit, and "box-sizing: border-box" makes sure the aspect-ratio above
-   is measured including this card's own padding, not on top of it, so
-   the card never quietly grows past the size that ratio implies. */
-#manhwaList li.note-card {
-  align-items: flex-start;
-  text-align: left;
-  cursor: pointer;
-  aspect-ratio: 16 / 9;
-  width: 100%;
-  box-sizing: border-box;
+/* Stands in for a comic's cover image. Same box shape/size as
+   ".cover-placeholder" above (same width, same 2/3 aspect ratio, same
+   rounded corners) so a note's "cover area" takes up exactly the same
+   footprint a comic's does - but tinted its own warm brown, instead of
+   comic gray (laptop/tablet) or the teal used by the phone-width
+   title-cover treatment further down this file. That color difference
+   is deliberate: it's what makes a note recognizable as "a note" at a
+   glance, never confusable with a cover-less comic. */
+.note-preview {
+  position: relative;
   overflow: hidden;
+  /* No box-sizing override, and no padding, on this outer box - on
+     purpose, both times. .cover-placeholder above doesn't set either
+     one (just width: 100% + a 1px border, browser-default content-box),
+     and matching that exactly - border only, padding pushed down onto
+     .note-preview-text below instead - is what keeps the two boxes
+     pixel-for-pixel the same width/height. Padding here would have
+     inflated this box past 100% the same way it's excluded from
+     .cover-placeholder. */
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  background: #3a2f1a;
+  border: 1px solid #5c4a2a;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-/* "width: 100%" makes the title/snippet fill the card's own width
-   instead of shrinking to fit their text (see the big comment above
-   for why that shrinking is what let text spill outside the card).
-   "overflow-wrap: break-word" is the other half of the overflow fix:
-   normally a browser only wraps text at spaces, so one long unbroken
-   chunk of text (a pasted URL, a run-on word) would refuse to wrap and
-   push past the card's edge instead - this tells the browser it's
-   allowed to break in the middle of a long word if that's the only way
-   to keep it inside the box. */
+/* The preview text itself, built from buildNoteSnippet() in script.js.
+   "white-space: pre-wrap" keeps line breaks the user actually typed
+   into their note, instead of squashing everything onto one line.
+   "display: -webkit-box" + "-webkit-box-orient: vertical" +
+   "-webkit-line-clamp: 6" together are what clip the text down to 6
+   lines and add a "..." right at the cutoff, automatically - the
+   multi-line version of the more familiar single-line
+   "text-overflow: ellipsis". Despite the "-webkit-" prefix, every
+   major browser (Chrome, Safari, Firefox, Edge) supports this combo;
+   it's the standard way to do multi-line text clamping in CSS today. */
+.note-preview-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  box-sizing: border-box;
+  width: 100%;
+  /* This is the padding that used to live on .note-preview itself - moved
+     down here, with box-sizing: border-box, so it stays inside this
+     element's own 100% width instead of adding to .note-preview's size. */
+  padding: calc(10px * var(--card-scale));
+  color: #f2e6cf;
+  font-size: calc(13px * var(--card-scale));
+  line-height: 1.4;
+}
+
+/* The note's title, in the same spot below the preview box that
+   ".entry-title" sits in below a comic's cover. "overflow-wrap:
+   break-word" stops one long unbroken word (a pasted link, a run-on
+   title) from pushing past the card's edge instead of wrapping. */
 .note-card-title {
   font-weight: bold;
-  width: 100%;
-  overflow-wrap: break-word;
-}
-
-/* The short preview/snippet under a note's title - built by
-   buildNoteSnippet() in script.js, which trims the note's full text
-   down to a short one-liner so the card stays just as compact as a
-   comic card, never the whole note. Dimmer than the title so the two
-   are easy to tell apart at a glance, same idea as
-   ".character-list-comic-title" further down this file. Same
-   "width: 100%" + "overflow-wrap" fix as .note-card-title above, for
-   the same reason. */
-.note-card-snippet {
-  color: #bbb;
-  font-size: calc(14px * var(--card-scale));
   width: 100%;
   overflow-wrap: break-word;
 }
@@ -1124,11 +1492,65 @@ body.private-mode #manhwaList {
   background-repeat: no-repeat;
 }
 
-/* The "No Cover" text is only meant to show while there's no image -
-   once .has-image is added, hide the text rather than letting it sit
-   on top of the photo. */
-.cover-placeholder.has-image .cover-placeholder-text {
+/* The "No Cover" text (and, on phone width, the big title text that
+   takes its place - see .cover-placeholder-title above) are only meant
+   to show while there's no image - once .has-image is added, hide both
+   rather than letting either sit on top of the photo. */
+.cover-placeholder.has-image .cover-placeholder-text,
+.cover-placeholder.has-image .cover-placeholder-title {
   display: none;
+}
+
+/* --- Cover dimming ---
+   script.js (setCoverDimming) sets --cover-brightness and
+   --cover-saturation on <html>, and adds the "cover-dimming" class
+   only while the slider is above 0%. The filter is applied ONLY to the
+   picture layers below, never to a whole card, so the status ribbon,
+   titles, "No Cover" text, buttons and borders stay at full
+   brightness. Placeholders (no picture) aren't matched at all.
+
+   Shelf / open-list covers (.dimmable-cover): the photo is drawn on
+   this ::before layer from --cover-image (setCoverElementImage() puts
+   it there instead of on the box's own background). It's first in the
+   box, so the absolutely positioned status ribbon (later in the DOM)
+   paints on top of it; the box's overflow: hidden + border-radius
+   clip it to the same rounded shape. The detail page never has
+   .dimmable-cover, so it's never dimmed. */
+:root {
+  --cover-brightness: 1;
+  --cover-saturation: 1;
+}
+
+.cover-placeholder.dimmable-cover.has-image::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--cover-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+
+/* The transition lives outside the .cover-dimming rule so it also
+   runs when the slider is dragged back down to 0%. */
+.cover-placeholder.dimmable-cover.has-image::before,
+.cover-placeholder.dimmable-cover > .video-thumbnail,
+.list-tile-slot.has-image {
+  transition: filter 150ms ease;
+}
+
+:root.cover-dimming .cover-placeholder.dimmable-cover.has-image::before,
+:root.cover-dimming .cover-placeholder.dimmable-cover > .video-thumbnail,
+:root.cover-dimming .list-tile-slot.has-image {
+  filter: brightness(var(--cover-brightness)) saturate(var(--cover-saturation));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cover-placeholder.dimmable-cover.has-image::before,
+  .cover-placeholder.dimmable-cover > .video-thumbnail,
+  .list-tile-slot.has-image {
+    transition: none;
+  }
 }
 
 /* Standard "visually hidden" trick: makes the real file input
@@ -1265,6 +1687,26 @@ body.private-mode #manhwaList {
   gap: 4px;
 }
 
+/* Each star on the detail page is wrapped in a <span class="star-slot">
+   (see renderDetailRatingStars() in script.js) so it can be tapped -
+   this makes that span a real tap target: padding gives it more room
+   to tap than just the bare 16px icon, and the pointer cursor is a
+   hint (for mouse users) that it does something when clicked. */
+.detail-rating .star-slot {
+  display: inline-flex;
+  padding: 4px;
+  cursor: pointer;
+}
+
+/* Bigger than the plain read-only .star-svg size used everywhere else
+   (16px) - these stars are the actual controls for setting a rating
+   now, not just a small status display, so they get more room to tap
+   accurately (left half vs. right half) especially on a phone. */
+.detail-rating .star-slot .star-svg {
+  width: 28px;
+  height: 28px;
+}
+
 /* Cursor hint + hover feedback for the card cover/title (Cover mode)
    and the title text (Private mode), now that clicking any of them
    opens the detail page - see renderList() and buildPrivateRow() in
@@ -1355,6 +1797,18 @@ body.private-mode #manhwaList {
   padding: 8px 16px;
   font-size: 15px;
   cursor: pointer;
+}
+
+/* Save Notes button + the quiet autosave status next to it. */
+.detail-notes-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.detail-notes-status {
+  font-size: 13px;
+  color: #777;
 }
 
 /* --- Favorite Scenes --- */
@@ -1584,6 +2038,279 @@ body.private-mode #manhwaList {
   overflow-wrap: break-word;
 }
 
+/* --- Lists tab --- */
+/* "New list" input + button at the top of the overview. */
+.lists-create-row {
+  display: flex;
+  gap: 8px;
+  max-width: 480px;
+  margin-bottom: 16px;
+}
+
+.lists-create-input,
+.list-rename-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  font-size: 16px;
+  background: #fff;
+  color: navy;
+  border: 1px solid #666;
+  border-radius: 4px;
+}
+
+.lists-create-button,
+.list-row-button {
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.lists-create-button:hover,
+.list-row-button:hover {
+  background: #444;
+}
+
+.lists-empty-state {
+  color: #bbb;
+  font-size: 15px;
+}
+
+/* First-run card shown in place of the shelf when a signed-in user's
+   library loaded and has zero entries (see #libraryEmptyState in
+   index.html and updateEmptyStates() in script.js). Same dark card look
+   as the phone Add Entry sheet. The [hidden] rule is needed because
+   display: flex would otherwise override the hidden attribute. */
+.library-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 700px;
+  margin: 10px 0 20px;
+  padding: 20px;
+  box-sizing: border-box;
+  background: #262626;
+  border: 1px solid #444;
+  border-radius: 12px;
+}
+
+.library-empty-state[hidden] {
+  display: none;
+}
+
+.library-empty-state-heading {
+  margin: 0;
+  font-size: 20px;
+}
+
+.library-empty-state-text {
+  margin: 0;
+  color: #bbb;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.library-empty-state-button {
+  padding: 8px 16px;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  background: #fff;
+  color: navy;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.library-empty-state-button:hover {
+  background: #e6e6e6;
+}
+
+/* One-line message when the active type tab has no entries of that
+   type (see #tabEmptyState in index.html). */
+.tab-empty-state {
+  color: #bbb;
+  font-size: 15px;
+  margin: 10px 0 20px;
+}
+
+.tab-empty-state[hidden] {
+  display: none;
+}
+
+/* The overview: a grid of square list tiles, same column sizing as the
+   comic shelf (#manhwaList at --card-scale 1), so a tile is the width
+   of a comic card - two columns on a phone. */
+.lists-overview {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 16px;
+}
+
+.list-tile {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #2b2b2b;
+}
+
+/* 2x2 collage of the list's first four comics. The 2px gap shows the
+   tile's background as thin dividers between covers. */
+.list-tile-collage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+}
+
+/* A slot with no cover is a plain neutral square. */
+.list-tile-slot {
+  background-color: #3a3a3a;
+  background-size: cover;
+  background-position: center;
+}
+
+/* Fills the tile, so clicking anywhere opens the list. */
+.list-tile-open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  padding: 0;
+  background: none;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.list-tile-open:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: -4px;
+  border-radius: 8px;
+}
+
+/* Dark gradient along the bottom, with the name + count on top. */
+.list-tile-label {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 28px 10px 10px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9), rgba(0, 0, 0, 0.6) 60%, transparent);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.list-tile-name {
+  font-size: 16px;
+  font-weight: bold;
+  overflow-wrap: anywhere;
+  /* At most two lines, then an ellipsis. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.list-tile-open:hover .list-tile-name {
+  text-decoration: underline;
+}
+
+.list-tile-count {
+  font-size: 13px;
+  color: #ddd;
+}
+
+/* Rename / Delete, top-right corner, above the open button. */
+.list-tile-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+}
+
+.list-tile-icon-button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.list-tile-icon-button:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.list-tile-delete {
+  color: #f88;
+}
+
+/* Inline rename, along the bottom of the tile. */
+.list-tile-rename {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.85);
+}
+
+.list-tile-rename-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.list-tile-rename-actions .list-row-button {
+  flex: 1;
+  padding: 6px 8px;
+}
+
+/* One open list. */
+.list-detail-title {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.list-detail-description {
+  margin: 0 0 12px;
+  color: #bbb;
+  white-space: pre-wrap;
+}
+
+.list-detail-items {
+  margin-top: 12px;
+}
+
+.list-remove-button {
+  margin-top: auto;
+  font-size: 13px;
+  padding: 6px 10px;
+}
+
 .character-actions {
   display: flex;
   gap: 6px;
@@ -1714,4 +2441,1525 @@ body.private-mode #manhwaList {
 
 .link-popup-button:hover {
   background: #555;
+}
+
+/* ===========================================================================
+   Phone-width layout: Add-entry sheet
+   ===========================================================================
+   Everything below this point is scoped inside one @media rule further
+   down, EXCEPT these two "hidden by default" rules. They have to live
+   outside the media query so that on laptop/tablet widths (where the
+   media query never applies) the header and floating button simply
+   don't exist visually - .form keeps looking exactly like it did
+   before this feature was added.
+
+   .add-entry-sheet-header is the little "Add Entry" title + "X" button
+   row that only makes sense once .form is being shown as a popup sheet
+   (see index.html, right above #titleInput). */
+.add-entry-sheet-header {
+  display: none;
+}
+
+/* .type-pill-row is the three-button Manhwa/Other Comics/Videos
+   restyle of the #typeInput dropdown (see index.html). Same reasoning
+   as .add-entry-sheet-header above: hidden by default so laptop/tablet
+   keeps showing the plain <select> exactly like before. */
+.type-pill-row {
+  display: none;
+}
+
+/* .add-entry-sheet-secondary-row holds the "Bulk add" / "Quick note"
+   text links (see index.html, just below #quickNotesButton) - the
+   phone-only alternative to #bulkAddButton/#quickNotesButton, which are
+   hidden on phone instead (see the phone media query below). Same
+   "hidden by default so laptop/tablet is untouched" reasoning as
+   .add-entry-sheet-header/.type-pill-row above. */
+.add-entry-sheet-secondary-row {
+  display: none;
+}
+
+/* .bulk-add-sheet-header is the title-plus-X header #bulkAddPanel gets
+   ONLY while it's standing in for the Add Entry sheet's content on
+   phone widths (see index.html, right above #bulkAddTextarea). Hidden
+   by default for the same reason as the rules above it: on laptop/
+   tablet, #bulkAddPanel keeps its normal plain-panel look with no
+   header at all, exactly like before this feature existed. */
+.bulk-add-sheet-header {
+  display: none;
+}
+
+/* .author-progress-row wraps #authorInput and the four progress fields
+   (see index.html). "display: contents" makes the wrapper itself
+   invisible to layout - its children act as if they were direct
+   children of .form, which is exactly how they behaved before this
+   wrapper existed. Only the phone media query below turns this into a
+   real side-by-side row. */
+.author-progress-row {
+  display: contents;
+}
+
+/* .open-add-entry-sheet-button is the floating "+" button (see
+   index.html, just after #addEntrySheetOverlay). Same reasoning: it
+   would be redundant on laptop/tablet since the form is already sitting
+   on the page there, so it stays hidden unless the media query below
+   turns it on. */
+.open-add-entry-sheet-button {
+  display: none;
+}
+
+/* .phone-filter-pill marks the two compact Status/Type dropdown pills
+   (see #phoneStatusDropdown/#typeFilterDropdown in index.html) that
+   replace the full-width Status/Type tabs on phone widths. Same
+   reasoning as every other rule in this block: hidden unconditionally
+   here so laptop/tablet never renders them, no matter what script.js
+   does - only the phone media query below ever turns them on. */
+.phone-filter-pill {
+  display: none;
+}
+
+/* max-width: 600px is our "phone width" cutoff - narrow enough to catch
+   phones in both portrait and landscape without also catching tablets,
+   which is what "laptop/tablet completely unaffected" above depends on. */
+@media (max-width: 600px) {
+
+  /* Cover-image placeholder, phone width only: instead of the plain
+     gray box + "No Cover" text used on laptop/tablet, give the box a
+     muted dark teal tint and show the entry's own title, big/bold/
+     centered, directly on it. ":not(.has-image)" keeps this scoped to
+     entries with no uploaded cover - the moment a real photo is picked,
+     .has-image takes over (see ".cover-placeholder.has-image" above)
+     and this whole treatment is bypassed automatically. The status
+     ribbon (.status-ribbon) is a separate absolutely-positioned element
+     appended into this same box, so it keeps sitting in the corner on
+     top of this exactly as it already did on top of the old gray box. */
+  #manhwaList li .cover-placeholder:not(.has-image) {
+    background: #16333a;
+  }
+
+  #manhwaList li .cover-placeholder-text {
+    display: none;
+  }
+
+  #manhwaList li .cover-placeholder-title {
+    display: block;
+    font-size: calc(20px * var(--card-scale));
+    font-weight: bold;
+    color: #eef6f5;
+    line-height: 1.3;
+    padding: calc(10px * var(--card-scale));
+    overflow-wrap: break-word;
+  }
+
+  /* The original teal "Bulk Add" and "Quick Notes" buttons disappear on
+     phone widths - .add-entry-sheet-secondary-row further down this
+     block ("Bulk add" / "Quick note") is what takes over as the way
+     into both features there instead. Both buttons stay exactly as they
+     were on laptop/tablet. */
+  #bulkAddButton,
+  #quickNotesButton {
+    display: none;
+  }
+
+  /* #addEntrySheetOverlay is the dimmed, full-screen backdrop - the
+     exact same idea as .modal-overlay above, just aligned to the
+     BOTTOM of the screen (justify-content isn't needed since we're
+     centering horizontally isn't the point; align-items: flex-end is
+     what makes .form sit at the bottom edge like a bottom sheet instead
+     of floating in the middle like the Quick Note popup does).
+
+     display: none by default = the sheet starts CLOSED. script.js adds
+     the "sheet-open" class (see the rule right below) when the "+"
+     button is tapped, and removes it again on close - it never touches
+     this element's inline style, so this media query stays in full
+     control of whether the sheet can ever be visible at all. */
+  .add-entry-sheet-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 1000;
+    align-items: flex-end;
+    justify-content: center;
+  }
+
+  .add-entry-sheet-overlay.sheet-open {
+    display: flex;
+  }
+
+  /* Once .form is inside the open sheet, give it the "popup box" look
+     (dark card, rounded top corners, its own scrollbar if the fields
+     don't all fit) instead of its normal "always on the page" look.
+     This only changes the BOX around the fields - none of the actual
+     input/select/button styles change, so the fields themselves still
+     look exactly like they do on laptop/tablet. */
+  .add-entry-sheet-overlay .form {
+    width: 100%;
+    max-width: none;
+    max-height: 85vh;
+    overflow-y: auto;
+    margin: 0;
+    background: #262626;
+    border: 1px solid #444;
+    border-radius: 12px 12px 0 0;
+    padding: 16px;
+    box-sizing: border-box;
+    /* Base .form is "flex-wrap: wrap" (fields flow left-to-right,
+       wrapping when they run out of room). The sheet instead wants
+       every field stacked in one full-width column, so switch the
+       main axis to vertical here. flex-wrap no longer matters once
+       we're stacking in a column, but leaving it doesn't hurt. */
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  /* Every direct child of .form inside the sheet (the header, the type
+     pills, each input/select, the tag row, the Add entry button, etc.)
+     becomes one full-width row in that vertical stack. "flex: none"
+     cancels out the "flex: 1" some of these fields have from their
+     base rule further up this file - that flex: 1 means "grow to fill
+     the row" in the normal left-to-right layout, but in a column
+     layout it would mean "grow to fill the sheet's height" instead,
+     which isn't what we want. Nested fields, like the inputs inside
+     .author-progress-row below, are NOT direct children of .form
+     anymore (they're inside that wrapper div), so they keep their
+     normal flex: 1 side-by-side behavior untouched. */
+  .add-entry-sheet-overlay .form > * {
+    flex: none;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* Visual order of the stack, top to bottom: header, type pills,
+     title, author+progress row, link, status, tag input, tag chips,
+     Add entry button, Bulk add/Quick note links. This uses the CSS
+     "order" property instead of moving elements around in index.html,
+     so script.js never has to care whether it's reading a field from
+     the normal page layout or from inside this popup sheet. */
+  .add-entry-sheet-header        { order: 1; }
+  .type-pill-row                 { order: 2; }
+  #titleInput                    { order: 3; }
+  .author-progress-row           { order: 4; }
+  #linkInput                     { order: 5; }
+  #statusInput                   { order: 6; }
+  .add-entry-sheet-overlay .tag-input-row { order: 7; }
+  #tagsPreview                   { order: 8; }
+  #addButton                     { order: 9; }
+  .add-entry-sheet-secondary-row { order: 10; }
+
+  .add-entry-sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .add-entry-sheet-header h3 {
+    margin: 0;
+  }
+
+  /* The real #typeInput dropdown is hidden on phone widths - the pill
+     buttons below take over as the visible, tappable control. It's
+     still present in the page (just invisible) because it's what
+     holds the actual type value everywhere else in the code. */
+  .add-entry-sheet-overlay #typeInput {
+    display: none;
+  }
+
+  /* Three equal-width segmented pills. */
+  .type-pill-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .type-pill {
+    flex: 1;
+    padding: 10px 4px;
+    font-size: 13px;
+    font-weight: bold;
+    text-align: center;
+    cursor: pointer;
+    border: none;
+    border-radius: 8px;
+    /* Unselected: dark gray pill, light gray text. */
+    background: #333;
+    color: #aaa;
+  }
+
+  /* Selected type: white pill, dark text. script.js toggles this class
+     onto whichever pill matches the current #typeInput value - see the
+     "Type pills" section in script.js. */
+  .type-pill.active {
+    background: #fff;
+    color: #1c1c1c;
+  }
+
+  /* Author + progress row: a real side-by-side flex row on phone
+     widths (on laptop/tablet, .author-progress-row is "display:
+     contents" instead - see the rule above this media query). The
+     inputs inside keep the "flex: 1" they already have from their base
+     rule further up this file, which is exactly what makes them share
+     this row's width evenly. */
+  .author-progress-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  /* Make every visible field in this row (Author, plus whichever
+     progress field is showing) share the row equally.
+
+     "flex: 1" here overrides each field's own base rule - #authorInput
+     doesn't have flex: 1 at all normally (it just sits at its default
+     input width), so without this override it wouldn't grow to share
+     space the way Chapter/Volume/Page/Episode do.
+
+     "min-width: 0" is needed too: flex items default to
+     "min-width: auto", which means they refuse to shrink smaller than
+     their own content - for a text <input> that's the browser's
+     default width (~170px+), wider than 1/2 or 1/3 of this row.
+     Without it, these fields would overflow off the right edge of the
+     sheet instead of sharing the row evenly. */
+  .author-progress-row > * {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* Dark gray, rounded, generously padded fields to match the sheet's
+     dark theme - overrides the white/navy look those same fields have
+     everywhere else in the app (see the shared field rule near the top
+     of this file). */
+  .add-entry-sheet-overlay #titleInput,
+  .add-entry-sheet-overlay #authorInput,
+  .add-entry-sheet-overlay #chapterInput,
+  .add-entry-sheet-overlay #volumeInput,
+  .add-entry-sheet-overlay #pageInput,
+  .add-entry-sheet-overlay #episodeInput,
+  .add-entry-sheet-overlay #linkInput,
+  .add-entry-sheet-overlay #statusInput,
+  .add-entry-sheet-overlay #tagInput {
+    box-sizing: border-box;
+    padding: 14px 16px;
+    border: none;
+    border-radius: 10px;
+    background: #333;
+    color: #fff;
+    font-size: 16px;
+  }
+
+  /* Full-width teal "Add entry" button, matching the floating "+"
+     button's teal (see .open-add-entry-sheet-button below) - both use
+     dark text for readability on this lighter turquoise. */
+  .add-entry-sheet-overlay #addButton {
+    padding: 14px 16px;
+    border: none;
+    border-radius: 10px;
+    background: #40e0d0;
+    color: #1c1c1c;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  .add-entry-sheet-overlay #addButton:hover {
+    background: #094f4f;
+  }
+
+  /* "Bulk add" / "Quick note" buttons: same full-width teal button
+     look as "Add entry" above (#40e0d0 background, dark text, 10px
+     rounding, same padding) instead of the old underlined-link look.
+     "flex: 1" on each button splits the row evenly so together they
+     still read as one full-width bar, matching "Add entry" above them. */
+  .add-entry-sheet-secondary-row {
+    display: flex;
+    gap: 10px;
+  }
+
+  .add-entry-sheet-secondary-link {
+    flex: 1;
+    padding: 14px 16px;
+    border: none;
+    border-radius: 10px;
+    background: #40e0d0;
+    color: #1c1c1c;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  .add-entry-sheet-secondary-link:hover {
+    background: #094f4f;
+  }
+
+  /* --- Bulk Add, reused inside the Add Entry sheet ---
+     Tapping "Bulk add" above adds the "showing-bulk-add" class onto
+     #addEntrySheetOverlay (see script.js) - the two rules below react
+     to that class, but each in its own way:
+
+       - ".form" is INSIDE #addEntrySheetOverlay in index.html, so a
+         plain descendant selector hides it - it's what makes the
+         sheet's content look "replaced" instead of having both sets
+         of fields visible at once.
+
+       - "#bulkAddPanel" is NOT inside #addEntrySheetOverlay (it's a
+         separate panel that sits further down index.html, reused as-
+         is from the standalone Bulk Add feature - see the big comment
+         above #bulkAddPanel there). The "~" below is CSS's "general
+         sibling" combinator: it matches #bulkAddPanel because it comes
+         AFTER #addEntrySheetOverlay in the page, under the same parent
+         - so this styling can target it without moving it in the DOM
+         or duplicating its fields. script.js still controls whether
+         #bulkAddPanel is showing at all (its own display: flex/none,
+         exactly as it always has on laptop/tablet) - this class only
+         adds the positioning/look that makes it read as "the sheet"
+         once it IS showing. */
+  .add-entry-sheet-overlay.showing-bulk-add .form {
+    display: none;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1001;
+    max-width: none;
+    max-height: 85vh;
+    overflow-y: auto;
+    margin: 0;
+    background: #262626;
+    border: 1px solid #444;
+    border-radius: 12px 12px 0 0;
+    padding: 16px;
+    box-sizing: border-box;
+    gap: 14px;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel .bulk-add-sheet-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel .bulk-add-sheet-header h3 {
+    margin: 0;
+  }
+
+  /* Dark-theme fields matching the rest of the sheet. The textarea
+     keeps a generous min-height here (on top of its existing rows="8")
+     so pasting a big list still feels roomy, same as the standalone
+     Bulk Add panel does on laptop/tablet. */
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel .bulk-add-textarea,
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel #bulkAddStatusInput {
+    box-sizing: border-box;
+    border: none;
+    border-radius: 10px;
+    background: #333;
+    color: #fff;
+    padding: 14px 16px;
+    font-size: 16px;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel .bulk-add-textarea {
+    min-height: 220px;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel .bulk-add-controls {
+    flex-direction: column;
+  }
+
+  /* "Add all": same full-width button shape and turquoise (#40e0d0)
+     as the other add-entry buttons. Text stays dark (#1c1c1c) for
+     readability. */
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel #bulkAddSubmitButton {
+    padding: 14px 16px;
+    border: none;
+    border-radius: 10px;
+    background: #40e0d0;
+    color: #1c1c1c;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+  }
+
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel #bulkAddSubmitButton:hover {
+    background: #2dd4bf;
+  }
+
+  /* "Cancel": same plain muted-link look as the secondary links above,
+     since the header's "X" (see .bulk-add-sheet-header above) is
+     already the sheet's main close control - this is just a second,
+     familiar way back. */
+  .add-entry-sheet-overlay.showing-bulk-add ~ .bulk-add-panel #bulkAddCancelButton {
+    background: none;
+    border: none;
+    color: #999;
+    text-decoration: underline;
+    padding: 8px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  /* Floating "+" button: fixed positioning (not absolute) is what keeps
+     it pinned to the same spot in the browser WINDOW as you scroll the
+     page, rather than scrolling away with the content like the rest of
+     the page does. */
+  .open-add-entry-sheet-button {
+    display: block;
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border: 1px solid #094f4f;
+    border-radius: 50%;
+    background: #40e0d0;
+    color: #1c1c1c;
+    font-size: 28px;
+    line-height: 54px;
+    text-align: center;
+    cursor: pointer;
+    z-index: 900;
+  }
+
+  .open-add-entry-sheet-button:hover {
+    background: #094f4f;
+  }
+
+  /* Phone-only card reorder. Every comic card (#manhwaList li) is
+     already a column flexbox (see "#manhwaList li" near the top of this
+     file), so its direct children can be put in any visual order with
+     the same "order" trick used above for the Add Entry sheet - no
+     script.js changes needed, laptop/tablet never sees this media
+     query, and no colors/icons/fonts change at all, just position.
+
+     ":not(.private-row)" on every selector here keeps all of this
+     scoped to normal Cover-mode cards only - the Private list view
+     (#manhwaList li.private-row, styled way above) reuses the
+     ".entry-link"/".entry-actions" classes too, and must stay exactly
+     as it already looks, untouched.
+
+     Cover-mode card children, in DOM order, are: .cover-placeholder,
+     .entry-title, .entry-rating (only for rated/Completed comics),
+     .entry-info-row (a row holding .entry-chapter + .entry-link
+     together), then .entry-actions. .cover-placeholder is left with no
+     "order" below, so it keeps its default order (0) and stays first,
+     same as always - "below the cover" is exactly what everything else
+     here is reordering. */
+
+  /* .entry-chapter and .entry-link normally live inside .entry-info-row,
+     one row together. "display: contents" makes that wrapper row
+     invisible to layout - its two children act as if they were direct
+     children of the card itself, which is what lets them each get
+     their own "order" below and end up on their own separate line,
+     instead of being stuck side by side. (Same "display: contents"
+     trick as .author-progress-row further up this file.) */
+  #manhwaList li:not(.private-row) .entry-info-row {
+    display: contents;
+  }
+
+  /* New order, top to bottom: Title, then (if present) the star
+     rating, then the Link, then the Chapter/Volume+Page/Episode
+     progress text, then the Edit/Delete icons. Every reordered piece
+     needs an explicit number here - if even one were left out it would
+     default to "order: 0" and jump back in front of .cover-placeholder,
+     which also sits at the default 0. */
+  #manhwaList li:not(.private-row) .entry-title { order: 1; }
+  #manhwaList li:not(.private-row) .entry-rating { order: 2; }
+  #manhwaList li:not(.private-row) .entry-link { order: 3; }
+
+  /* Makes the "Link" text twice as big on phone width only - laptop/
+     tablet never sees this media query, so they're untouched. "2em"
+     means "2x whatever size this text would otherwise be", so it just
+     scales up from its normal size instead of a fixed number that
+     could look wrong at different Card Size slider settings. Only
+     font-size is set here - color (#06c, from .entry-link above) and
+     the little link icon (sized separately by .icon-svg, not affected
+     by font-size) both stay exactly as they were, and the "order: 3"
+     line above still controls where it sits, untouched too. */
+  #manhwaList li:not(.private-row) .entry-link {
+    font-size: 2em;
+  }
+
+  #manhwaList li:not(.private-row) .entry-chapter { order: 4; }
+
+  /* The thin divider line the icons now sit below. Just a top border
+     plus a little breathing room above it, added only here on phone -
+     laptop/tablet's .entry-actions (styled further up this file) is
+     completely untouched. */
+  #manhwaList li:not(.private-row) .entry-actions {
+    order: 5;
+    width: 100%;
+    justify-content: center;
+    border-top: 1px solid #444;
+    padding-top: calc(6px * var(--card-scale));
+    margin-top: calc(2px * var(--card-scale));
+    box-sizing: border-box;
+  }
+
+  /* ===========================================================================
+     Phone-width layout: Filter row
+     ===========================================================================
+     Replaces the full-width Status/Type tabs with two compact dropdown
+     pills, and shrinks the Characters tab down to just its star icon.
+     Nothing about HOW filtering works changes here - #statusFilterRow
+     and .filter-tabs still hold the real, only copy of that logic (see
+     script.js); this section only changes which elements are visible
+     and where they sit.
+
+     "display: contents" on .filter-tabs makes its five buttons (All /
+     Manhwa / Other Comics / Videos / Characters) act as if they were
+     direct children of .tabs-row instead of nested inside .filter-tabs -
+     the same trick .author-progress-row uses further up this file. That
+     lets the "order" values below freely interleave the Characters
+     button with the two new pills, which are ALSO direct children of
+     .tabs-row (see index.html). */
+  .filter-tabs {
+    display: contents;
+  }
+
+  /* The four Type tabs are fully replaced by #typeFilterDropdown below -
+     hide them on phone. The Characters tab is handled separately below
+     instead, since it stays visible (just shrunk to an icon). */
+  .filter-tab:not([data-filter="Characters"]):not([data-filter="Lists"]) {
+    display: none;
+  }
+
+  /* The full Status row (the "All" button + its own dropdown) is
+     replaced by #phoneStatusDropdown below - hide it on phone. Note
+     this only overrides the CSS default: updateStatusFilterRowUI() in
+     script.js still sets this same element's inline display to "none"
+     whenever no type tab is active, which continues to work exactly as
+     before either way. */
+  .status-filter-row {
+    display: none;
+  }
+
+  /* .tabs-row normally uses "space-between" to push .filter-tabs (one
+     single flex item) over to the left edge and .privacy-toggle over to
+     the right edge, with empty space in between. Now that .filter-tabs
+     is "display: contents" above, its buttons count as SEPARATE flex
+     items in .tabs-row - "space-between" would spread all of them out
+     evenly across the row instead of keeping them grouped together on
+     the left. Switching to "flex-start" packs everything tightly
+     together from the left instead; .privacy-toggle's own
+     "margin-left: auto" below is what pushes IT specifically back over
+     to the right edge, recreating the same left-group/right-toggle look
+     as before. */
+  .tabs-row {
+    justify-content: flex-start;
+  }
+
+  /* Visual order in .tabs-row on phone: Type pill, Status pill,
+     Characters star, then the Cover/Private toggle - kept last with an
+     explicit order here so it stays exactly where it already was (the
+     right-hand end of the row), rather than jumping in front of the
+     newly-flattened .filter-tabs children, which would otherwise happen
+     since un-ordered flex items default to "order: 0". */
+  #typeFilterDropdown  { order: 1; }
+  #phoneStatusDropdown { order: 2; }
+  .filter-tab[data-filter="Characters"] { order: 3; }
+  .filter-tab[data-filter="Lists"] { order: 3; padding: 8px 10px; }
+
+  .privacy-toggle {
+    order: 4;
+    margin-left: auto;
+  }
+
+  /* Both pills reuse .status-dropdown-button's look as-is (dark pill,
+     rounded, white text, small chevron) - no size/color overrides
+     needed here, just turning them on. */
+  .phone-filter-pill {
+    display: flex;
+  }
+
+  /* Shrink the Characters tab down to just its gold star: hide the
+     text label (see .filter-tab-label in index.html) and trim the
+     padding that used to make room for that text. The star icon itself
+     (.tab-star-icon) is untouched, so it still looks exactly the same,
+     just on its own now. */
+  .filter-tab[data-filter="Characters"] .filter-tab-label {
+    display: none;
+  }
+
+  .filter-tab[data-filter="Characters"] {
+    padding: 8px 10px;
+  }
+
+}
+
+/* Sync error banner: the warning shown by showSyncErrorBanner() in
+   script.js when a save/delete to Supabase fails. position: fixed pins
+   it to the top of the screen no matter where you've scrolled, and the
+   high z-index keeps it above the modals/sheets. Dark red so it reads
+   as a problem at a glance against the charcoal page, without being a
+   full-screen popup like alert(). The [hidden] rule makes sure the
+   display: flex below doesn't override the hidden attribute. */
+.sync-error-banner {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  box-sizing: border-box;
+  padding: 10px 12px 10px 16px;
+  background: #8b1e1e;
+  color: #fff;
+  border: 1px solid #5e1414;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  font-size: 14px;
+}
+
+.sync-error-banner[hidden] {
+  display: none;
+}
+
+/* Non-error variants set by showSyncBanner(). "queued" = saved on this
+   device, waiting to sync (muted amber: worth noticing, not alarming).
+   "synced" = queued changes went up (green). */
+.sync-error-banner.sync-banner-queued {
+  background: #6b4e12;
+  border-color: #4a360c;
+}
+
+.sync-error-banner.sync-banner-synced {
+  background: #1f6b3a;
+  border-color: #144a27;
+}
+
+.sync-error-banner-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: #fff;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.sync-error-banner-close:hover {
+  color: #ffcccc;
+}
+
+/* Pending-sync badge: the small "N changes waiting to sync" pill next
+   to Log Out, shown by updatePendingIndicator() in script.js. Same muted
+   amber as the "queued" sync banner, so it reads as "saved here, not
+   uploaded yet" rather than an error. The [hidden] rule keeps the
+   display: inline-block below from overriding the hidden attribute. */
+.pending-sync-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  background: #6b4e12;
+  color: #fff;
+  border: 1px solid #4a360c;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+
+.pending-sync-badge[hidden] {
+  display: none;
+}
+
+/* ===========================================================================
+   "Add to list" picker
+   ===========================================================================
+   Opened by the bookmark button on shelf comic cards and the "Add to
+   list" button on a comic's detail page (see the "--- Add to list
+   picker ---" section in script.js). Reuses .modal-overlay/.modal-box
+   for the centered desktop popup; the phone rules at the bottom turn it
+   into a bottom sheet. */
+
+/* Same look as the edit button next to it on the card. */
+.add-to-list-button {
+  color: #444;
+  background: #fff;
+  border: 1px solid #444;
+}
+
+.add-to-list-button:hover {
+  background: #444;
+  color: #fff;
+}
+
+.detail-add-to-list-button {
+  width: fit-content;
+  min-height: 44px;
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  margin-top: 8px;
+}
+
+.list-picker {
+  max-width: 420px;
+}
+
+/* A long comic title wraps instead of pushing the X off the box. */
+.list-picker-heading {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding-right: 8px;
+}
+
+/* 44px square so the X is easy to hit on a phone. */
+.list-picker-close {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+.list-picker-subheading {
+  margin: -6px 0 0;
+  color: #bbb;
+  font-size: 13px;
+}
+
+.list-picker-rows {
+  display: flex;
+  flex-direction: column;
+  max-height: 50vh;
+  overflow-y: auto;
+  border-top: 1px solid #444;
+  border-bottom: 1px solid #444;
+}
+
+/* The whole row is the tap target (it's a <label>), at least 48px tall. */
+.list-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 4px 6px;
+  cursor: pointer;
+  border-bottom: 1px solid #333;
+}
+
+.list-picker-row:last-child {
+  border-bottom: none;
+}
+
+.list-picker-row:hover {
+  background: #2f2f2f;
+}
+
+.list-picker-checkbox {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.list-picker-row-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.list-picker-empty {
+  margin: 12px 0;
+  color: #bbb;
+  font-size: 15px;
+}
+
+.list-picker-create-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* 16px text so iOS doesn't zoom in when the box is focused. */
+.list-picker-new-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 10px;
+  font-size: 16px;
+  background: #3a3a3a;
+  color: #fff;
+  border: 1px solid #555;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+.list-picker-new-input::placeholder {
+  color: #aaa;
+}
+
+.list-picker-new-button,
+.list-picker-done-button {
+  min-height: 44px;
+  padding: 8px 16px;
+  font-size: 15px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.list-picker-new-button:hover,
+.list-picker-done-button:hover {
+  background: #444;
+}
+
+.list-picker-done-button {
+  align-self: flex-end;
+}
+
+@media (max-width: 600px) {
+  /* Bottom sheet: pinned to the bottom edge, full width, rounded top
+     corners - same shape as the Add Entry sheet. */
+  .list-picker-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .list-picker {
+    max-width: none;
+    max-height: 85vh;
+    border-radius: 12px 12px 0 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .list-picker-done-button {
+    align-self: stretch;
+  }
+
+  /* The card's bookmark button gets a phone-sized tap area without
+     changing how big the icon looks. */
+  #manhwaList li:not(.private-row) .add-to-list-button {
+    min-width: 40px;
+    min-height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+/* ===========================================================================
+   Footer + Privacy & Contact popup
+   ===========================================================================
+   The footer sits outside #authScreen/#appScreen in index.html, so it
+   shows on both. The popup reuses .modal-overlay/.modal-box for the
+   centered desktop look; the phone rules below turn it into a bottom
+   sheet like the "Add to list" picker. */
+.app-footer {
+  margin: 40px 0 20px;
+  padding-top: 16px;
+  border-top: 1px solid #333;
+  text-align: center;
+}
+
+.app-footer-link {
+  background: none;
+  border: none;
+  color: #bbb;
+  font-size: 13px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 10px 12px;
+  min-height: 44px;
+}
+
+.app-footer-link:hover,
+.app-footer-link:focus-visible {
+  color: #fff;
+}
+
+.privacy-modal {
+  max-width: 560px;
+  color: #eee;
+}
+
+.privacy-modal-close-x {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+}
+
+/* Only the text scrolls, so the title and Close button stay in view
+   however long the text is. min-height: 0 lets it shrink inside the
+   flex column of .modal-box instead of overflowing it. */
+.privacy-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  font-size: 15px;
+  line-height: 1.55;
+  color: #ddd;
+}
+
+.privacy-modal-body p {
+  margin: 0 0 12px;
+}
+
+.privacy-modal-body p:last-child {
+  margin-bottom: 0;
+}
+
+.privacy-modal-body strong {
+  color: #fff;
+}
+
+.privacy-contact-link {
+  color: #40e0d0;
+  overflow-wrap: anywhere;
+}
+
+.privacy-contact-link:hover {
+  color: #7ff0e4;
+}
+
+.privacy-modal-close-button {
+  align-self: flex-end;
+  min-height: 44px;
+  padding: 8px 20px;
+  font-size: 15px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.privacy-modal-close-button:hover {
+  background: #444;
+}
+
+@media (max-width: 600px) {
+  /* Extra bottom space so the floating "+" button never covers the
+     footer link once you've scrolled to the bottom. */
+  .app-footer {
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  .privacy-modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .privacy-modal {
+    max-width: none;
+    max-height: 85vh;
+    border-radius: 12px 12px 0 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .privacy-modal-close-button {
+    align-self: stretch;
+  }
+}
+
+/* ===========================================================================
+   Settings
+   ===========================================================================
+   The gear buttons that open Settings, and #settingsView itself (see the
+   "Settings view" section in script.js). Uses the same 600px phone
+   breakpoint as the rest of this file. */
+
+/* Gear button: a 44x44 touch target with a muted icon that brightens on
+   hover/focus, like the other icon-only controls. There are two copies
+   in index.html; exactly one is visible at any width (see below). */
+.settings-gear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  color: #aaa;
+  cursor: pointer;
+}
+
+.settings-gear:hover {
+  background: #2b2b2b;
+  color: #fff;
+}
+
+.settings-gear:focus-visible {
+  outline: 2px solid #4169e1;
+  outline-offset: 2px;
+  color: #fff;
+}
+
+/* Phone copy: hidden unless the phone media query below turns it on. */
+.settings-gear-phone {
+  display: none;
+}
+
+/* Laptop/tablet copy: pinned to the right end of the Add Entry /
+   Bulk Add / Quick Notes row. #addEntrySheetOverlay is a full-width,
+   otherwise unstyled wrapper on these widths, so right: 0 lines the
+   gear up with the search bar's right edge. The buttons are the last
+   line of .form and .form's bottom margin collapses through the
+   wrapper, so the wrapper's bottom edge is that row's bottom edge;
+   bottom: -3px centers the 44px gear on the 38px buttons. Absolute
+   positioning means nothing in .form moves. */
+@media (min-width: 601px) {
+  #addEntrySheetOverlay {
+    position: relative;
+  }
+
+  .settings-gear-laptop {
+    position: absolute;
+    right: 0;
+    bottom: -3px;
+  }
+}
+
+@media (max-width: 600px) {
+  .settings-gear-laptop {
+    display: none;
+  }
+
+  /* Right after "Lists" (same order, later in the page), pushed to the
+     right end of the filter row's first line. The negative vertical
+     margins keep the row's line height what it was (the tallest item
+     there is 36px) while the touch target stays 44px. */
+  .settings-gear-phone {
+    display: inline-flex;
+    order: 3;
+    margin: -4px 0 -4px auto;
+  }
+}
+
+/* --- Settings view --- */
+.settings-heading {
+  margin: 0 0 20px;
+}
+
+.settings-heading:focus {
+  outline: none;
+}
+
+/* Laptop/tablet: sidebar on the left, the selected section's page on
+   the right. */
+.settings-layout {
+  display: flex;
+  gap: 30px;
+  align-items: flex-start;
+}
+
+.settings-sidebar {
+  flex: 0 0 200px;
+}
+
+.settings-section-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.settings-section-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  font-size: 15px;
+  text-align: left;
+  background: none;
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.settings-section-button:hover {
+  background: #2b2b2b;
+}
+
+.settings-section-button:focus-visible {
+  outline: 2px solid #4169e1;
+  outline-offset: 1px;
+}
+
+/* The selected section (laptop sidebar only). */
+.settings-section-button[aria-current="true"] {
+  background: #2b2b2b;
+  border-color: #666;
+  font-weight: bold;
+}
+
+/* The ">" hint only makes sense on phone, where tapping opens a page. */
+.settings-section-chevron {
+  display: none;
+  color: #aaa;
+}
+
+.settings-content {
+  flex: 1;
+  min-width: 0;
+  max-width: 560px;
+}
+
+.settings-page-heading {
+  margin: 0 0 20px;
+  font-size: 20px;
+}
+
+.settings-field {
+  margin-bottom: 24px;
+}
+
+.settings-field-label {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: bold;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.settings-field-value {
+  margin: 0 0 6px;
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.settings-field-note {
+  margin: 0;
+  font-size: 13px;
+  color: #aaa;
+}
+
+.settings-button {
+  padding: 8px 16px;
+  font-size: 15px;
+  cursor: pointer;
+  min-height: 38px;
+}
+
+.settings-button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Status line under the password controls. Empty = takes no space. */
+.settings-message {
+  margin: 10px 0 0;
+  font-size: 14px;
+}
+
+.settings-message:empty {
+  display: none;
+}
+
+.settings-message-error {
+  color: #ff8a80;
+}
+
+.settings-message-success {
+  color: #7bd88f;
+}
+
+.settings-password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px;
+  background: #242424;
+  border: 1px solid #444;
+  border-radius: 8px;
+}
+
+.settings-password-form[hidden] {
+  display: none;
+}
+
+.settings-input-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+}
+
+.settings-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* Same white field / navy text as the search box and Add Entry form. */
+.settings-input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px;
+  font-size: 16px;
+  background: #fff;
+  color: navy;
+  border: 1px solid #666;
+  border-radius: 4px;
+}
+
+.settings-reveal-button {
+  flex: 0 0 auto;
+  min-width: 64px;
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  background: #2b2b2b;
+  color: #fff;
+  border: 1px solid #666;
+  border-radius: 4px;
+}
+
+.settings-reveal-button:hover {
+  background: #444;
+}
+
+.settings-hint {
+  margin: 0;
+  font-size: 13px;
+  color: #aaa;
+}
+
+.settings-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* "Delete my account": a divider and a clearly separate area at the
+   bottom of the Account page. Deliberately low-emphasis: grey,
+   underlined text, not a red button. */
+.settings-danger-zone {
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid #444;
+  min-height: 60px;
+}
+
+.settings-danger-zone[hidden] {
+  display: none;
+}
+
+.delete-account-caption {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: #aaa;
+}
+
+.delete-account-open-button {
+  background: none;
+  border: none;
+  padding: 10px 0;
+  min-height: 44px;
+  font-size: 14px;
+  color: #aaa;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.delete-account-open-button:hover {
+  color: #ddd;
+}
+
+.delete-account-open-button:focus-visible {
+  outline: 2px solid #4169e1;
+  outline-offset: 2px;
+}
+
+/* Delete-account dialog: a centered modal (reuses .modal-overlay /
+   .modal-box), a near-full-screen sheet on phone (below). */
+.delete-account-dialog {
+  max-width: 460px;
+  color: #eee;
+  gap: 12px;
+}
+
+.delete-account-dialog:focus {
+  outline: none;
+}
+
+.delete-account-title {
+  margin: 0;
+  font-size: 20px;
+}
+
+.delete-account-text {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.delete-account-email {
+  overflow-wrap: anywhere;
+}
+
+.delete-account-list {
+  margin: 0;
+  padding-left: 22px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.delete-account-warning {
+  font-weight: bold;
+}
+
+.delete-account-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 4px;
+}
+
+.delete-account-confirm-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.delete-account-message {
+  margin: 0;
+}
+
+.delete-account-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.delete-account-cancel-button,
+.delete-account-confirm-button {
+  min-height: 44px;
+  padding: 8px 20px;
+  font-size: 15px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+/* Cancel: the clearly primary button. */
+.delete-account-cancel-button {
+  background: #4169e1;
+  color: #fff;
+  border: 1px solid #4169e1;
+  font-weight: bold;
+}
+
+.delete-account-cancel-button:hover:not(:disabled) {
+  background: #5a7ff0;
+}
+
+/* Delete: muted and outlined. */
+.delete-account-confirm-button {
+  background: transparent;
+  color: #bbb;
+  border: 1px solid #666;
+}
+
+.delete-account-confirm-button:hover:not(:disabled) {
+  color: #fff;
+  border-color: #888;
+}
+
+.delete-account-cancel-button:disabled,
+.delete-account-confirm-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.delete-account-cancel-button:focus-visible,
+.delete-account-confirm-button:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* One-time "Your account has been deleted." on the login screen. */
+.auth-notice {
+  margin: 12px 0 0;
+  font-size: 15px;
+  color: #7bd88f;
+}
+
+.auth-notice[hidden] {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .delete-account-overlay {
+    align-items: stretch;
+    padding: 24px 0 0;
+  }
+
+  .delete-account-dialog {
+    max-width: none;
+    max-height: none;
+    height: 100%;
+    border-radius: 12px 12px 0 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .delete-account-form {
+    flex: 1 0 auto;
+  }
+
+  /* Cancel on top, both full width, pinned to the bottom of the sheet. */
+  .delete-account-actions {
+    flex-direction: column-reverse;
+    margin-top: auto;
+  }
+
+  .delete-account-cancel-button,
+  .delete-account-confirm-button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 600px) {
+  /* Phone: one column, and only one of the list / the page at a time.
+     script.js adds .settings-phone-page-open while a section's page is
+     open. */
+  .settings-layout {
+    display: block;
+  }
+
+  .settings-content {
+    display: none;
+    max-width: none;
+  }
+
+  .settings-view.settings-phone-page-open .settings-sidebar {
+    display: none;
+  }
+
+  .settings-view.settings-phone-page-open .settings-content {
+    display: block;
+  }
+
+  /* No "selected" highlight on phone - the list is just a menu. */
+  .settings-section-button,
+  .settings-section-button[aria-current="true"] {
+    background: #242424;
+    border-color: #444;
+    font-weight: normal;
+    min-height: 52px;
+  }
+
+  .settings-section-chevron {
+    display: inline;
+  }
 }
